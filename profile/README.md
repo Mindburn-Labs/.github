@@ -2,8 +2,8 @@
 
 **Execution-grade infrastructure for autonomous software.**
 
-> *You cannot mathematically regulate the latent space of a neural network.*
-> *But you can — and must — regulate the physics of its execution.*
+> _You cannot mathematically regulate the latent space of a neural network._
+> _But you can — and must — regulate the physics of its execution._
 
 ---
 
@@ -11,11 +11,21 @@
 
 We build the middleware between intelligence and execution. AI models are becoming commoditized — incredibly smart, cheap, and ubiquitous. But they have zero executive authority. **AI proposes. Deterministic systems govern.**
 
-| Product | Description | Stack |
-|---------|------------|-------|
-| **[HELM](https://github.com/Mindburn-Labs/helm)** | The deterministic execution layer for the agent economy. Fail-closed policy enforcement, cryptographic receipts, replayable proofs. | Go · WASI · Ed25519 |
-| **TITAN** | Bio-mimetic algorithmic trading. Sub-millisecond execution, Active Inference orchestration, sovereign infrastructure. | Rust · TypeScript · NATS |
-| **Automation** | AI-native marketing and full-stack systems. Personalization at scale without a massive team. | TypeScript · React |
+| Product                                               | Description                                                                                                                         | Stack                    |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| **[HELM](https://github.com/Mindburn-Labs/helm-oss)** | The deterministic execution layer for the agent economy. Fail-closed policy enforcement, cryptographic receipts, replayable proofs. | Go · WASI · Ed25519      |
+| **[TITAN](https://github.com/Mindburn-Labs/titan)**   | Bio-mimetic algorithmic trading. Sub-millisecond execution, Active Inference orchestration, sovereign infrastructure.               | Rust · TypeScript · NATS |
+
+---
+
+### Repositories
+
+| Repo                                                    | Visibility | Purpose                                                          |
+| ------------------------------------------------------- | ---------- | ---------------------------------------------------------------- |
+| [`helm-oss`](https://github.com/Mindburn-Labs/helm-oss) | 🌐 Public  | HELM open-source kernel — Go core, protocols, SDK, documentation |
+| [`helm`](https://github.com/Mindburn-Labs/helm)         | 🔒 Private | HELM commercial — enterprise overlays, connectors, metering      |
+| [`titan`](https://github.com/Mindburn-Labs/titan)       | 🔒 Private | Titan Trading System — full monorepo                             |
+| [`mindburn`](https://github.com/Mindburn-Labs/mindburn) | 🔒 Private | Corporate website — [mindburn.org](https://mindburn.org)         |
 
 ---
 
@@ -33,9 +43,9 @@ HELM is the missing layer in the agent stack: deterministic policy enforcement w
 Models propose. HELM decides and records.
 ```
 
-[![HELM](https://img.shields.io/badge/HELM-OSS-blue?style=flat-square&logo=go)](https://github.com/Mindburn-Labs/helm)
-[![Standard](https://img.shields.io/badge/Standard-v1.2-green?style=flat-square)](https://github.com/Mindburn-Labs/helm/blob/main/HELM_Unified_Canonical_Standard_FINAL_2026-02-15_FINAL_SOTA_v1.2.md)
-[![License](https://img.shields.io/badge/License-BUSL--1.1-orange?style=flat-square)](https://github.com/Mindburn-Labs/helm/blob/main/LICENSE)
+[![HELM](https://img.shields.io/badge/HELM-OSS-blue?style=flat-square&logo=go)](https://github.com/Mindburn-Labs/helm-oss)
+[![Standard](https://img.shields.io/badge/Standard-v1.2-green?style=flat-square)](https://github.com/Mindburn-Labs/helm-oss/blob/main/HELM_Unified_Canonical_Standard_FINAL_2026-02-15_FINAL_SOTA_v1.2.md)
+[![License](https://img.shields.io/badge/License-BUSL--1.1-orange?style=flat-square)](https://github.com/Mindburn-Labs/helm-oss/blob/main/LICENSE)
 
 ---
 
