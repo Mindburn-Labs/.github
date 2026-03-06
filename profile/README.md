@@ -52,5 +52,3 @@ Models propose. HELM decides and records.
 ### How We Build
 
 Most of what we ship gets built with AI assistance — not replacing developers, but proving that a small team can ship production-grade systems by leveraging AI the right way.
-
-**Toronto 🇨🇦 · Sofia 🇧🇬 · Remote-first**
