@@ -1,6 +1,8 @@
-# Mindburn Labs
+# Mindburn Labs, Inc.
 
 **Execution-grade infrastructure for autonomous software.**
+
+*A fully legal company registered in Delaware as a C Corporation (Entity: Delaware C Corporation, EIN: 32-0854020, Incorporation Date: Apr 23, 2026).*
 
 > _You cannot mathematically regulate the latent space of a neural network._
 > _But you can — and must — regulate the physics of its execution._
