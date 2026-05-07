@@ -2,8 +2,6 @@
 
 **Execution-grade infrastructure for autonomous software.**
 
-*A fully legal company registered in Delaware as a C Corporation (Entity: Delaware C Corporation, EIN: 32-0854020, Incorporation Date: Apr 23, 2026).*
-
 > _You cannot mathematically regulate the latent space of a neural network._
 > _But you can — and must — regulate the physics of its execution._
 
@@ -22,12 +20,16 @@ We build the middleware between intelligence and execution. AI models are becomi
 
 ### Repositories
 
-| Repo                                                    | Visibility | Purpose                                                          |
-| ------------------------------------------------------- | ---------- | ---------------------------------------------------------------- |
-| [`helm-oss`](https://github.com/Mindburn-Labs/helm-oss) | 🌐 Public  | HELM open-source kernel — Go core, protocols, SDK, documentation |
-| [`helm`](https://github.com/Mindburn-Labs/helm)         | 🔒 Private | HELM commercial — enterprise overlays, connectors, metering      |
-| [`titan`](https://github.com/Mindburn-Labs/titan)       | 🔒 Private | Titan Trading System — full monorepo                             |
-| [`mindburn`](https://github.com/Mindburn-Labs/mindburn) | 🔒 Private | Corporate website — [mindburn.org](https://mindburn.org)         |
+| Repo                                                                      | Visibility | Purpose                                                          |
+| ------------------------------------------------------------------------- | ---------- | ---------------------------------------------------------------- |
+| [`helm-oss`](https://github.com/Mindburn-Labs/helm-oss)                   | 🌐 Public  | HELM open-source kernel — Go core, protocols, SDK, documentation |
+| [`helm`](https://github.com/Mindburn-Labs/helm)                           | 🔒 Private | HELM commercial — enterprise overlays, connectors, metering      |
+| [`titan`](https://github.com/Mindburn-Labs/titan)                         | 🔒 Private | Titan Trading System — bio-mimetic algorithmic trading           |
+| [`mindburn`](https://github.com/Mindburn-Labs/mindburn)                   | 🔒 Private | Corporate website — [mindburn.org](https://mindburn.org)         |
+| [`pilot`](https://github.com/Mindburn-Labs/pilot)                         | 🔒 Private | Pilot gateway (formerly founder-OS)                              |
+| [`orggenome-compiler`](https://github.com/Mindburn-Labs/orggenome-compiler)| 🔒 Private | OrgGenome Compiler GPU clusters                                  |
+| [`docs-platform`](https://github.com/Mindburn-Labs/docs-platform)         | 🔒 Private | Dedicated product documentation sites                            |
+| [`mindburn-admin`](https://github.com/Mindburn-Labs/mindburn-admin)       | 🔒 Private | Private company operating system and admin infrastructure        |
 
 ---
 
@@ -46,8 +48,9 @@ Models propose. HELM decides and records.
 ```
 
 [![HELM](https://img.shields.io/badge/HELM-OSS-blue?style=flat-square&logo=go)](https://github.com/Mindburn-Labs/helm-oss)
-[![Standard](https://img.shields.io/badge/Standard-v1.2-green?style=flat-square)](https://github.com/Mindburn-Labs/helm-oss/blob/main/HELM_Unified_Canonical_Standard_FINAL_2026-02-15_FINAL_SOTA_v1.2.md)
-[![License](https://img.shields.io/badge/License-BUSL--1.1-orange?style=flat-square)](https://github.com/Mindburn-Labs/helm-oss/blob/main/LICENSE)
+[![Standard](https://img.shields.io/badge/Standard-v1.3-green?style=flat-square)](https://github.com/Mindburn-Labs/helm-oss)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat-square)](https://github.com/Mindburn-Labs/helm-oss/blob/main/LICENSE)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/mindburn-labs/helm-oss/badge)](https://scorecard.dev/viewer/?uri=github.com/mindburn-labs/helm-oss)
 
 ---
 
