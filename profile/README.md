@@ -14,7 +14,6 @@ We build the middleware between intelligence and execution. AI models are becomi
 | Product                                               | Description                                                                                                                         | Stack                    |
 | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
 | **[HELM](https://github.com/Mindburn-Labs/helm-oss)** | The deterministic execution layer for the agent economy. Fail-closed policy enforcement, cryptographic receipts, replayable proofs. | Go · WASI · Ed25519      |
-| **[TITAN](https://github.com/Mindburn-Labs/titan)**   | Bio-mimetic algorithmic trading. Sub-millisecond execution, Active Inference orchestration, sovereign infrastructure.               | Rust · TypeScript · NATS |
 
 ---
 
@@ -23,10 +22,10 @@ We build the middleware between intelligence and execution. AI models are becomi
 | Repo                                                                      | Visibility | Purpose                                                          |
 | ------------------------------------------------------------------------- | ---------- | ---------------------------------------------------------------- |
 | [`helm-oss`](https://github.com/Mindburn-Labs/helm-oss)                   | 🌐 Public  | HELM open-source kernel — Go core, protocols, SDK, documentation |
+| [`pilot`](https://github.com/Mindburn-Labs/pilot)                         | 🌐 Public | Experimental Pilot gateway (adjacent, not HELM OSS)              |
 | [`helm`](https://github.com/Mindburn-Labs/helm)                           | 🔒 Private | HELM commercial — enterprise overlays, connectors, metering      |
 | [`titan`](https://github.com/Mindburn-Labs/titan)                         | 🔒 Private | Titan Trading System — bio-mimetic algorithmic trading           |
 | [`mindburn`](https://github.com/Mindburn-Labs/mindburn)                   | 🔒 Private | Corporate website — [mindburn.org](https://mindburn.org)         |
-| [`pilot`](https://github.com/Mindburn-Labs/pilot)                         | 🔒 Private | Pilot gateway (formerly founder-OS)                              |
 | [`orggenome-compiler`](https://github.com/Mindburn-Labs/orggenome-compiler)| 🔒 Private | OrgGenome Compiler GPU clusters                                  |
 | [`docs-platform`](https://github.com/Mindburn-Labs/docs-platform)         | 🔒 Private | Dedicated product documentation sites                            |
 | [`mindburn-admin`](https://github.com/Mindburn-Labs/mindburn-admin)       | 🔒 Private | Private company operating system and admin infrastructure        |
@@ -50,7 +49,6 @@ Models propose. HELM decides and records.
 [![HELM](https://img.shields.io/badge/HELM-OSS-blue?style=flat-square&logo=go)](https://github.com/Mindburn-Labs/helm-oss)
 [![Standard](https://img.shields.io/badge/Standard-v1.3-green?style=flat-square)](https://github.com/Mindburn-Labs/helm-oss)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat-square)](https://github.com/Mindburn-Labs/helm-oss/blob/main/LICENSE)
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/mindburn-labs/helm-oss/badge)](https://scorecard.dev/viewer/?uri=github.com/mindburn-labs/helm-oss)
 
 ---
 
