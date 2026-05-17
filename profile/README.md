@@ -13,7 +13,7 @@ We build the middleware between intelligence and execution. AI models are becomi
 
 | Product                                               | Description                                                                                                                         | Stack                    |
 | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
-| **[HELM](https://github.com/Mindburn-Labs/helm-oss)** | The deterministic execution layer for the agent economy. Fail-closed policy enforcement, cryptographic receipts, replayable proofs. | Go · WASI · Ed25519      |
+| **[HELM](https://github.com/Mindburn-Labs/helm-ai-kernel)** | The deterministic execution layer for the agent economy. Fail-closed policy enforcement, cryptographic receipts, replayable proofs. | Go · WASI · Ed25519      |
 
 ---
 
@@ -21,9 +21,9 @@ We build the middleware between intelligence and execution. AI models are becomi
 
 | Repo                                                                      | Visibility | Purpose                                                          |
 | ------------------------------------------------------------------------- | ---------- | ---------------------------------------------------------------- |
-| [`helm-oss`](https://github.com/Mindburn-Labs/helm-oss)                   | 🌐 Public  | HELM open-source kernel — Go core, protocols, SDK, documentation |
-| [`pilot`](https://github.com/Mindburn-Labs/pilot)                         | 🌐 Public | Experimental Pilot gateway (adjacent, not HELM OSS)              |
-| [`helm`](https://github.com/Mindburn-Labs/helm)                           | 🔒 Private | HELM commercial — enterprise overlays, connectors, metering      |
+| [`helm-ai-kernel`](https://github.com/Mindburn-Labs/helm-ai-kernel)                    | 🌐 Public  | HELM AI Kernel — Go core, protocols, SDK, documentation          |
+| [`pilot`](https://github.com/Mindburn-Labs/pilot)                                      | 🌐 Public  | Experimental Pilot gateway (adjacent, not HELM AI Kernel)        |
+| [`helm-ai-enterprise`](https://github.com/Mindburn-Labs/helm-ai-enterprise)            | 🔒 Private | HELM AI Enterprise — enterprise overlays, connectors, metering   |
 | [`titan`](https://github.com/Mindburn-Labs/titan)                         | 🔒 Private | Titan Trading System — bio-mimetic algorithmic trading           |
 | [`mindburn`](https://github.com/Mindburn-Labs/mindburn)                   | 🔒 Private | Corporate website — [mindburn.org](https://mindburn.org)         |
 | [`orggenome-compiler`](https://github.com/Mindburn-Labs/orggenome-compiler)| 🔒 Private | OrgGenome Compiler GPU clusters                                  |
@@ -32,7 +32,7 @@ We build the middleware between intelligence and execution. AI models are becomi
 
 ---
 
-### HELM — Open Source
+### HELM AI Kernel — Open Source
 
 HELM is the missing layer in the agent stack: deterministic policy enforcement with replayable proofs.
 
@@ -40,15 +40,15 @@ HELM is the missing layer in the agent stack: deterministic policy enforcement w
 - **Below:** clouds, hardware, identity, payments
 - **Missing:** the enforcement plane that every agentic app reuses
 
-**Open-core model:** the kernel, ProofGraph, and EvidencePacks are OSS. Enterprise governance, certified connectors, and dispute replay are paid.
+**Open-core model:** the kernel, ProofGraph, and EvidencePacks are open source (HELM AI Kernel). Enterprise governance, certified connectors, and dispute replay are commercial (HELM AI Enterprise).
 
 ```
 Models propose. HELM decides and records.
 ```
 
-[![HELM](https://img.shields.io/badge/HELM-OSS-blue?style=flat-square&logo=go)](https://github.com/Mindburn-Labs/helm-oss)
-[![Standard](https://img.shields.io/badge/Standard-v1.3-green?style=flat-square)](https://github.com/Mindburn-Labs/helm-oss)
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat-square)](https://github.com/Mindburn-Labs/helm-oss/blob/main/LICENSE)
+[![HELM AI Kernel](https://img.shields.io/badge/HELM_AI_Kernel-Open_Source-blue?style=flat-square&logo=go)](https://github.com/Mindburn-Labs/helm-ai-kernel)
+[![Standard](https://img.shields.io/badge/Standard-v1.3-green?style=flat-square)](https://github.com/Mindburn-Labs/helm-ai-kernel)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat-square)](https://github.com/Mindburn-Labs/helm-ai-kernel/blob/main/LICENSE)
 
 ---
 
