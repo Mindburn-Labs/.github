@@ -1,0 +1,2322 @@
+{
+  "generated_at": "2026-05-26T18:35:52.405862+00:00",
+  "source_ranked": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+  "mode": "exhaustive",
+  "task_count": 41,
+  "execution_policy": [
+    "Execute in priority order unless threat model identifies a higher-impact workflow.",
+    "Treat every task as a hypothesis. Confirm, disprove, dedupe, or mark needs-context.",
+    "Do not report unvalidated speculation as a finding."
+  ],
+  "tasks": [
+    {
+      "id": "MS-TASK-0001",
+      "priority": 1,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Authentication/session flaw",
+      "scope": [
+        "profile/README.md"
+      ],
+      "rank_score": 156.69,
+      "tags": [
+        "entrypoint",
+        "authn/session",
+        "authz/tenant",
+        "crypto/secrets",
+        "filesystem/path",
+        "parser/decoder",
+        "secret handling",
+        "agentic-ai boundary"
+      ],
+      "objective": "Determine whether unauthenticated or weakly authenticated input can reach privileged behavior, session creation, token minting, password reset, or account takeover paths.",
+      "validation_goal": "Produce a local request/test demonstrating unauthorized access, invalid token acceptance, session fixation, reset abuse, or prove guards prevent it.",
+      "source_hints": [
+        "HTTP/RPC/CLI/event inputs",
+        "route params",
+        "request body",
+        "headers",
+        "cookies",
+        "principal identity",
+        "tenant/org/resource IDs",
+        "roles/claims",
+        "filenames",
+        "archive entries",
+        "upload metadata",
+        "retrieved text",
+        "user prompts",
+        "tool results"
+      ],
+      "sink_hints": [
+        "policy checks",
+        "session/token issuance",
+        "privileged data access",
+        "file read/write/delete",
+        "archive extraction",
+        "tool calls",
+        "system prompt",
+        "memory writes",
+        "code execution bridge"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 1,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "entrypoint hint",
+          "security signal density: +129"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0002",
+      "priority": 2,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Authorization bypass / IDOR / tenant isolation",
+      "scope": [
+        "profile/README.md"
+      ],
+      "rank_score": 156.69,
+      "tags": [
+        "entrypoint",
+        "authn/session",
+        "authz/tenant",
+        "crypto/secrets",
+        "filesystem/path",
+        "parser/decoder",
+        "secret handling",
+        "agentic-ai boundary"
+      ],
+      "objective": "Trace whether attacker-controlled user, tenant, role, organization, project, or resource IDs can access or mutate data outside their authority.",
+      "validation_goal": "Create a failing authorization regression test with two principals/tenants, or document a deterministic proof that policy checks dominate every sink.",
+      "source_hints": [
+        "HTTP/RPC/CLI/event inputs",
+        "route params",
+        "request body",
+        "headers",
+        "cookies",
+        "principal identity",
+        "tenant/org/resource IDs",
+        "roles/claims",
+        "filenames",
+        "archive entries",
+        "upload metadata",
+        "retrieved text",
+        "user prompts",
+        "tool results"
+      ],
+      "sink_hints": [
+        "policy checks",
+        "session/token issuance",
+        "privileged data access",
+        "file read/write/delete",
+        "archive extraction",
+        "tool calls",
+        "system prompt",
+        "memory writes",
+        "code execution bridge"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 1,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "entrypoint hint",
+          "security signal density: +129"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0003",
+      "priority": 3,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "SSRF or unsafe outbound request",
+      "scope": [
+        "profile/README.md"
+      ],
+      "rank_score": 156.69,
+      "tags": [
+        "entrypoint",
+        "authn/session",
+        "authz/tenant",
+        "crypto/secrets",
+        "filesystem/path",
+        "parser/decoder",
+        "secret handling",
+        "agentic-ai boundary"
+      ],
+      "objective": "Find flows where user-controlled URLs, hosts, webhooks, callbacks, redirects, or metadata endpoints influence outbound network requests.",
+      "validation_goal": "Use a local mock endpoint and blocked-address cases to demonstrate request control, or prove allowlist/canonicalization blocks dangerous destinations.",
+      "source_hints": [
+        "HTTP/RPC/CLI/event inputs",
+        "route params",
+        "request body",
+        "headers",
+        "cookies",
+        "principal identity",
+        "tenant/org/resource IDs",
+        "roles/claims",
+        "filenames",
+        "archive entries",
+        "upload metadata",
+        "retrieved text",
+        "user prompts",
+        "tool results"
+      ],
+      "sink_hints": [
+        "policy checks",
+        "session/token issuance",
+        "privileged data access",
+        "file read/write/delete",
+        "archive extraction",
+        "tool calls",
+        "system prompt",
+        "memory writes",
+        "code execution bridge"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 1,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "entrypoint hint",
+          "security signal density: +129"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0004",
+      "priority": 4,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Path traversal / arbitrary file read or write",
+      "scope": [
+        "profile/README.md"
+      ],
+      "rank_score": 156.69,
+      "tags": [
+        "entrypoint",
+        "authn/session",
+        "authz/tenant",
+        "crypto/secrets",
+        "filesystem/path",
+        "parser/decoder",
+        "secret handling",
+        "agentic-ai boundary"
+      ],
+      "objective": "Check whether attacker-controlled file names, archive paths, template names, export names, or import paths can escape intended directories or overwrite sensitive files.",
+      "validation_goal": "Build a local fixture for traversal, symlink, archive-slip, or path-normalization bypass; verify expected denial after patch.",
+      "source_hints": [
+        "HTTP/RPC/CLI/event inputs",
+        "route params",
+        "request body",
+        "headers",
+        "cookies",
+        "principal identity",
+        "tenant/org/resource IDs",
+        "roles/claims",
+        "filenames",
+        "archive entries",
+        "upload metadata",
+        "retrieved text",
+        "user prompts",
+        "tool results"
+      ],
+      "sink_hints": [
+        "policy checks",
+        "session/token issuance",
+        "privileged data access",
+        "file read/write/delete",
+        "archive extraction",
+        "tool calls",
+        "system prompt",
+        "memory writes",
+        "code execution bridge"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 1,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "entrypoint hint",
+          "security signal density: +129"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0005",
+      "priority": 5,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Command injection / unsafe process execution",
+      "scope": [
+        "profile/README.md"
+      ],
+      "rank_score": 156.69,
+      "tags": [
+        "entrypoint",
+        "authn/session",
+        "authz/tenant",
+        "crypto/secrets",
+        "filesystem/path",
+        "parser/decoder",
+        "secret handling",
+        "agentic-ai boundary"
+      ],
+      "objective": "Trace user-controlled strings into shell/process APIs and verify argument separation, allowlists, environment isolation, and quoting behavior.",
+      "validation_goal": "Add a local test proving controlled command/argument injection or proving shell-free invocation and allowlist enforcement.",
+      "source_hints": [
+        "HTTP/RPC/CLI/event inputs",
+        "route params",
+        "request body",
+        "headers",
+        "cookies",
+        "principal identity",
+        "tenant/org/resource IDs",
+        "roles/claims",
+        "filenames",
+        "archive entries",
+        "upload metadata",
+        "retrieved text",
+        "user prompts",
+        "tool results"
+      ],
+      "sink_hints": [
+        "policy checks",
+        "session/token issuance",
+        "privileged data access",
+        "file read/write/delete",
+        "archive extraction",
+        "tool calls",
+        "system prompt",
+        "memory writes",
+        "code execution bridge"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 1,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "entrypoint hint",
+          "security signal density: +129"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0006",
+      "priority": 6,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Authentication/session flaw",
+      "scope": [
+        "repo-manifest.yaml"
+      ],
+      "rank_score": 155.83,
+      "tags": [
+        "entrypoint",
+        "authz/tenant",
+        "crypto/secrets",
+        "filesystem/path",
+        "parser/decoder",
+        "agentic-ai boundary"
+      ],
+      "objective": "Determine whether unauthenticated or weakly authenticated input can reach privileged behavior, session creation, token minting, password reset, or account takeover paths.",
+      "validation_goal": "Produce a local request/test demonstrating unauthorized access, invalid token acceptance, session fixation, reset abuse, or prove guards prevent it.",
+      "source_hints": [
+        "HTTP/RPC/CLI/event inputs",
+        "route params",
+        "request body",
+        "headers",
+        "cookies",
+        "principal identity",
+        "tenant/org/resource IDs",
+        "roles/claims",
+        "filenames",
+        "archive entries",
+        "upload metadata",
+        "retrieved text",
+        "user prompts",
+        "tool results"
+      ],
+      "sink_hints": [
+        "policy checks",
+        "session/token issuance",
+        "privileged data access",
+        "file read/write/delete",
+        "archive extraction",
+        "tool calls",
+        "system prompt",
+        "memory writes",
+        "code execution bridge"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 2,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "entrypoint hint",
+          "language risk weight: YAML",
+          "security signal density: +120",
+          "large/high-complexity file"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0007",
+      "priority": 7,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Authorization bypass / IDOR / tenant isolation",
+      "scope": [
+        "repo-manifest.yaml"
+      ],
+      "rank_score": 155.83,
+      "tags": [
+        "entrypoint",
+        "authz/tenant",
+        "crypto/secrets",
+        "filesystem/path",
+        "parser/decoder",
+        "agentic-ai boundary"
+      ],
+      "objective": "Trace whether attacker-controlled user, tenant, role, organization, project, or resource IDs can access or mutate data outside their authority.",
+      "validation_goal": "Create a failing authorization regression test with two principals/tenants, or document a deterministic proof that policy checks dominate every sink.",
+      "source_hints": [
+        "HTTP/RPC/CLI/event inputs",
+        "route params",
+        "request body",
+        "headers",
+        "cookies",
+        "principal identity",
+        "tenant/org/resource IDs",
+        "roles/claims",
+        "filenames",
+        "archive entries",
+        "upload metadata",
+        "retrieved text",
+        "user prompts",
+        "tool results"
+      ],
+      "sink_hints": [
+        "policy checks",
+        "session/token issuance",
+        "privileged data access",
+        "file read/write/delete",
+        "archive extraction",
+        "tool calls",
+        "system prompt",
+        "memory writes",
+        "code execution bridge"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 2,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "entrypoint hint",
+          "language risk weight: YAML",
+          "security signal density: +120",
+          "large/high-complexity file"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0008",
+      "priority": 8,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "SSRF or unsafe outbound request",
+      "scope": [
+        "repo-manifest.yaml"
+      ],
+      "rank_score": 155.83,
+      "tags": [
+        "entrypoint",
+        "authz/tenant",
+        "crypto/secrets",
+        "filesystem/path",
+        "parser/decoder",
+        "agentic-ai boundary"
+      ],
+      "objective": "Find flows where user-controlled URLs, hosts, webhooks, callbacks, redirects, or metadata endpoints influence outbound network requests.",
+      "validation_goal": "Use a local mock endpoint and blocked-address cases to demonstrate request control, or prove allowlist/canonicalization blocks dangerous destinations.",
+      "source_hints": [
+        "HTTP/RPC/CLI/event inputs",
+        "route params",
+        "request body",
+        "headers",
+        "cookies",
+        "principal identity",
+        "tenant/org/resource IDs",
+        "roles/claims",
+        "filenames",
+        "archive entries",
+        "upload metadata",
+        "retrieved text",
+        "user prompts",
+        "tool results"
+      ],
+      "sink_hints": [
+        "policy checks",
+        "session/token issuance",
+        "privileged data access",
+        "file read/write/delete",
+        "archive extraction",
+        "tool calls",
+        "system prompt",
+        "memory writes",
+        "code execution bridge"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 2,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "entrypoint hint",
+          "language risk weight: YAML",
+          "security signal density: +120",
+          "large/high-complexity file"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0009",
+      "priority": 9,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Path traversal / arbitrary file read or write",
+      "scope": [
+        "repo-manifest.yaml"
+      ],
+      "rank_score": 155.83,
+      "tags": [
+        "entrypoint",
+        "authz/tenant",
+        "crypto/secrets",
+        "filesystem/path",
+        "parser/decoder",
+        "agentic-ai boundary"
+      ],
+      "objective": "Check whether attacker-controlled file names, archive paths, template names, export names, or import paths can escape intended directories or overwrite sensitive files.",
+      "validation_goal": "Build a local fixture for traversal, symlink, archive-slip, or path-normalization bypass; verify expected denial after patch.",
+      "source_hints": [
+        "HTTP/RPC/CLI/event inputs",
+        "route params",
+        "request body",
+        "headers",
+        "cookies",
+        "principal identity",
+        "tenant/org/resource IDs",
+        "roles/claims",
+        "filenames",
+        "archive entries",
+        "upload metadata",
+        "retrieved text",
+        "user prompts",
+        "tool results"
+      ],
+      "sink_hints": [
+        "policy checks",
+        "session/token issuance",
+        "privileged data access",
+        "file read/write/delete",
+        "archive extraction",
+        "tool calls",
+        "system prompt",
+        "memory writes",
+        "code execution bridge"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 2,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "entrypoint hint",
+          "language risk weight: YAML",
+          "security signal density: +120",
+          "large/high-complexity file"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0010",
+      "priority": 10,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Command injection / unsafe process execution",
+      "scope": [
+        "repo-manifest.yaml"
+      ],
+      "rank_score": 155.83,
+      "tags": [
+        "entrypoint",
+        "authz/tenant",
+        "crypto/secrets",
+        "filesystem/path",
+        "parser/decoder",
+        "agentic-ai boundary"
+      ],
+      "objective": "Trace user-controlled strings into shell/process APIs and verify argument separation, allowlists, environment isolation, and quoting behavior.",
+      "validation_goal": "Add a local test proving controlled command/argument injection or proving shell-free invocation and allowlist enforcement.",
+      "source_hints": [
+        "HTTP/RPC/CLI/event inputs",
+        "route params",
+        "request body",
+        "headers",
+        "cookies",
+        "principal identity",
+        "tenant/org/resource IDs",
+        "roles/claims",
+        "filenames",
+        "archive entries",
+        "upload metadata",
+        "retrieved text",
+        "user prompts",
+        "tool results"
+      ],
+      "sink_hints": [
+        "policy checks",
+        "session/token issuance",
+        "privileged data access",
+        "file read/write/delete",
+        "archive extraction",
+        "tool calls",
+        "system prompt",
+        "memory writes",
+        "code execution bridge"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 2,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "entrypoint hint",
+          "language risk weight: YAML",
+          "security signal density: +120",
+          "large/high-complexity file"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0011",
+      "priority": 11,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Authentication/session flaw",
+      "scope": [
+        "README.md"
+      ],
+      "rank_score": 128.6,
+      "tags": [
+        "authn/session",
+        "authz/tenant",
+        "crypto/secrets",
+        "filesystem/path",
+        "parser/decoder",
+        "secret handling",
+        "agentic-ai boundary"
+      ],
+      "objective": "Determine whether unauthenticated or weakly authenticated input can reach privileged behavior, session creation, token minting, password reset, or account takeover paths.",
+      "validation_goal": "Produce a local request/test demonstrating unauthorized access, invalid token acceptance, session fixation, reset abuse, or prove guards prevent it.",
+      "source_hints": [
+        "principal identity",
+        "tenant/org/resource IDs",
+        "roles/claims",
+        "filenames",
+        "archive entries",
+        "upload metadata",
+        "retrieved text",
+        "user prompts",
+        "tool results"
+      ],
+      "sink_hints": [
+        "policy checks",
+        "session/token issuance",
+        "privileged data access",
+        "file read/write/delete",
+        "archive extraction",
+        "tool calls",
+        "system prompt",
+        "memory writes",
+        "code execution bridge"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 3,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "security signal density: +126"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0012",
+      "priority": 12,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Authorization bypass / IDOR / tenant isolation",
+      "scope": [
+        "README.md"
+      ],
+      "rank_score": 128.6,
+      "tags": [
+        "authn/session",
+        "authz/tenant",
+        "crypto/secrets",
+        "filesystem/path",
+        "parser/decoder",
+        "secret handling",
+        "agentic-ai boundary"
+      ],
+      "objective": "Trace whether attacker-controlled user, tenant, role, organization, project, or resource IDs can access or mutate data outside their authority.",
+      "validation_goal": "Create a failing authorization regression test with two principals/tenants, or document a deterministic proof that policy checks dominate every sink.",
+      "source_hints": [
+        "principal identity",
+        "tenant/org/resource IDs",
+        "roles/claims",
+        "filenames",
+        "archive entries",
+        "upload metadata",
+        "retrieved text",
+        "user prompts",
+        "tool results"
+      ],
+      "sink_hints": [
+        "policy checks",
+        "session/token issuance",
+        "privileged data access",
+        "file read/write/delete",
+        "archive extraction",
+        "tool calls",
+        "system prompt",
+        "memory writes",
+        "code execution bridge"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 3,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "security signal density: +126"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0013",
+      "priority": 13,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Path traversal / arbitrary file read or write",
+      "scope": [
+        "README.md"
+      ],
+      "rank_score": 128.6,
+      "tags": [
+        "authn/session",
+        "authz/tenant",
+        "crypto/secrets",
+        "filesystem/path",
+        "parser/decoder",
+        "secret handling",
+        "agentic-ai boundary"
+      ],
+      "objective": "Check whether attacker-controlled file names, archive paths, template names, export names, or import paths can escape intended directories or overwrite sensitive files.",
+      "validation_goal": "Build a local fixture for traversal, symlink, archive-slip, or path-normalization bypass; verify expected denial after patch.",
+      "source_hints": [
+        "principal identity",
+        "tenant/org/resource IDs",
+        "roles/claims",
+        "filenames",
+        "archive entries",
+        "upload metadata",
+        "retrieved text",
+        "user prompts",
+        "tool results"
+      ],
+      "sink_hints": [
+        "policy checks",
+        "session/token issuance",
+        "privileged data access",
+        "file read/write/delete",
+        "archive extraction",
+        "tool calls",
+        "system prompt",
+        "memory writes",
+        "code execution bridge"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 3,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "security signal density: +126"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0014",
+      "priority": 14,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Unsafe deserialization / parser confusion / resource exhaustion",
+      "scope": [
+        "README.md"
+      ],
+      "rank_score": 128.6,
+      "tags": [
+        "authn/session",
+        "authz/tenant",
+        "crypto/secrets",
+        "filesystem/path",
+        "parser/decoder",
+        "secret handling",
+        "agentic-ai boundary"
+      ],
+      "objective": "Audit parser, decoder, import, archive, and deserialization paths for gadget execution, type confusion, canonicalization bugs, entity expansion, recursion, and uncontrolled resource consumption.",
+      "validation_goal": "Create a bounded malicious fixture that triggers the flaw locally without destructive side effects, or prove safe parser settings and resource limits.",
+      "source_hints": [
+        "principal identity",
+        "tenant/org/resource IDs",
+        "roles/claims",
+        "filenames",
+        "archive entries",
+        "upload metadata",
+        "retrieved text",
+        "user prompts",
+        "tool results"
+      ],
+      "sink_hints": [
+        "policy checks",
+        "session/token issuance",
+        "privileged data access",
+        "file read/write/delete",
+        "archive extraction",
+        "tool calls",
+        "system prompt",
+        "memory writes",
+        "code execution bridge"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 3,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "security signal density: +126"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0015",
+      "priority": 15,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Crypto, token, certificate, or secret-handling flaw",
+      "scope": [
+        "README.md"
+      ],
+      "rank_score": 128.6,
+      "tags": [
+        "authn/session",
+        "authz/tenant",
+        "crypto/secrets",
+        "filesystem/path",
+        "parser/decoder",
+        "secret handling",
+        "agentic-ai boundary"
+      ],
+      "objective": "Review randomness, nonce reuse, signature verification, certificate validation, token claims, key storage, secret logging, and algorithm downgrade behavior.",
+      "validation_goal": "Create deterministic tests around invalid signatures/certs, replay, weak randomness assumptions, secret redaction, and token boundary checks.",
+      "source_hints": [
+        "principal identity",
+        "tenant/org/resource IDs",
+        "roles/claims",
+        "filenames",
+        "archive entries",
+        "upload metadata",
+        "retrieved text",
+        "user prompts",
+        "tool results"
+      ],
+      "sink_hints": [
+        "policy checks",
+        "session/token issuance",
+        "privileged data access",
+        "file read/write/delete",
+        "archive extraction",
+        "tool calls",
+        "system prompt",
+        "memory writes",
+        "code execution bridge"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 3,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "security signal density: +126"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0016",
+      "priority": 16,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Authorization bypass / IDOR / tenant isolation",
+      "scope": [
+        "agent.yaml"
+      ],
+      "rank_score": 65.32,
+      "tags": [
+        "agentic-ai boundary",
+        "authz/tenant",
+        "parser/decoder",
+        "secret handling"
+      ],
+      "objective": "Trace whether attacker-controlled user, tenant, role, organization, project, or resource IDs can access or mutate data outside their authority.",
+      "validation_goal": "Create a failing authorization regression test with two principals/tenants, or document a deterministic proof that policy checks dominate every sink.",
+      "source_hints": [
+        "principal identity",
+        "tenant/org/resource IDs",
+        "roles/claims",
+        "retrieved text",
+        "user prompts",
+        "tool results"
+      ],
+      "sink_hints": [
+        "policy checks",
+        "session/token issuance",
+        "privileged data access",
+        "tool calls",
+        "system prompt",
+        "memory writes",
+        "code execution bridge"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 4,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "language risk weight: YAML",
+          "path keyword: agentic-ai boundary",
+          "security signal density: +42"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0017",
+      "priority": 17,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Unsafe deserialization / parser confusion / resource exhaustion",
+      "scope": [
+        "agent.yaml"
+      ],
+      "rank_score": 65.32,
+      "tags": [
+        "agentic-ai boundary",
+        "authz/tenant",
+        "parser/decoder",
+        "secret handling"
+      ],
+      "objective": "Audit parser, decoder, import, archive, and deserialization paths for gadget execution, type confusion, canonicalization bugs, entity expansion, recursion, and uncontrolled resource consumption.",
+      "validation_goal": "Create a bounded malicious fixture that triggers the flaw locally without destructive side effects, or prove safe parser settings and resource limits.",
+      "source_hints": [
+        "principal identity",
+        "tenant/org/resource IDs",
+        "roles/claims",
+        "retrieved text",
+        "user prompts",
+        "tool results"
+      ],
+      "sink_hints": [
+        "policy checks",
+        "session/token issuance",
+        "privileged data access",
+        "tool calls",
+        "system prompt",
+        "memory writes",
+        "code execution bridge"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 4,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "language risk weight: YAML",
+          "path keyword: agentic-ai boundary",
+          "security signal density: +42"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0018",
+      "priority": 18,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Crypto, token, certificate, or secret-handling flaw",
+      "scope": [
+        "agent.yaml"
+      ],
+      "rank_score": 65.32,
+      "tags": [
+        "agentic-ai boundary",
+        "authz/tenant",
+        "parser/decoder",
+        "secret handling"
+      ],
+      "objective": "Review randomness, nonce reuse, signature verification, certificate validation, token claims, key storage, secret logging, and algorithm downgrade behavior.",
+      "validation_goal": "Create deterministic tests around invalid signatures/certs, replay, weak randomness assumptions, secret redaction, and token boundary checks.",
+      "source_hints": [
+        "principal identity",
+        "tenant/org/resource IDs",
+        "roles/claims",
+        "retrieved text",
+        "user prompts",
+        "tool results"
+      ],
+      "sink_hints": [
+        "policy checks",
+        "session/token issuance",
+        "privileged data access",
+        "tool calls",
+        "system prompt",
+        "memory writes",
+        "code execution bridge"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 4,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "language risk weight: YAML",
+          "path keyword: agentic-ai boundary",
+          "security signal density: +42"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0019",
+      "priority": 19,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Prompt injection / tool-boundary / retrieval poisoning",
+      "scope": [
+        "agent.yaml"
+      ],
+      "rank_score": 65.32,
+      "tags": [
+        "agentic-ai boundary",
+        "authz/tenant",
+        "parser/decoder",
+        "secret handling"
+      ],
+      "objective": "Trace untrusted content into prompts, tool calls, memory, retrieval, or code execution boundaries; verify instruction hierarchy, output encoding, allowlists, and provenance checks.",
+      "validation_goal": "Create a local malicious-content fixture that attempts tool misuse or data exfiltration and confirm isolation/denial after patch.",
+      "source_hints": [
+        "principal identity",
+        "tenant/org/resource IDs",
+        "roles/claims",
+        "retrieved text",
+        "user prompts",
+        "tool results"
+      ],
+      "sink_hints": [
+        "policy checks",
+        "session/token issuance",
+        "privileged data access",
+        "tool calls",
+        "system prompt",
+        "memory writes",
+        "code execution bridge"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 4,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "language risk weight: YAML",
+          "path keyword: agentic-ai boundary",
+          "security signal density: +42"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0020",
+      "priority": 20,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Unsafe deserialization / parser confusion / resource exhaustion",
+      "scope": [
+        "Makefile"
+      ],
+      "rank_score": 64.32,
+      "tags": [
+        "deployment/config",
+        "parser/decoder",
+        "agentic-ai boundary"
+      ],
+      "objective": "Audit parser, decoder, import, archive, and deserialization paths for gadget execution, type confusion, canonicalization bugs, entity expansion, recursion, and uncontrolled resource consumption.",
+      "validation_goal": "Create a bounded malicious fixture that triggers the flaw locally without destructive side effects, or prove safe parser settings and resource limits.",
+      "source_hints": [
+        "retrieved text",
+        "user prompts",
+        "tool results"
+      ],
+      "sink_hints": [
+        "tool calls",
+        "system prompt",
+        "memory writes",
+        "code execution bridge"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 5,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "configuration or deployment surface",
+          "security signal density: +48"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0021",
+      "priority": 21,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Supply-chain, dependency, CI/CD, or deployment misconfiguration",
+      "scope": [
+        "Makefile"
+      ],
+      "rank_score": 64.32,
+      "tags": [
+        "deployment/config",
+        "parser/decoder",
+        "agentic-ai boundary"
+      ],
+      "objective": "Check lockfiles, install scripts, CI permissions, workflow triggers, image builds, secrets exposure, artifact publishing, cloud/IaC defaults, and dependency risk.",
+      "validation_goal": "Produce a concrete misconfiguration proof, dependency advisory mapping, or patch that narrows permissions/pins inputs/removes secret exposure.",
+      "source_hints": [
+        "retrieved text",
+        "user prompts",
+        "tool results"
+      ],
+      "sink_hints": [
+        "tool calls",
+        "system prompt",
+        "memory writes",
+        "code execution bridge"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 5,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "configuration or deployment surface",
+          "security signal density: +48"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0022",
+      "priority": 22,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Prompt injection / tool-boundary / retrieval poisoning",
+      "scope": [
+        "Makefile"
+      ],
+      "rank_score": 64.32,
+      "tags": [
+        "deployment/config",
+        "parser/decoder",
+        "agentic-ai boundary"
+      ],
+      "objective": "Trace untrusted content into prompts, tool calls, memory, retrieval, or code execution boundaries; verify instruction hierarchy, output encoding, allowlists, and provenance checks.",
+      "validation_goal": "Create a local malicious-content fixture that attempts tool misuse or data exfiltration and confirm isolation/denial after patch.",
+      "source_hints": [
+        "retrieved text",
+        "user prompts",
+        "tool results"
+      ],
+      "sink_hints": [
+        "tool calls",
+        "system prompt",
+        "memory writes",
+        "code execution bridge"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 5,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "configuration or deployment surface",
+          "security signal density: +48"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0023",
+      "priority": 23,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Authorization bypass / IDOR / tenant isolation",
+      "scope": [
+        "AGENTS.md"
+      ],
+      "rank_score": 50.0,
+      "tags": [
+        "agentic-ai boundary",
+        "authz/tenant",
+        "parser/decoder"
+      ],
+      "objective": "Trace whether attacker-controlled user, tenant, role, organization, project, or resource IDs can access or mutate data outside their authority.",
+      "validation_goal": "Create a failing authorization regression test with two principals/tenants, or document a deterministic proof that policy checks dominate every sink.",
+      "source_hints": [
+        "principal identity",
+        "tenant/org/resource IDs",
+        "roles/claims",
+        "retrieved text",
+        "user prompts",
+        "tool results"
+      ],
+      "sink_hints": [
+        "policy checks",
+        "session/token issuance",
+        "privileged data access",
+        "tool calls",
+        "system prompt",
+        "memory writes",
+        "code execution bridge"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 6,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "path keyword: agentic-ai boundary",
+          "security signal density: +32"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0024",
+      "priority": 24,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Unsafe deserialization / parser confusion / resource exhaustion",
+      "scope": [
+        "AGENTS.md"
+      ],
+      "rank_score": 50.0,
+      "tags": [
+        "agentic-ai boundary",
+        "authz/tenant",
+        "parser/decoder"
+      ],
+      "objective": "Audit parser, decoder, import, archive, and deserialization paths for gadget execution, type confusion, canonicalization bugs, entity expansion, recursion, and uncontrolled resource consumption.",
+      "validation_goal": "Create a bounded malicious fixture that triggers the flaw locally without destructive side effects, or prove safe parser settings and resource limits.",
+      "source_hints": [
+        "principal identity",
+        "tenant/org/resource IDs",
+        "roles/claims",
+        "retrieved text",
+        "user prompts",
+        "tool results"
+      ],
+      "sink_hints": [
+        "policy checks",
+        "session/token issuance",
+        "privileged data access",
+        "tool calls",
+        "system prompt",
+        "memory writes",
+        "code execution bridge"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 6,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "path keyword: agentic-ai boundary",
+          "security signal density: +32"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0025",
+      "priority": 25,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Prompt injection / tool-boundary / retrieval poisoning",
+      "scope": [
+        "AGENTS.md"
+      ],
+      "rank_score": 50.0,
+      "tags": [
+        "agentic-ai boundary",
+        "authz/tenant",
+        "parser/decoder"
+      ],
+      "objective": "Trace untrusted content into prompts, tool calls, memory, retrieval, or code execution boundaries; verify instruction hierarchy, output encoding, allowlists, and provenance checks.",
+      "validation_goal": "Create a local malicious-content fixture that attempts tool misuse or data exfiltration and confirm isolation/denial after patch.",
+      "source_hints": [
+        "principal identity",
+        "tenant/org/resource IDs",
+        "roles/claims",
+        "retrieved text",
+        "user prompts",
+        "tool results"
+      ],
+      "sink_hints": [
+        "policy checks",
+        "session/token issuance",
+        "privileged data access",
+        "tool calls",
+        "system prompt",
+        "memory writes",
+        "code execution bridge"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 6,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "path keyword: agentic-ai boundary",
+          "security signal density: +32"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0026",
+      "priority": 26,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Authorization bypass / IDOR / tenant isolation",
+      "scope": [
+        ".github/workflows/ci.yml"
+      ],
+      "rank_score": 47.46,
+      "tags": [
+        "deployment/config",
+        "deployment/supply chain",
+        "authz/tenant"
+      ],
+      "objective": "Trace whether attacker-controlled user, tenant, role, organization, project, or resource IDs can access or mutate data outside their authority.",
+      "validation_goal": "Create a failing authorization regression test with two principals/tenants, or document a deterministic proof that policy checks dominate every sink.",
+      "source_hints": [
+        "principal identity",
+        "tenant/org/resource IDs",
+        "roles/claims"
+      ],
+      "sink_hints": [
+        "policy checks",
+        "session/token issuance",
+        "privileged data access"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 7,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "configuration or deployment surface",
+          "language risk weight: YAML",
+          "path keyword: deployment/supply chain",
+          "security signal density: +10"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0027",
+      "priority": 27,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Supply-chain, dependency, CI/CD, or deployment misconfiguration",
+      "scope": [
+        ".github/workflows/ci.yml"
+      ],
+      "rank_score": 47.46,
+      "tags": [
+        "deployment/config",
+        "deployment/supply chain",
+        "authz/tenant"
+      ],
+      "objective": "Check lockfiles, install scripts, CI permissions, workflow triggers, image builds, secrets exposure, artifact publishing, cloud/IaC defaults, and dependency risk.",
+      "validation_goal": "Produce a concrete misconfiguration proof, dependency advisory mapping, or patch that narrows permissions/pins inputs/removes secret exposure.",
+      "source_hints": [
+        "principal identity",
+        "tenant/org/resource IDs",
+        "roles/claims"
+      ],
+      "sink_hints": [
+        "policy checks",
+        "session/token issuance",
+        "privileged data access"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 7,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "configuration or deployment surface",
+          "language risk weight: YAML",
+          "path keyword: deployment/supply chain",
+          "security signal density: +10"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0028",
+      "priority": 28,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Authorization bypass / IDOR / tenant isolation",
+      "scope": [
+        ".github/CODEOWNERS"
+      ],
+      "rank_score": 36.0,
+      "tags": [
+        "authz/tenant"
+      ],
+      "objective": "Trace whether attacker-controlled user, tenant, role, organization, project, or resource IDs can access or mutate data outside their authority.",
+      "validation_goal": "Create a failing authorization regression test with two principals/tenants, or document a deterministic proof that policy checks dominate every sink.",
+      "source_hints": [
+        "principal identity",
+        "tenant/org/resource IDs",
+        "roles/claims"
+      ],
+      "sink_hints": [
+        "policy checks",
+        "session/token issuance",
+        "privileged data access"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 8,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "path keyword: authz/tenant",
+          "security signal density: +10"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0029",
+      "priority": 29,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Authorization bypass / IDOR / tenant isolation",
+      "scope": [
+        "CHANGELOG.md"
+      ],
+      "rank_score": 33.0,
+      "tags": [
+        "authz/tenant",
+        "filesystem/path",
+        "parser/decoder"
+      ],
+      "objective": "Trace whether attacker-controlled user, tenant, role, organization, project, or resource IDs can access or mutate data outside their authority.",
+      "validation_goal": "Create a failing authorization regression test with two principals/tenants, or document a deterministic proof that policy checks dominate every sink.",
+      "source_hints": [
+        "principal identity",
+        "tenant/org/resource IDs",
+        "roles/claims",
+        "filenames",
+        "archive entries",
+        "upload metadata"
+      ],
+      "sink_hints": [
+        "policy checks",
+        "session/token issuance",
+        "privileged data access",
+        "file read/write/delete",
+        "archive extraction"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 9,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "security signal density: +33"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0030",
+      "priority": 30,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Path traversal / arbitrary file read or write",
+      "scope": [
+        "CHANGELOG.md"
+      ],
+      "rank_score": 33.0,
+      "tags": [
+        "authz/tenant",
+        "filesystem/path",
+        "parser/decoder"
+      ],
+      "objective": "Check whether attacker-controlled file names, archive paths, template names, export names, or import paths can escape intended directories or overwrite sensitive files.",
+      "validation_goal": "Build a local fixture for traversal, symlink, archive-slip, or path-normalization bypass; verify expected denial after patch.",
+      "source_hints": [
+        "principal identity",
+        "tenant/org/resource IDs",
+        "roles/claims",
+        "filenames",
+        "archive entries",
+        "upload metadata"
+      ],
+      "sink_hints": [
+        "policy checks",
+        "session/token issuance",
+        "privileged data access",
+        "file read/write/delete",
+        "archive extraction"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 9,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "security signal density: +33"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0031",
+      "priority": 31,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Unsafe deserialization / parser confusion / resource exhaustion",
+      "scope": [
+        "CHANGELOG.md"
+      ],
+      "rank_score": 33.0,
+      "tags": [
+        "authz/tenant",
+        "filesystem/path",
+        "parser/decoder"
+      ],
+      "objective": "Audit parser, decoder, import, archive, and deserialization paths for gadget execution, type confusion, canonicalization bugs, entity expansion, recursion, and uncontrolled resource consumption.",
+      "validation_goal": "Create a bounded malicious fixture that triggers the flaw locally without destructive side effects, or prove safe parser settings and resource limits.",
+      "source_hints": [
+        "principal identity",
+        "tenant/org/resource IDs",
+        "roles/claims",
+        "filenames",
+        "archive entries",
+        "upload metadata"
+      ],
+      "sink_hints": [
+        "policy checks",
+        "session/token issuance",
+        "privileged data access",
+        "file read/write/delete",
+        "archive extraction"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 9,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "security signal density: +33"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0032",
+      "priority": 32,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Authorization bypass / IDOR / tenant isolation",
+      "scope": [
+        "CODEOWNERS"
+      ],
+      "rank_score": 33.0,
+      "tags": [
+        "authz/tenant",
+        "parser/decoder"
+      ],
+      "objective": "Trace whether attacker-controlled user, tenant, role, organization, project, or resource IDs can access or mutate data outside their authority.",
+      "validation_goal": "Create a failing authorization regression test with two principals/tenants, or document a deterministic proof that policy checks dominate every sink.",
+      "source_hints": [
+        "principal identity",
+        "tenant/org/resource IDs",
+        "roles/claims"
+      ],
+      "sink_hints": [
+        "policy checks",
+        "session/token issuance",
+        "privileged data access"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 10,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "path keyword: authz/tenant",
+          "security signal density: +7"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0033",
+      "priority": 33,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Unsafe deserialization / parser confusion / resource exhaustion",
+      "scope": [
+        "CODEOWNERS"
+      ],
+      "rank_score": 33.0,
+      "tags": [
+        "authz/tenant",
+        "parser/decoder"
+      ],
+      "objective": "Audit parser, decoder, import, archive, and deserialization paths for gadget execution, type confusion, canonicalization bugs, entity expansion, recursion, and uncontrolled resource consumption.",
+      "validation_goal": "Create a bounded malicious fixture that triggers the flaw locally without destructive side effects, or prove safe parser settings and resource limits.",
+      "source_hints": [
+        "principal identity",
+        "tenant/org/resource IDs",
+        "roles/claims"
+      ],
+      "sink_hints": [
+        "policy checks",
+        "session/token issuance",
+        "privileged data access"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 10,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "path keyword: authz/tenant",
+          "security signal density: +7"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0034",
+      "priority": 34,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Authorization bypass / IDOR / tenant isolation",
+      "scope": [
+        "catalog-info.yaml"
+      ],
+      "rank_score": 21.0,
+      "tags": [
+        "authz/tenant"
+      ],
+      "objective": "Trace whether attacker-controlled user, tenant, role, organization, project, or resource IDs can access or mutate data outside their authority.",
+      "validation_goal": "Create a failing authorization regression test with two principals/tenants, or document a deterministic proof that policy checks dominate every sink.",
+      "source_hints": [
+        "principal identity",
+        "tenant/org/resource IDs",
+        "roles/claims"
+      ],
+      "sink_hints": [
+        "policy checks",
+        "session/token issuance",
+        "privileged data access"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 11,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "language risk weight: YAML",
+          "security signal density: +16"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0035",
+      "priority": 35,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Path traversal / arbitrary file read or write",
+      "scope": [
+        "observability/alerts.yaml"
+      ],
+      "rank_score": 18.0,
+      "tags": [
+        "filesystem/path",
+        "parser/decoder"
+      ],
+      "objective": "Check whether attacker-controlled file names, archive paths, template names, export names, or import paths can escape intended directories or overwrite sensitive files.",
+      "validation_goal": "Build a local fixture for traversal, symlink, archive-slip, or path-normalization bypass; verify expected denial after patch.",
+      "source_hints": [
+        "filenames",
+        "archive entries",
+        "upload metadata"
+      ],
+      "sink_hints": [
+        "file read/write/delete",
+        "archive extraction"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 12,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "language risk weight: YAML",
+          "security signal density: +13"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0036",
+      "priority": 36,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Unsafe deserialization / parser confusion / resource exhaustion",
+      "scope": [
+        "observability/alerts.yaml"
+      ],
+      "rank_score": 18.0,
+      "tags": [
+        "filesystem/path",
+        "parser/decoder"
+      ],
+      "objective": "Audit parser, decoder, import, archive, and deserialization paths for gadget execution, type confusion, canonicalization bugs, entity expansion, recursion, and uncontrolled resource consumption.",
+      "validation_goal": "Create a bounded malicious fixture that triggers the flaw locally without destructive side effects, or prove safe parser settings and resource limits.",
+      "source_hints": [
+        "filenames",
+        "archive entries",
+        "upload metadata"
+      ],
+      "sink_hints": [
+        "file read/write/delete",
+        "archive extraction"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 12,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "language risk weight: YAML",
+          "security signal density: +13"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0037",
+      "priority": 37,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Crypto, token, certificate, or secret-handling flaw",
+      "scope": [
+        "SECURITY.md"
+      ],
+      "rank_score": 16.0,
+      "tags": [
+        "secret handling"
+      ],
+      "objective": "Review randomness, nonce reuse, signature verification, certificate validation, token claims, key storage, secret logging, and algorithm downgrade behavior.",
+      "validation_goal": "Create deterministic tests around invalid signatures/certs, replay, weak randomness assumptions, secret redaction, and token boundary checks.",
+      "source_hints": [],
+      "sink_hints": [],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 13,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "security signal density: +16"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0038",
+      "priority": 38,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "SQL/NoSQL/LDAP/query injection",
+      "scope": [
+        "docs/runbook.md"
+      ],
+      "rank_score": 10.0,
+      "tags": [
+        "injection/query"
+      ],
+      "objective": "Find concatenated, interpolated, raw, or policy-bypassing queries reachable from untrusted input.",
+      "validation_goal": "Use a local database/fixture or unit test to demonstrate predicate manipulation, authorization bypass, or prove parameterization and policy checks are complete.",
+      "source_hints": [
+        "query filters",
+        "sort/order fields",
+        "raw search input"
+      ],
+      "sink_hints": [
+        "database query construction"
+      ],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 14,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": [
+          "security signal density: +10"
+        ]
+      }
+    },
+    {
+      "id": "MS-TASK-0039",
+      "priority": 39,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Trust-boundary reachability trace",
+      "scope": [
+        ".devcontainer/devcontainer.json"
+      ],
+      "rank_score": 0.0,
+      "tags": [],
+      "objective": "Map sources of untrusted input through this component to sensitive sinks and security decisions.",
+      "validation_goal": "Produce a source-to-sink trace or prove the file is not externally reachable in deployed configurations.",
+      "source_hints": [],
+      "sink_hints": [],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 15,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": []
+      }
+    },
+    {
+      "id": "MS-TASK-0040",
+      "priority": 40,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Trust-boundary reachability trace",
+      "scope": [
+        "renovate.json"
+      ],
+      "rank_score": 0.0,
+      "tags": [],
+      "objective": "Map sources of untrusted input through this component to sensitive sinks and security decisions.",
+      "validation_goal": "Produce a source-to-sink trace or prove the file is not externally reachable in deployed configurations.",
+      "source_hints": [],
+      "sink_hints": [],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 16,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": []
+      }
+    },
+    {
+      "id": "MS-TASK-0041",
+      "priority": 41,
+      "mode": "exhaustive",
+      "status": "queued",
+      "attack_class": "Trust-boundary reachability trace",
+      "scope": [
+        "docs/adr/README.md"
+      ],
+      "rank_score": 0.0,
+      "tags": [],
+      "objective": "Map sources of untrusted input through this component to sensitive sinks and security decisions.",
+      "validation_goal": "Produce a source-to-sink trace or prove the file is not externally reachable in deployed configurations.",
+      "source_hints": [],
+      "sink_hints": [],
+      "review_steps": [
+        "Read the scoped file and immediate callers/callees.",
+        "Trace attacker-controlled sources to security-sensitive sinks.",
+        "List guards/sanitizers and try to disprove the hypothesis.",
+        "If plausible, create the smallest safe local reproduction or failing regression test.",
+        "Record outcome as confirmed, disproven, duplicate, needs-context, or patched."
+      ],
+      "evidence_required": [
+        "source-to-sink path or explicit non-reachability proof",
+        "local reproduction, failing test, or deterministic static proof",
+        "affected component/version/configuration",
+        "minimal remediation path"
+      ],
+      "origin": {
+        "ranked_file_index": 17,
+        "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
+        "reasons": []
+      }
+    }
+  ]
+}

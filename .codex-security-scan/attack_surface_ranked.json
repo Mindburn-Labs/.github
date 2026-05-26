@@ -1,0 +1,435 @@
+{
+  "generated_at": "2026-05-26T18:35:52.382389+00:00",
+  "source_repo_map": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/repo_map.json",
+  "root": "/Users/ivan/Code/Mindburn-Labs/.github-repo",
+  "ranked_file_count": 17,
+  "ranking_notes": [
+    "Scores are heuristics for review priority, not vulnerability probability.",
+    "High ranking means the file deserves focused review, local validation, and reachability tracing.",
+    "Use task queue generation to split this ranked surface into narrow Mythos-style hunts."
+  ],
+  "top_tags": [
+    [
+      "authz/tenant",
+      10
+    ],
+    [
+      "parser/decoder",
+      9
+    ],
+    [
+      "agentic-ai boundary",
+      6
+    ],
+    [
+      "filesystem/path",
+      5
+    ],
+    [
+      "secret handling",
+      4
+    ],
+    [
+      "crypto/secrets",
+      3
+    ],
+    [
+      "entrypoint",
+      2
+    ],
+    [
+      "authn/session",
+      2
+    ],
+    [
+      "deployment/config",
+      2
+    ],
+    [
+      "deployment/supply chain",
+      1
+    ],
+    [
+      "injection/query",
+      1
+    ]
+  ],
+  "ranked_files": [
+    {
+      "path": "profile/README.md",
+      "score": 156.69,
+      "language": "Other",
+      "lines": 103,
+      "size_bytes": 8501,
+      "tags": [
+        "entrypoint",
+        "authn/session",
+        "authz/tenant",
+        "crypto/secrets",
+        "filesystem/path",
+        "parser/decoder",
+        "secret handling",
+        "agentic-ai boundary"
+      ],
+      "reasons": [
+        "entrypoint hint",
+        "security signal density: +129"
+      ],
+      "security_signals": {
+        "auth": 4,
+        "authorization": 12,
+        "crypto": 2,
+        "filesystem": 1,
+        "parser": 1,
+        "secrets": 3,
+        "agentic_ai": 17
+      },
+      "is_entrypoint_hint": true,
+      "is_dependency_manifest": false,
+      "is_config_or_deploy": false
+    },
+    {
+      "path": "repo-manifest.yaml",
+      "score": 155.83,
+      "language": "YAML",
+      "lines": 908,
+      "size_bytes": 32095,
+      "tags": [
+        "entrypoint",
+        "authz/tenant",
+        "crypto/secrets",
+        "filesystem/path",
+        "parser/decoder",
+        "agentic-ai boundary"
+      ],
+      "reasons": [
+        "entrypoint hint",
+        "language risk weight: YAML",
+        "security signal density: +120",
+        "large/high-complexity file"
+      ],
+      "security_signals": {
+        "authorization": 201,
+        "crypto": 2,
+        "filesystem": 17,
+        "parser": 6,
+        "agentic_ai": 15
+      },
+      "is_entrypoint_hint": true,
+      "is_dependency_manifest": false,
+      "is_config_or_deploy": false
+    },
+    {
+      "path": "README.md",
+      "score": 128.6,
+      "language": "Other",
+      "lines": 97,
+      "size_bytes": 4766,
+      "tags": [
+        "authn/session",
+        "authz/tenant",
+        "crypto/secrets",
+        "filesystem/path",
+        "parser/decoder",
+        "secret handling",
+        "agentic-ai boundary"
+      ],
+      "reasons": [
+        "security signal density: +126"
+      ],
+      "security_signals": {
+        "auth": 3,
+        "authorization": 3,
+        "crypto": 3,
+        "filesystem": 5,
+        "parser": 2,
+        "secrets": 4,
+        "agentic_ai": 4
+      },
+      "is_entrypoint_hint": false,
+      "is_dependency_manifest": false,
+      "is_config_or_deploy": false
+    },
+    {
+      "path": "agent.yaml",
+      "score": 65.32,
+      "language": "YAML",
+      "lines": 20,
+      "size_bytes": 455,
+      "tags": [
+        "agentic-ai boundary",
+        "authz/tenant",
+        "parser/decoder",
+        "secret handling"
+      ],
+      "reasons": [
+        "language risk weight: YAML",
+        "path keyword: agentic-ai boundary",
+        "security signal density: +42"
+      ],
+      "security_signals": {
+        "authorization": 1,
+        "parser": 1,
+        "secrets": 1,
+        "agentic_ai": 2
+      },
+      "is_entrypoint_hint": false,
+      "is_dependency_manifest": false,
+      "is_config_or_deploy": false
+    },
+    {
+      "path": "Makefile",
+      "score": 64.32,
+      "language": "Other",
+      "lines": 20,
+      "size_bytes": 658,
+      "tags": [
+        "deployment/config",
+        "parser/decoder",
+        "agentic-ai boundary"
+      ],
+      "reasons": [
+        "configuration or deployment surface",
+        "security signal density: +48"
+      ],
+      "security_signals": {
+        "parser": 12,
+        "agentic_ai": 4
+      },
+      "is_entrypoint_hint": false,
+      "is_dependency_manifest": false,
+      "is_config_or_deploy": true
+    },
+    {
+      "path": "AGENTS.md",
+      "score": 50.0,
+      "language": "Other",
+      "lines": 14,
+      "size_bytes": 703,
+      "tags": [
+        "agentic-ai boundary",
+        "authz/tenant",
+        "parser/decoder"
+      ],
+      "reasons": [
+        "path keyword: agentic-ai boundary",
+        "security signal density: +32"
+      ],
+      "security_signals": {
+        "authorization": 1,
+        "parser": 2,
+        "agentic_ai": 1
+      },
+      "is_entrypoint_hint": false,
+      "is_dependency_manifest": false,
+      "is_config_or_deploy": false
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "score": 47.46,
+      "language": "YAML",
+      "lines": 22,
+      "size_bytes": 385,
+      "tags": [
+        "deployment/config",
+        "deployment/supply chain",
+        "authz/tenant"
+      ],
+      "reasons": [
+        "configuration or deployment surface",
+        "language risk weight: YAML",
+        "path keyword: deployment/supply chain",
+        "security signal density: +10"
+      ],
+      "security_signals": {
+        "authorization": 1
+      },
+      "is_entrypoint_hint": false,
+      "is_dependency_manifest": false,
+      "is_config_or_deploy": true
+    },
+    {
+      "path": ".github/CODEOWNERS",
+      "score": 36.0,
+      "language": "Other",
+      "lines": 2,
+      "size_bytes": 24,
+      "tags": [
+        "authz/tenant"
+      ],
+      "reasons": [
+        "path keyword: authz/tenant",
+        "security signal density: +10"
+      ],
+      "security_signals": {
+        "authorization": 1
+      },
+      "is_entrypoint_hint": false,
+      "is_dependency_manifest": false,
+      "is_config_or_deploy": false
+    },
+    {
+      "path": "CHANGELOG.md",
+      "score": 33.0,
+      "language": "Other",
+      "lines": 10,
+      "size_bytes": 627,
+      "tags": [
+        "authz/tenant",
+        "filesystem/path",
+        "parser/decoder"
+      ],
+      "reasons": [
+        "security signal density: +33"
+      ],
+      "security_signals": {
+        "authorization": 2,
+        "filesystem": 2,
+        "parser": 1
+      },
+      "is_entrypoint_hint": false,
+      "is_dependency_manifest": false,
+      "is_config_or_deploy": false
+    },
+    {
+      "path": "CODEOWNERS",
+      "score": 33.0,
+      "language": "Other",
+      "lines": 5,
+      "size_bytes": 205,
+      "tags": [
+        "authz/tenant",
+        "parser/decoder"
+      ],
+      "reasons": [
+        "path keyword: authz/tenant",
+        "security signal density: +7"
+      ],
+      "security_signals": {
+        "parser": 1
+      },
+      "is_entrypoint_hint": false,
+      "is_dependency_manifest": false,
+      "is_config_or_deploy": false
+    },
+    {
+      "path": "catalog-info.yaml",
+      "score": 21.0,
+      "language": "YAML",
+      "lines": 10,
+      "size_bytes": 245,
+      "tags": [
+        "authz/tenant"
+      ],
+      "reasons": [
+        "language risk weight: YAML",
+        "security signal density: +16"
+      ],
+      "security_signals": {
+        "authorization": 2
+      },
+      "is_entrypoint_hint": false,
+      "is_dependency_manifest": false,
+      "is_config_or_deploy": false
+    },
+    {
+      "path": "observability/alerts.yaml",
+      "score": 18.0,
+      "language": "YAML",
+      "lines": 10,
+      "size_bytes": 244,
+      "tags": [
+        "filesystem/path",
+        "parser/decoder"
+      ],
+      "reasons": [
+        "language risk weight: YAML",
+        "security signal density: +13"
+      ],
+      "security_signals": {
+        "filesystem": 1,
+        "parser": 1
+      },
+      "is_entrypoint_hint": false,
+      "is_dependency_manifest": false,
+      "is_config_or_deploy": false
+    },
+    {
+      "path": "SECURITY.md",
+      "score": 16.0,
+      "language": "Other",
+      "lines": 4,
+      "size_bytes": 187,
+      "tags": [
+        "secret handling"
+      ],
+      "reasons": [
+        "security signal density: +16"
+      ],
+      "security_signals": {
+        "secrets": 3
+      },
+      "is_entrypoint_hint": false,
+      "is_dependency_manifest": false,
+      "is_config_or_deploy": false
+    },
+    {
+      "path": "docs/runbook.md",
+      "score": 10.0,
+      "language": "Other",
+      "lines": 14,
+      "size_bytes": 238,
+      "tags": [
+        "injection/query"
+      ],
+      "reasons": [
+        "security signal density: +10"
+      ],
+      "security_signals": {
+        "sql_query": 1
+      },
+      "is_entrypoint_hint": false,
+      "is_dependency_manifest": false,
+      "is_config_or_deploy": false
+    },
+    {
+      "path": ".devcontainer/devcontainer.json",
+      "score": 0.0,
+      "language": "JSON",
+      "lines": 10,
+      "size_bytes": 206,
+      "tags": [],
+      "reasons": [],
+      "security_signals": {},
+      "is_entrypoint_hint": false,
+      "is_dependency_manifest": false,
+      "is_config_or_deploy": false
+    },
+    {
+      "path": "renovate.json",
+      "score": 0.0,
+      "language": "JSON",
+      "lines": 7,
+      "size_bytes": 185,
+      "tags": [],
+      "reasons": [],
+      "security_signals": {},
+      "is_entrypoint_hint": false,
+      "is_dependency_manifest": false,
+      "is_config_or_deploy": false
+    },
+    {
+      "path": "docs/adr/README.md",
+      "score": 0.0,
+      "language": "Other",
+      "lines": 4,
+      "size_bytes": 141,
+      "tags": [],
+      "reasons": [],
+      "security_signals": {},
+      "is_entrypoint_hint": false,
+      "is_dependency_manifest": false,
+      "is_config_or_deploy": false
+    }
+  ]
+}

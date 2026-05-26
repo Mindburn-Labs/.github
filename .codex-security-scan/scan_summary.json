@@ -1,0 +1,15 @@
+{
+  "repo": ".github-repo",
+  "repo_path": "/Users/ivan/Code/Mindburn-Labs/.github-repo",
+  "scan_dir": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan",
+  "generated_at": "2026-05-26T18:35:52.576942+00:00",
+  "file_count": 17,
+  "ranked_file_count": 17,
+  "task_count": 41,
+  "grep_lead_count": 42,
+  "tool_executed_count": 0,
+  "tool_skipped_count": 19,
+  "confirmed_findings": 0,
+  "command_failures": [],
+  "report": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/security_scan_report.md"
+}

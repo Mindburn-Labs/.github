@@ -1,0 +1,324 @@
+{
+  "generated_at": "2026-05-26T18:35:52.358554+00:00",
+  "root": "/Users/ivan/Code/Mindburn-Labs/.github-repo",
+  "file_count": 17,
+  "language_counts": {
+    "Other": 10,
+    "YAML": 5,
+    "JSON": 2
+  },
+  "signal_counts": {
+    "authorization": 224,
+    "agentic_ai": 43,
+    "parser": 27,
+    "filesystem": 26,
+    "secrets": 11,
+    "auth": 7,
+    "crypto": 7,
+    "sql_query": 1
+  },
+  "dependency_files": [],
+  "config_files": [
+    ".github/workflows/ci.yml",
+    "Makefile"
+  ],
+  "files": [
+    {
+      "path": "CHANGELOG.md",
+      "language": "Other",
+      "extension": ".md",
+      "size_bytes": 627,
+      "lines": 10,
+      "sha256_1mb": "fa10a4760d3a68447ce030a529b32e0fc2bdf76325069f3829264064c0d20560",
+      "is_binary": false,
+      "is_dependency_manifest": false,
+      "is_config_or_deploy": false,
+      "is_entrypoint_hint": false,
+      "security_signals": {
+        "authorization": 2,
+        "filesystem": 2,
+        "parser": 1
+      }
+    },
+    {
+      "path": "renovate.json",
+      "language": "JSON",
+      "extension": ".json",
+      "size_bytes": 185,
+      "lines": 7,
+      "sha256_1mb": "3e7c57cd7217f11836704fe8ba36f120ad4abd18c3c782ce99a47c1bac94ccb5",
+      "is_binary": false,
+      "is_dependency_manifest": false,
+      "is_config_or_deploy": false,
+      "is_entrypoint_hint": false,
+      "security_signals": {}
+    },
+    {
+      "path": "agent.yaml",
+      "language": "YAML",
+      "extension": ".yaml",
+      "size_bytes": 455,
+      "lines": 20,
+      "sha256_1mb": "b3957b7f0c7eb2eff89cadd7b1823526c597d774dd5cac8afb9b53c17c087a5d",
+      "is_binary": false,
+      "is_dependency_manifest": false,
+      "is_config_or_deploy": false,
+      "is_entrypoint_hint": false,
+      "security_signals": {
+        "authorization": 1,
+        "parser": 1,
+        "secrets": 1,
+        "agentic_ai": 2
+      }
+    },
+    {
+      "path": "Makefile",
+      "language": "Other",
+      "extension": "",
+      "size_bytes": 658,
+      "lines": 20,
+      "sha256_1mb": "273225da7c6b55b9fad6c3c942d2d698d259cd44ce26a8d49b104ade3524cf97",
+      "is_binary": false,
+      "is_dependency_manifest": false,
+      "is_config_or_deploy": true,
+      "is_entrypoint_hint": false,
+      "security_signals": {
+        "parser": 12,
+        "agentic_ai": 4
+      }
+    },
+    {
+      "path": "CODEOWNERS",
+      "language": "Other",
+      "extension": "",
+      "size_bytes": 205,
+      "lines": 5,
+      "sha256_1mb": "5f8a3ac2691a740ff2d2d27e973421ce34609a003a9003c4d8095705133ba25e",
+      "is_binary": false,
+      "is_dependency_manifest": false,
+      "is_config_or_deploy": false,
+      "is_entrypoint_hint": false,
+      "security_signals": {
+        "parser": 1
+      }
+    },
+    {
+      "path": "README.md",
+      "language": "Other",
+      "extension": ".md",
+      "size_bytes": 4766,
+      "lines": 97,
+      "sha256_1mb": "940043930ebbc56a1222f76ad4133f1f0e57e5f468d866e365abf4790cf19aee",
+      "is_binary": false,
+      "is_dependency_manifest": false,
+      "is_config_or_deploy": false,
+      "is_entrypoint_hint": false,
+      "security_signals": {
+        "auth": 3,
+        "authorization": 3,
+        "crypto": 3,
+        "filesystem": 5,
+        "parser": 2,
+        "secrets": 4,
+        "agentic_ai": 4
+      }
+    },
+    {
+      "path": "AGENTS.md",
+      "language": "Other",
+      "extension": ".md",
+      "size_bytes": 703,
+      "lines": 14,
+      "sha256_1mb": "47d62736e73d182736d5e7983b44a2670bf5b8bada560e8efe07c662f8f7fccc",
+      "is_binary": false,
+      "is_dependency_manifest": false,
+      "is_config_or_deploy": false,
+      "is_entrypoint_hint": false,
+      "security_signals": {
+        "authorization": 1,
+        "parser": 2,
+        "agentic_ai": 1
+      }
+    },
+    {
+      "path": "SECURITY.md",
+      "language": "Other",
+      "extension": ".md",
+      "size_bytes": 187,
+      "lines": 4,
+      "sha256_1mb": "2dd6a27c5d88fcded61d46e2f8eac1e7a67a0ec7daebd9af6fab5424422a6d01",
+      "is_binary": false,
+      "is_dependency_manifest": false,
+      "is_config_or_deploy": false,
+      "is_entrypoint_hint": false,
+      "security_signals": {
+        "secrets": 3
+      }
+    },
+    {
+      "path": "repo-manifest.yaml",
+      "language": "YAML",
+      "extension": ".yaml",
+      "size_bytes": 32095,
+      "lines": 908,
+      "sha256_1mb": "f0d3daf9914503d25cc41bd00e4f9fcefb91fc01104566b0d54abc2b00cf78c8",
+      "is_binary": false,
+      "is_dependency_manifest": false,
+      "is_config_or_deploy": false,
+      "is_entrypoint_hint": true,
+      "security_signals": {
+        "authorization": 201,
+        "crypto": 2,
+        "filesystem": 17,
+        "parser": 6,
+        "agentic_ai": 15
+      }
+    },
+    {
+      "path": "catalog-info.yaml",
+      "language": "YAML",
+      "extension": ".yaml",
+      "size_bytes": 245,
+      "lines": 10,
+      "sha256_1mb": "b126c08cbdc4cb3b0db42f5afb9f6c3bf2caa31ea9b94cdb75395a079e1e67aa",
+      "is_binary": false,
+      "is_dependency_manifest": false,
+      "is_config_or_deploy": false,
+      "is_entrypoint_hint": false,
+      "security_signals": {
+        "authorization": 2
+      }
+    },
+    {
+      "path": "docs/runbook.md",
+      "language": "Other",
+      "extension": ".md",
+      "size_bytes": 238,
+      "lines": 14,
+      "sha256_1mb": "83966b5ee093df33fbf2da7de6665467826d02237cd299dde1cd4f5bc3e1d2e1",
+      "is_binary": false,
+      "is_dependency_manifest": false,
+      "is_config_or_deploy": false,
+      "is_entrypoint_hint": false,
+      "security_signals": {
+        "sql_query": 1
+      }
+    },
+    {
+      "path": "docs/adr/README.md",
+      "language": "Other",
+      "extension": ".md",
+      "size_bytes": 141,
+      "lines": 4,
+      "sha256_1mb": "c333e930c562948f5ab0340ba9d3ae6db00c11a6abc45d38b04179bf907a2411",
+      "is_binary": false,
+      "is_dependency_manifest": false,
+      "is_config_or_deploy": false,
+      "is_entrypoint_hint": false,
+      "security_signals": {}
+    },
+    {
+      "path": ".devcontainer/devcontainer.json",
+      "language": "JSON",
+      "extension": ".json",
+      "size_bytes": 206,
+      "lines": 10,
+      "sha256_1mb": "a392e0a8e5260b2be8a6eed4a337f4efae2a2ff74b5374aeede17ad1e256539f",
+      "is_binary": false,
+      "is_dependency_manifest": false,
+      "is_config_or_deploy": false,
+      "is_entrypoint_hint": false,
+      "security_signals": {}
+    },
+    {
+      "path": "observability/alerts.yaml",
+      "language": "YAML",
+      "extension": ".yaml",
+      "size_bytes": 244,
+      "lines": 10,
+      "sha256_1mb": "d885328aed8b9e4460d62ac4d3cd84f007e83a4c6f6747b47476f3e21b8a1e19",
+      "is_binary": false,
+      "is_dependency_manifest": false,
+      "is_config_or_deploy": false,
+      "is_entrypoint_hint": false,
+      "security_signals": {
+        "filesystem": 1,
+        "parser": 1
+      }
+    },
+    {
+      "path": "profile/README.md",
+      "language": "Other",
+      "extension": ".md",
+      "size_bytes": 8501,
+      "lines": 103,
+      "sha256_1mb": "c9914c9b1640126175fd2e19c12105389d5db3e63fe8c52be94429e77b01053a",
+      "is_binary": false,
+      "is_dependency_manifest": false,
+      "is_config_or_deploy": false,
+      "is_entrypoint_hint": true,
+      "security_signals": {
+        "auth": 4,
+        "authorization": 12,
+        "crypto": 2,
+        "filesystem": 1,
+        "parser": 1,
+        "secrets": 3,
+        "agentic_ai": 17
+      }
+    },
+    {
+      "path": ".github/CODEOWNERS",
+      "language": "Other",
+      "extension": "",
+      "size_bytes": 24,
+      "lines": 2,
+      "sha256_1mb": "d43058b1e67d81635dd0602e66d3f252f2332eed8fa6dd0806f63547fe99d507",
+      "is_binary": false,
+      "is_dependency_manifest": false,
+      "is_config_or_deploy": false,
+      "is_entrypoint_hint": false,
+      "security_signals": {
+        "authorization": 1
+      }
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "language": "YAML",
+      "extension": ".yml",
+      "size_bytes": 385,
+      "lines": 22,
+      "sha256_1mb": "e14bf9cc8dac16d3ae119eef1379e25a534ddd057775f5acd60a76a7ff598c91",
+      "is_binary": false,
+      "is_dependency_manifest": false,
+      "is_config_or_deploy": true,
+      "is_entrypoint_hint": false,
+      "security_signals": {
+        "authorization": 1
+      }
+    }
+  ],
+  "high_signal_files": [
+    "repo-manifest.yaml",
+    "profile/README.md",
+    "README.md",
+    "Makefile",
+    "agent.yaml",
+    "CHANGELOG.md",
+    "AGENTS.md",
+    "SECURITY.md",
+    "catalog-info.yaml",
+    "observability/alerts.yaml",
+    ".github/workflows/ci.yml",
+    "docs/runbook.md",
+    "CODEOWNERS",
+    ".github/CODEOWNERS",
+    ".devcontainer/devcontainer.json",
+    "renovate.json",
+    "docs/adr/README.md"
+  ],
+  "notes": [
+    "Binary and excluded directories are omitted by default.",
+    "Signals are heuristic leads, not findings. Validate reachability and impact before reporting."
+  ]
+}

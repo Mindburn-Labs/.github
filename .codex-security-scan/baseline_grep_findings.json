@@ -1,0 +1,443 @@
+{
+  "generated_at": "2026-05-26T18:35:52.457174+00:00",
+  "root": "/Users/ivan/Code/Mindburn-Labs/.github-repo",
+  "scanned_files": 15,
+  "match_count": 42,
+  "pattern_counts": {
+    "process-shell": 0,
+    "shell-true": 0,
+    "dynamic-code-eval": 0,
+    "unsafe-deserialization": 0,
+    "path-traversal-sinks": 2,
+    "query-raw-interpolation": 0,
+    "ssrf-outbound-request": 0,
+    "weak-crypto-tls": 6,
+    "secret-material": 0,
+    "xxe-xml-parser": 0,
+    "memory-unsafe-calls": 0,
+    "ai-tool-boundary": 34
+  },
+  "warning": "These are grep leads, not confirmed vulnerabilities. Validate reachability, exploitability, and impact before reporting.",
+  "matches": [
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "agent.yaml",
+      "line": 15,
+      "excerpt": "agent_entrypoints:",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "agent.yaml",
+      "line": 16,
+      "excerpt": "default_task: make agent-context",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "Makefile",
+      "line": 3,
+      "excerpt": ".PHONY: setup test lint build agent-context",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "Makefile",
+      "line": 12,
+      "excerpt": "@ruby -e 'require \"yaml\"; YAML.safe_load(File.read(\"agent.yaml\"), aliases: true); YAML.safe_load(File.read(\"catalog-info.yaml\"), aliases: true); YAML.safe_load(File.read(\"observability/alerts.yaml\"), aliases: true); puts \"validated basel...",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "Makefile",
+      "line": 14,
+      "excerpt": "@test -f AGENTS.md",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "Makefile",
+      "line": 19,
+      "excerpt": "agent-context: lint",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "README.md",
+      "line": 24,
+      "excerpt": "\u251c\u2500\u2500 .devcontainer/        # Ephemeral sandbox configuration for AI agents and devs",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "README.md",
+      "line": 30,
+      "excerpt": "\u251c\u2500\u2500 agent.yaml            # Declarative execution constraints and entrypoints for AI agents",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "README.md",
+      "line": 31,
+      "excerpt": "\u2514\u2500\u2500 AGENTS.md             # Autonomous engineering directives and test runner indices",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "weak-crypto-tls",
+      "severity_hint": "medium",
+      "category": "crypto",
+      "path": "README.md",
+      "line": 83,
+      "excerpt": "3.  If stateful migration rollback is blocked, initiate the approved **Forward-Fix** pipeline rather than attempting destructive data reversals.",
+      "validation": "Verify context. Replace weak algorithms or disabled certificate checks when security-sensitive.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "AGENTS.md",
+      "line": 1,
+      "excerpt": "# AGENTS.md",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "path-traversal-sinks",
+      "severity_hint": "medium",
+      "category": "filesystem/path",
+      "path": "repo-manifest.yaml",
+      "line": 162,
+      "excerpt": "current_role: OrgGenome Compiler active transition shell, not archived",
+      "validation": "Check whether attacker-controlled paths are normalized under an allowlisted root and symlink/archive-slip cases are blocked.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "path-traversal-sinks",
+      "severity_hint": "medium",
+      "category": "filesystem/path",
+      "path": "repo-manifest.yaml",
+      "line": 178,
+      "excerpt": "deprecation_plan: archive only after ml-orggenome-compiler and svc-orggenome-inference prove full ownership",
+      "validation": "Check whether attacker-controlled paths are normalized under an allowlisted root and symlink/archive-slip cases are blocked.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "repo-manifest.yaml",
+      "line": 299,
+      "excerpt": "name: platform-agent-substrate",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "repo-manifest.yaml",
+      "line": 300,
+      "excerpt": "current_role: agent execution substrate; HELM-governed consumer, not a second HELM",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "repo-manifest.yaml",
+      "line": 304,
+      "excerpt": "canonical_source_paths: [platform-agent-substrate]",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "repo-manifest.yaml",
+      "line": 308,
+      "excerpt": "name: platform-agent-capabilities",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "repo-manifest.yaml",
+      "line": 309,
+      "excerpt": "current_role: agent capability registry and reusable skills",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "repo-manifest.yaml",
+      "line": 313,
+      "excerpt": "canonical_source_paths: [platform-agent-capabilities]",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "repo-manifest.yaml",
+      "line": 324,
+      "excerpt": "name: svc-agent-control-plane",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "repo-manifest.yaml",
+      "line": 325,
+      "excerpt": "current_role: agent task routing and policy coordination service",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "repo-manifest.yaml",
+      "line": 329,
+      "excerpt": "canonical_source_paths: [svc-agent-control-plane]",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "repo-manifest.yaml",
+      "line": 334,
+      "excerpt": "name: svc-agent-sandbox-runner",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "repo-manifest.yaml",
+      "line": 335,
+      "excerpt": "current_role: local sandbox runner for agent workspaces",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "repo-manifest.yaml",
+      "line": 339,
+      "excerpt": "canonical_source_paths: [svc-agent-sandbox-runner]",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "repo-manifest.yaml",
+      "line": 344,
+      "excerpt": "name: integration-agent-evals",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "repo-manifest.yaml",
+      "line": 345,
+      "excerpt": "current_role: multi-agent regression and evidence-level evaluations",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "repo-manifest.yaml",
+      "line": 349,
+      "excerpt": "canonical_source_paths: [integration-agent-evals]",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "weak-crypto-tls",
+      "severity_hint": "medium",
+      "category": "crypto",
+      "path": "repo-manifest.yaml",
+      "line": 383,
+      "excerpt": "current_role: application desired-state overlays",
+      "validation": "Verify context. Replace weak algorithms or disabled certificate checks when security-sensitive.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "weak-crypto-tls",
+      "severity_hint": "medium",
+      "category": "crypto",
+      "path": "repo-manifest.yaml",
+      "line": 395,
+      "excerpt": "current_role: platform controller desired-state overlays",
+      "validation": "Verify context. Replace weak algorithms or disabled certificate checks when security-sensitive.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "weak-crypto-tls",
+      "severity_hint": "medium",
+      "category": "crypto",
+      "path": "catalog-info.yaml",
+      "line": 5,
+      "excerpt": "description: GitHub organization profile and repository manifest mirror.",
+      "validation": "Verify context. Replace weak algorithms or disabled certificate checks when security-sensitive.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "weak-crypto-tls",
+      "severity_hint": "medium",
+      "category": "crypto",
+      "path": "profile/README.md",
+      "line": 13,
+      "excerpt": "| Core Product | Description | Stack |",
+      "validation": "Verify context. Replace weak algorithms or disabled certificate checks when security-sensitive.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "profile/README.md",
+      "line": 15,
+      "excerpt": "| **[HELM](https://github.com/Mindburn-Labs/helm-ai-kernel)** | The deterministic execution layer for the agent economy. Fail-closed policy enforcement, cryptographic receipts, replayable proofs. | Go \u00b7 WASI \u00b7 Ed25519 |",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "profile/README.md",
+      "line": 29,
+      "excerpt": "| **3. Agent Substrates** | `@Mindburn-Labs/agent-engineers` | Sandbox, Control Plane, MCP | `@mindburnlabs` |",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "profile/README.md",
+      "line": 43,
+      "excerpt": "*   [`orggenome-compiler`](https://github.com/Mindburn-Labs/orggenome-compiler) [\ud83d\udd12 Private] \u2014 GPU cluster compilers for organizational multi-agent genomes.",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "weak-crypto-tls",
+      "severity_hint": "medium",
+      "category": "crypto",
+      "path": "profile/README.md",
+      "line": 56,
+      "excerpt": "*   [`gitops-apps`](https://github.com/Mindburn-Labs/gitops-apps) \u2014 Continuous delivery desired-state values and OCI image digests.",
+      "validation": "Verify context. Replace weak algorithms or disabled certificate checks when security-sensitive.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "profile/README.md",
+      "line": 58,
+      "excerpt": "#### \ud83e\udd16 3. Agent Substrate Layer",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "profile/README.md",
+      "line": 59,
+      "excerpt": "*   [`platform-agent-substrate`](https://github.com/Mindburn-Labs/platform-agent-substrate) \u2014 Ephemeral worker supervisor and credential exchange bridge.",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "profile/README.md",
+      "line": 60,
+      "excerpt": "*   [`platform-agent-capabilities`](https://github.com/Mindburn-Labs/platform-agent-capabilities) \u2014 Standardized execution skills, prompts, and regression evals.",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "profile/README.md",
+      "line": 62,
+      "excerpt": "*   [`svc-agent-control-plane`](https://github.com/Mindburn-Labs/svc-agent-control-plane) \u2014 Agent task broker and authorization routing gateway.",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "profile/README.md",
+      "line": 63,
+      "excerpt": "*   [`svc-agent-sandbox-runner`](https://github.com/Mindburn-Labs/svc-agent-sandbox-runner) \u2014 Sandboxed WASI runtime and container workspace orchestrator.",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "profile/README.md",
+      "line": 64,
+      "excerpt": "*   [`integration-agent-evals`](https://github.com/Mindburn-Labs/integration-agent-evals) \u2014 Regression suite executors for capability compliance audits.",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    }
+  ]
+}

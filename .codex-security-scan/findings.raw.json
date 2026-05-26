@@ -1,0 +1,9 @@
+{
+  "generated_at": "2026-05-26T18:35:52.502487+00:00",
+  "repo": "/Users/ivan/Code/Mindburn-Labs/.github-repo",
+  "mode": "exhaustive",
+  "remediation_policy": "report-only",
+  "finding_count": 0,
+  "findings": [],
+  "note": "No findings were promoted without local reproduction, deterministic reachability, or manual validation evidence. Leads are preserved in baseline_grep_findings.json and tool_runs/."
+}

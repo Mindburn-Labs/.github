@@ -1,0 +1,127 @@
+{
+  "generated_at": "2026-05-26T18:35:52.496964+00:00",
+  "root": "/Users/ivan/Code/Mindburn-Labs/.github-repo",
+  "out_dir": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/tool_runs",
+  "offline": true,
+  "allow_network": false,
+  "executed_count": 0,
+  "skipped_count": 19,
+  "results": [],
+  "skipped": [
+    {
+      "name": "gitleaks",
+      "category": "secrets",
+      "reason": "binary not found: gitleaks",
+      "network_required": false
+    },
+    {
+      "name": "detect-secrets",
+      "category": "secrets",
+      "reason": "no matching project files detected",
+      "network_required": false
+    },
+    {
+      "name": "semgrep",
+      "category": "sast",
+      "reason": "network-backed tool skipped; rerun with --allow-network if approved",
+      "network_required": true
+    },
+    {
+      "name": "bandit",
+      "category": "python-sast",
+      "reason": "binary not found: bandit",
+      "network_required": false
+    },
+    {
+      "name": "pip-audit",
+      "category": "dependency",
+      "reason": "binary not found: pip-audit",
+      "network_required": true
+    },
+    {
+      "name": "npm-audit",
+      "category": "dependency",
+      "reason": "network-backed tool skipped; rerun with --allow-network if approved",
+      "network_required": true
+    },
+    {
+      "name": "pnpm-audit",
+      "category": "dependency",
+      "reason": "network-backed tool skipped; rerun with --allow-network if approved",
+      "network_required": true
+    },
+    {
+      "name": "yarn-audit",
+      "category": "dependency",
+      "reason": "network-backed tool skipped; rerun with --allow-network if approved",
+      "network_required": true
+    },
+    {
+      "name": "osv-scanner",
+      "category": "dependency",
+      "reason": "binary not found: osv-scanner",
+      "network_required": true
+    },
+    {
+      "name": "cargo-audit",
+      "category": "rust-dependency",
+      "reason": "network-backed tool skipped; rerun with --allow-network if approved",
+      "network_required": true
+    },
+    {
+      "name": "govulncheck",
+      "category": "go-dependency",
+      "reason": "network-backed tool skipped; rerun with --allow-network if approved",
+      "network_required": true
+    },
+    {
+      "name": "gosec",
+      "category": "go-sast",
+      "reason": "binary not found: gosec",
+      "network_required": false
+    },
+    {
+      "name": "brakeman",
+      "category": "ruby-rails-sast",
+      "reason": "binary not found: brakeman",
+      "network_required": false
+    },
+    {
+      "name": "bundle-audit",
+      "category": "ruby-dependency",
+      "reason": "binary not found: bundle-audit",
+      "network_required": true
+    },
+    {
+      "name": "composer-audit",
+      "category": "php-dependency",
+      "reason": "binary not found: composer",
+      "network_required": true
+    },
+    {
+      "name": "checkov",
+      "category": "iac",
+      "reason": "binary not found: checkov",
+      "network_required": false
+    },
+    {
+      "name": "tfsec",
+      "category": "iac",
+      "reason": "no matching project files detected",
+      "network_required": false
+    },
+    {
+      "name": "trivy-fs",
+      "category": "dependency/container/iac",
+      "reason": "network-backed tool skipped; rerun with --allow-network if approved",
+      "network_required": true
+    },
+    {
+      "name": "hadolint",
+      "category": "dockerfile",
+      "reason": "binary not found: hadolint",
+      "network_required": false
+    }
+  ],
+  "warning": "Tool output is lead generation. Validate reachability, exploitability, and impact before reporting."
+}
