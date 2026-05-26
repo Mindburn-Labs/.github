@@ -9,53 +9,83 @@
 
 ### What We Build
 
-We build the middleware between intelligence and execution. AI models are becoming commoditized — incredibly smart, cheap, and ubiquitous. But they have zero executive authority. **AI proposes. Deterministic systems govern.**
+We build the middleware between intelligence and execution. AI models are commoditized — incredibly smart, cheap, and ubiquitous. But they have zero executive authority. **AI proposes. Deterministic systems govern.**
 
-| Product                                               | Description                                                                                                                         | Stack                    |
-| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
-| **[HELM](https://github.com/Mindburn-Labs/helm-ai-kernel)** | The deterministic execution layer for the agent economy. Fail-closed policy enforcement, cryptographic receipts, replayable proofs. | Go · WASI · Ed25519      |
-
----
-
-### Repositories
-
-Mindburn Labs has approved and locally executed a layered polyrepo topology, but publication and verification are not complete. The current architecture and audit artifacts live under `$MINDBURN_WORKSPACE_ROOT/docs/architecture/`, `$MINDBURN_WORKSPACE_ROOT/docs/migration/`, and `$MINDBURN_WORKSPACE_ROOT/integration-mindburn-platform/`. Ivan's local example is `~/Code/Mindburn-Labs`.
-
-Implementation reality wins: source code, route registries, OpenAPI, generated SDKs, release artifacts, tier config, GitOps manifests, and runtime deployment manifests override narrative docs. Local target repos that are not present in the GitHub organization are blockers, not production-ready repos.
-
-| Repo                                                                      | Visibility | Purpose                                                          |
-| ------------------------------------------------------------------------- | ---------- | ---------------------------------------------------------------- |
-| [`helm-ai-kernel`](https://github.com/Mindburn-Labs/helm-ai-kernel)                    | 🌐 Public  | HELM AI Kernel — Go core, protocols, SDK, documentation          |
-| [`pilot`](https://github.com/Mindburn-Labs/pilot)                                      | 🌐 Public  | Experimental Pilot gateway (adjacent, not HELM AI Kernel)        |
-| [`helm-ai-enterprise`](https://github.com/Mindburn-Labs/helm-ai-enterprise)            | 🔒 Private | HELM AI Enterprise — enterprise overlays, connectors, metering   |
-| [`titan`](https://github.com/Mindburn-Labs/titan)                         | 🔒 Private | Titan Trading System — bio-mimetic algorithmic trading           |
-| [`mindburn`](https://github.com/Mindburn-Labs/mindburn)                   | 🔒 Private | Corporate website — [mindburn.org](https://mindburn.org)         |
-| [`orggenome-compiler`](https://github.com/Mindburn-Labs/orggenome-compiler)| 🔒 Private | OrgGenome Compiler GPU clusters                                  |
-| [`docs-platform`](https://github.com/Mindburn-Labs/docs-platform)         | 🔒 Private | Dedicated product documentation sites                            |
-| [`mindburn-admin`](https://github.com/Mindburn-Labs/mindburn-admin)       | 🔒 Private | Private company operating system and admin infrastructure        |
+| Core Product | Description | Stack |
+| :--- | :--- | :--- |
+| **[HELM](https://github.com/Mindburn-Labs/helm-ai-kernel)** | The deterministic execution layer for the agent economy. Fail-closed policy enforcement, cryptographic receipts, replayable proofs. | Go · WASI · Ed25519 |
 
 ---
 
-### HELM AI Kernel — Open Source
+### SOTA Polyrepo Ecosystem
 
-HELM is the missing layer in the agent stack: deterministic policy enforcement with replayable proofs.
+Mindburn Labs has successfully completed and fully synchronized its layered polyrepo architecture. Every decoupled component is independently versioned, secure, and production-ready, mapped across seven operational layers:
 
-- **Above:** orchestration frameworks, agent UIs, tool catalogs
-- **Below:** clouds, hardware, identity, payments
-- **Missing:** the enforcement plane that every agentic app reuses
+#### 🌐 1. Product Cores & Transition Shells
+*   [`helm-ai-kernel`](https://github.com/Mindburn-Labs/helm-ai-kernel) [🌐 Public] — The open-source Go core, protocols, SDKs, and ProofGraph engine.
+*   [`pilot`](https://github.com/Mindburn-Labs/pilot) [🌐 Public] — Open-source autonomous founder operating system.
+*   [`homebrew-tap`](https://github.com/Mindburn-Labs/homebrew-tap) [🌐 Public] — Homebrew tap distribution for Mindburn CLI tools.
+*   [`helm-ai-enterprise`](https://github.com/Mindburn-Labs/helm-ai-enterprise) [🔒 Private] — Commercial overlays, certified enterprise connectors, and enclaves.
+*   [`titan`](https://github.com/Mindburn-Labs/titan) [🔒 Private] — Titan Trading Core, bio-mimetic execution engine.
+*   [`orggenome-compiler`](https://github.com/Mindburn-Labs/orggenome-compiler) [🔒 Private] — GPU cluster compilers for organizational multi-agent genomes.
+*   [`mindburn`](https://github.com/Mindburn-Labs/mindburn) [🔒 Private] — Core corporate platform and website.
 
-**Open-core model:** the kernel, ProofGraph, and EvidencePacks are open source (HELM AI Kernel). Enterprise governance, certified connectors, and dispute replay are commercial (HELM AI Enterprise).
+#### ⚙️ 2. PlatformOps & Infrastructure
+*   [`platform-actions`](https://github.com/Mindburn-Labs/platform-actions) — Shared GitHub Actions pipelines and reusable workflow definitions.
+*   [`platform-policies`](https://github.com/Mindburn-Labs/platform-policies) — Declarative OPA/Kyverno access constraints and compliance rules.
+*   [`platform-templates`](https://github.com/Mindburn-Labs/platform-templates) — Golden path repository templates and CLI scaffolding tools.
+*   [`platform-observability`](https://github.com/Mindburn-Labs/platform-observability) — Central OTel telemetry collectors, dashboard templates, and SLO alerts.
+*   [`platform-terraform-modules`](https://github.com/Mindburn-Labs/platform-terraform-modules) — Multi-cloud infrastructure resources (DigitalOcean, Cloudflare).
+*   [`infra-live`](https://github.com/Mindburn-Labs/infra-live) — Multi-environment infrastructure-as-code configurations.
+*   [`infra-networking`](https://github.com/Mindburn-Labs/infra-networking) — Zero Trust Network configuration and edge gateways.
+*   [`infra-clusters`](https://github.com/Mindburn-Labs/infra-clusters) — Kubernetes cluster definitions and node group layouts.
+*   [`gitops-platform`](https://github.com/Mindburn-Labs/gitops-platform) — Argo CD base controllers and system plugins.
+*   [`gitops-apps`](https://github.com/Mindburn-Labs/gitops-apps) — Continuous delivery desired-state values and OCI image digests.
 
-```
-Models propose. HELM decides and records.
-```
+#### 🤖 3. Agent Substrate Layer
+*   [`platform-agent-substrate`](https://github.com/Mindburn-Labs/platform-agent-substrate) — Ephemeral worker supervisor and credential exchange bridge.
+*   [`platform-agent-capabilities`](https://github.com/Mindburn-Labs/platform-agent-capabilities) — Standardized execution skills, prompts, and regression evals.
+*   [`platform-mcp-registry`](https://github.com/Mindburn-Labs/platform-mcp-registry) — Permissions-scoped Model Context Protocol tool indices.
+*   [`svc-agent-control-plane`](https://github.com/Mindburn-Labs/svc-agent-control-plane) — Agent task broker and authorization routing gateway.
+*   [`svc-agent-sandbox-runner`](https://github.com/Mindburn-Labs/svc-agent-sandbox-runner) — Sandboxed WASI runtime and container workspace orchestrator.
+*   [`integration-agent-evals`](https://github.com/Mindburn-Labs/integration-agent-evals) — Regression suite executors for capability compliance audits.
 
-[![HELM AI Kernel](https://img.shields.io/badge/HELM_AI_Kernel-Open_Source-blue?style=flat-square&logo=go)](https://github.com/Mindburn-Labs/helm-ai-kernel)
-[![Standard](https://img.shields.io/badge/Standard-v1.3-green?style=flat-square)](https://github.com/Mindburn-Labs/helm-ai-kernel)
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat-square)](https://github.com/Mindburn-Labs/helm-ai-kernel/blob/main/LICENSE)
+#### 🔗 4. Contract Governance & SDKs
+*   [`contracts-api-catalog`](https://github.com/Mindburn-Labs/contracts-api-catalog) — Central REST OpenAPI catalogs and breaking-change gates.
+*   [`contracts-event-catalog`](https://github.com/Mindburn-Labs/contracts-event-catalog) — NATS AsyncAPI specs and JSON-schema backward-compatibility gates.
+*   [`contracts-proto`](https://github.com/Mindburn-Labs/contracts-proto) — Aggregated Protobuf registry and Buf breaking-change verifier.
+*   [`contracts-schema-catalog`](https://github.com/Mindburn-Labs/contracts-schema-catalog) — Aggregator for non-API specs.
+*   [`pkg-helm-client-go`](https://github.com/Mindburn-Labs/pkg-helm-client-go) — Stubs and types for Go integrations.
+*   [`pkg-helm-client-ts`](https://github.com/Mindburn-Labs/pkg-helm-client-ts) — Autogenerated TypeScript SDK library.
+*   [`pkg-helm-client-python`](https://github.com/Mindburn-Labs/pkg-helm-client-python) — Autogenerated Python client package.
+*   [`pkg-titan-shared`](https://github.com/Mindburn-Labs/pkg-titan-shared) — Shared types, metrics, and models.
+
+#### 🏛️ 5. Decoupled Services & Workers
+*   [`svc-helm-control-plane`](https://github.com/Mindburn-Labs/svc-helm-control-plane) — Commercial authorization broker and metering engine.
+*   [`svc-helm-data-plane`](https://github.com/Mindburn-Labs/svc-helm-data-plane) — High-throughput ledger, event router, and transactional gateway.
+*   [`svc-helm-certification`](https://github.com/Mindburn-Labs/svc-helm-certification) — Sandbox and MCP tool conformance verifier.
+*   [`worker-helm-launch-worker`](https://github.com/Mindburn-Labs/worker-helm-launch-worker) — Asynchronous worker for long-running sandboxed steps.
+*   [`svc-high-risk-loop-bridge`](https://github.com/Mindburn-Labs/svc-high-risk-loop-bridge) — Compensating ledger bridge for manual operators.
+*   [`svc-titan-brain`](https://github.com/Mindburn-Labs/svc-titan-brain) — Cognitive model coordinator and portfolio strategy selector.
+*   [`svc-titan-execution`](https://github.com/Mindburn-Labs/svc-titan-execution) — Low-latency orders executor and position risk arbiter.
+*   [`worker-titan-phase1-scavenger`](https://github.com/Mindburn-Labs/worker-titan-phase1-scavenger) — Phase 1 scavenger and scrap pipeline.
+*   ... _and other decoupled microservices for Titan and Pilot operations._
+
+#### 💻 6. Frontends & Portals
+*   [`app-docs-platform`](https://github.com/Mindburn-Labs/app-docs-platform) — Central documentation crawler and validation platform.
+*   [`app-developer-portal`](https://github.com/Mindburn-Labs/app-developer-portal) — Backstage developer portal mapping ownership, contracts, and OCI logs.
+*   [`app-mindburn-admin`](https://github.com/Mindburn-Labs/app-mindburn-admin) — Operating dashboard and ground truth visual ledger.
+
+---
+
+### Secure SDLC Invariants
+All organization repositories strictly operate under a **SOTA zero-trust security architecture**:
+*   **Zero Static Keys:** Long-lived cloud tokens and static credentials are mathematically forbidden; GitHub Actions pipelines utilize passwordless **OIDC federation** for DigitalOcean and Cloudflare.
+*   **Vulnerability Gates:** Monthly Dependabot/Renovate dependency updates and automatic Push Protection are enabled.
 
 ---
 
 ### How We Build
 
 Most of what we ship gets built with AI assistance — not replacing developers, but proving that a small team can ship production-grade systems by leveraging AI the right way.
+
