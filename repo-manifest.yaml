@@ -24,13 +24,13 @@ source_truth_priority:
 audit_summary:
   github_org_repos_observed:
     - .github
-    - docs-platform
+    - app-docs-platform
     - docs_for_team
     - helm-ai-enterprise
     - helm-ai-kernel
     - homebrew-tap
     - mindburn
-    - mindburn-admin
+    - app-mindburn-admin
     - orggenome-compiler
     - pilot
     - titan
@@ -194,15 +194,15 @@ repositories:
     github_status: present_in_org
 
   - <<: *repo_defaults
-    name: mindburn-admin
+    name: app-mindburn-admin
     current_role: private company operating system, not HELM source truth
     owner_team: operations
     visibility: private
     lifecycle_state: active
     product_association: Mindburn
     deployability: app
-    canonical_source_paths: [mindburn-admin]
-    current_source_truth_docs: [mindburn-admin/README.md]
+    canonical_source_paths: [app-mindburn-admin]
+    current_source_truth_docs: [app-mindburn-admin/README.md]
     ci_status: not_run_dirty_worktree
     release_status: active_core_repo
     security_classification: confidential
@@ -210,15 +210,15 @@ repositories:
     github_status: present_in_org
 
   - <<: *repo_defaults
-    name: docs-platform
+    name: app-docs-platform
     current_role: product documentation renderer/crawler, not product source truth
     owner_team: docs
     visibility: private
     lifecycle_state: active
     product_association: docs
     deployability: app
-    canonical_source_paths: [docs-platform]
-    current_source_truth_docs: [docs-platform/README.md]
+    canonical_source_paths: [app-docs-platform]
+    current_source_truth_docs: [app-docs-platform/README.md]
     ci_status: not_run_dirty_worktree
     release_status: active_core_repo
     docs_ownership: docs
@@ -503,17 +503,17 @@ repositories:
     lifecycle_state: target_only
     product_association: Mindburn
     deployability: app
-    canonical_source_paths: [mindburn-admin]
+    canonical_source_paths: [app-mindburn-admin]
     github_status: missing_from_org_target_alias
 
   - <<: *repo_defaults
     name: app-docs-platform
-    current_role: target name for docs-platform
+    current_role: target name for app-docs-platform
     owner_team: docs
     lifecycle_state: target_only
     product_association: docs
     deployability: app
-    canonical_source_paths: [docs-platform]
+    canonical_source_paths: [app-docs-platform]
     github_status: missing_from_org_target_alias
 
   - <<: *repo_defaults
@@ -596,7 +596,7 @@ repositories:
     helm_conformance_status: normative
     deployability: service
     canonical_source_paths: [svc-helm-control-plane]
-    previous_source_paths: [helm-ai-enterprise/apps/controlplane]
+    previous_source_paths: [helm-ai-enterprise/svc-helm-control-plane]
     current_source_truth_docs: [svc-helm-control-plane/docs/rfc/repo-creation.md, svc-helm-control-plane/docs/rfc/extraction.md]
     ci_status: pass_local_go_test_2026-05-26
     release_status: blocked_missing_github_repo_and_unverified_gitops_digest
@@ -616,7 +616,7 @@ repositories:
     helm_conformance_status: normative
     deployability: service
     canonical_source_paths: [svc-helm-data-plane]
-    previous_source_paths: [helm-ai-enterprise/apps/data-plane]
+    previous_source_paths: [helm-ai-enterprise/svc-helm-data-plane]
     ci_status: pass_local_go_test_2026-05-26
     release_status: blocked_missing_github_repo_and_unverified_gitops_digest
     contract_ownership: data-plane event/API contracts in producer repo; catalog sync not verified

@@ -85,8 +85,8 @@ graph TD
     %% 5. App & Docs Layer
     subgraph App_Layer["5. Application Interfaces & Public Docs"]
         A1["app-mindburn-web<br>(Astro Landing Site)"]:::ui
-        A2["app-app-mindburn-admin<br>(Ops Visual Ledger)"]:::ui
-        A3["app-app-docs-platform<br>(Onboarding Crawler)"]:::ui
+        A2["app-mindburn-admin<br>(Ops Visual Ledger)"]:::ui
+        A3["app-docs-platform<br>(Onboarding Crawler)"]:::ui
         A4["app-helm-console<br>(Flutter Client)"]:::ui
         A5["docs-engineering-handbook<br>(Specs & Onboarding)"]:::ui
         A6["app-developer-portal<br>(Backstage Directory)"]:::ui
@@ -247,9 +247,9 @@ Mindburn Labs is in the active transition and execution state of its unified pol
 *   [`svc-pilot-mcp-server`](https://github.com/Mindburn-Labs/svc-pilot-mcp-server) — Secured Model Context Protocol server exposing Pilot OS capabilities.
 
 #### 💻 6. Frontends, Portals & Aggregators
-*   [`app-app-docs-platform`](https://github.com/Mindburn-Labs/app-app-docs-platform) — Central documentation crawler and validation platform.
+*   [`app-docs-platform`](https://github.com/Mindburn-Labs/app-docs-platform) — Central documentation crawler and validation platform.
 *   [`app-developer-portal`](https://github.com/Mindburn-Labs/app-developer-portal) — Backstage developer portal mapping ownership, contracts, and OCI logs.
-*   [`app-app-mindburn-admin`](https://github.com/Mindburn-Labs/app-app-mindburn-admin) — Operating dashboard and ground truth visual ledger.
+*   [`app-mindburn-admin`](https://github.com/Mindburn-Labs/app-mindburn-admin) — Operating dashboard and ground truth visual ledger.
 *   [`app-mindburn-web`](https://github.com/Mindburn-Labs/app-mindburn-web) — Astro-based public website for Mindburn Labs.
 *   [`app-helm-console`](https://github.com/Mindburn-Labs/app-helm-console) — Flutter-based interactive client console.
 *   [`app-titan-console`](https://github.com/Mindburn-Labs/app-titan-console) — UI console displaying algorithmic statistics and risk states.
