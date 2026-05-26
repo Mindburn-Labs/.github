@@ -1,7 +1,7 @@
-apiVersion: mindburn.org/v1
+apiVersion: app-mindburn-web.org/v1
 kind: ObservabilityCatalog
 metadata:
-  name: mindburn-github-profile
+  name: app-mindburn-web-github-profile
 spec:
   slo:
     - name: profile-metadata-valid

@@ -61,7 +61,7 @@ graph TD
             C2["contracts-event-catalog<br>(AsyncAPI NATS Schemas)"]:::contr
             C3["contracts-proto<br>(Central Buf Registry)"]:::contr
             C4["contracts-schema-catalog<br>(Offline Static Schemas)"]:::contr
-            INT1["integration-mindburn-platform<br>(Global Release Lockfile)"]:::contr
+            INT1["integration-app-mindburn-web-platform<br>(Global Release Lockfile)"]:::contr
             INT2["integration-helm<br>(HELM Integration Tests)"]:::contr
             INT3["integration-titan<br>(Titan Integration Tests)"]:::contr
             INT4["integration-pilot<br>(Pilot Integration Tests)"]:::contr

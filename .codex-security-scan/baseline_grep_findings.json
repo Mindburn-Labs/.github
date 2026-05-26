@@ -1,21 +1,21 @@
 {
-  "generated_at": "2026-05-26T18:35:52.457174+00:00",
+  "generated_at": "2026-05-26T19:22:24.838394+00:00",
   "root": "/Users/ivan/Code/Mindburn-Labs/.github-repo",
   "scanned_files": 15,
-  "match_count": 42,
+  "match_count": 54,
   "pattern_counts": {
     "process-shell": 0,
     "shell-true": 0,
     "dynamic-code-eval": 0,
     "unsafe-deserialization": 0,
-    "path-traversal-sinks": 2,
+    "path-traversal-sinks": 5,
     "query-raw-interpolation": 0,
     "ssrf-outbound-request": 0,
-    "weak-crypto-tls": 6,
+    "weak-crypto-tls": 7,
     "secret-material": 0,
     "xxe-xml-parser": 0,
     "memory-unsafe-calls": 0,
-    "ai-tool-boundary": 34
+    "ai-tool-boundary": 42
   },
   "warning": "These are grep leads, not confirmed vulnerabilities. Validate reachability, exploitability, and impact before reporting.",
   "matches": [
@@ -354,8 +354,8 @@
       "severity_hint": "medium",
       "category": "agentic-ai boundary",
       "path": "profile/README.md",
-      "line": 29,
-      "excerpt": "| **3. Agent Substrates** | `@Mindburn-Labs/agent-engineers` | Sandbox, Control Plane, MCP | `@mindburnlabs` |",
+      "line": 45,
+      "excerpt": "%% 2. Agent Substrate Layer",
       "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
       "status": "lead-needs-validation"
     },
@@ -364,9 +364,109 @@
       "severity_hint": "medium",
       "category": "agentic-ai boundary",
       "path": "profile/README.md",
-      "line": 43,
-      "excerpt": "*   [`orggenome-compiler`](https://github.com/Mindburn-Labs/orggenome-compiler) [\ud83d\udd12 Private] \u2014 GPU cluster compilers for organizational multi-agent genomes.",
+      "line": 46,
+      "excerpt": "subgraph Substrate_Layer[\"2. Agent Substrate & Automation Layer\"]",
       "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "profile/README.md",
+      "line": 47,
+      "excerpt": "SU1[\"platform-agent-substrate<br>(Supervisor Core)\"]:::substrate",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "profile/README.md",
+      "line": 48,
+      "excerpt": "SU2[\"platform-agent-capabilities<br>(Capabilities Registry)\"]:::substrate",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "profile/README.md",
+      "line": 50,
+      "excerpt": "SU4[\"svc-agent-control-plane<br>(Agent Policy & Routing)\"]:::substrate",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "profile/README.md",
+      "line": 51,
+      "excerpt": "SU5[\"svc-agent-sandbox-runner<br>(Enclave Orchestrator)\"]:::substrate",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "profile/README.md",
+      "line": 52,
+      "excerpt": "SU6[\"integration-agent-evals<br>(Agent Regression Testing)\"]:::substrate",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "profile/README.md",
+      "line": 75,
+      "excerpt": "INT5[\"integration-ai-flows<br>(Agent Prompt Flow Testing)\"]:::contr",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "path-traversal-sinks",
+      "severity_hint": "medium",
+      "category": "filesystem/path",
+      "path": "profile/README.md",
+      "line": 103,
+      "excerpt": "B5[\"orggenome-compiler<br>(Archive Audit Shell)\"]:::platform",
+      "validation": "Check whether attacker-controlled paths are normalized under an allowlisted root and symlink/archive-slip cases are blocked.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "profile/README.md",
+      "line": 180,
+      "excerpt": "| **4. Agent Substrates & Automation** | `@Mindburn-Labs/agent-engineers` | Sandbox runner, control plane, MCP tool registry | `@peycheff-com` |",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "path-traversal-sinks",
+      "severity_hint": "medium",
+      "category": "filesystem/path",
+      "path": "profile/README.md",
+      "line": 189,
+      "excerpt": "#### \ud83c\udf10 1. Product Cores, Transition Shells & Archives",
+      "validation": "Check whether attacker-controlled paths are normalized under an allowlisted root and symlink/archive-slip cases are blocked.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "path-traversal-sinks",
+      "severity_hint": "medium",
+      "category": "filesystem/path",
+      "path": "profile/README.md",
+      "line": 195,
+      "excerpt": "*   [`orggenome-compiler`](https://github.com/Mindburn-Labs/orggenome-compiler) [\ud83d\udd12 Private] \u2014 [ARCHIVED] Historical repository shell retained strictly for audit compliance.",
+      "validation": "Check whether attacker-controlled paths are normalized under an allowlisted root and symlink/archive-slip cases are blocked.",
       "status": "lead-needs-validation"
     },
     {
@@ -374,7 +474,7 @@
       "severity_hint": "medium",
       "category": "crypto",
       "path": "profile/README.md",
-      "line": 56,
+      "line": 207,
       "excerpt": "*   [`gitops-apps`](https://github.com/Mindburn-Labs/gitops-apps) \u2014 Continuous delivery desired-state values and OCI image digests.",
       "validation": "Verify context. Replace weak algorithms or disabled certificate checks when security-sensitive.",
       "status": "lead-needs-validation"
@@ -384,7 +484,7 @@
       "severity_hint": "medium",
       "category": "agentic-ai boundary",
       "path": "profile/README.md",
-      "line": 58,
+      "line": 209,
       "excerpt": "#### \ud83e\udd16 3. Agent Substrate Layer",
       "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
       "status": "lead-needs-validation"
@@ -394,7 +494,7 @@
       "severity_hint": "medium",
       "category": "agentic-ai boundary",
       "path": "profile/README.md",
-      "line": 59,
+      "line": 210,
       "excerpt": "*   [`platform-agent-substrate`](https://github.com/Mindburn-Labs/platform-agent-substrate) \u2014 Ephemeral worker supervisor and credential exchange bridge.",
       "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
       "status": "lead-needs-validation"
@@ -404,7 +504,7 @@
       "severity_hint": "medium",
       "category": "agentic-ai boundary",
       "path": "profile/README.md",
-      "line": 60,
+      "line": 211,
       "excerpt": "*   [`platform-agent-capabilities`](https://github.com/Mindburn-Labs/platform-agent-capabilities) \u2014 Standardized execution skills, prompts, and regression evals.",
       "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
       "status": "lead-needs-validation"
@@ -414,7 +514,7 @@
       "severity_hint": "medium",
       "category": "agentic-ai boundary",
       "path": "profile/README.md",
-      "line": 62,
+      "line": 213,
       "excerpt": "*   [`svc-agent-control-plane`](https://github.com/Mindburn-Labs/svc-agent-control-plane) \u2014 Agent task broker and authorization routing gateway.",
       "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
       "status": "lead-needs-validation"
@@ -424,7 +524,7 @@
       "severity_hint": "medium",
       "category": "agentic-ai boundary",
       "path": "profile/README.md",
-      "line": 63,
+      "line": 214,
       "excerpt": "*   [`svc-agent-sandbox-runner`](https://github.com/Mindburn-Labs/svc-agent-sandbox-runner) \u2014 Sandboxed WASI runtime and container workspace orchestrator.",
       "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
       "status": "lead-needs-validation"
@@ -434,8 +534,28 @@
       "severity_hint": "medium",
       "category": "agentic-ai boundary",
       "path": "profile/README.md",
-      "line": 64,
+      "line": 215,
       "excerpt": "*   [`integration-agent-evals`](https://github.com/Mindburn-Labs/integration-agent-evals) \u2014 Regression suite executors for capability compliance audits.",
+      "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "weak-crypto-tls",
+      "severity_hint": "medium",
+      "category": "crypto",
+      "path": "profile/README.md",
+      "line": 239,
+      "excerpt": "*   [`svc-titan-ops-api`](https://github.com/Mindburn-Labs/svc-titan-ops-api) \u2014 Back-office API handling config overrides and manual circuit breakers.",
+      "validation": "Verify context. Replace weak algorithms or disabled certificate checks when security-sensitive.",
+      "status": "lead-needs-validation"
+    },
+    {
+      "pattern_id": "ai-tool-boundary",
+      "severity_hint": "medium",
+      "category": "agentic-ai boundary",
+      "path": "profile/README.md",
+      "line": 246,
+      "excerpt": "*   [`svc-orggenome-inference`](https://github.com/Mindburn-Labs/svc-orggenome-inference) \u2014 Serving containers on top of vLLM runtimes.",
       "validation": "Trace untrusted content into tool use, privileged prompts, memory, retrieval, and command execution boundaries.",
       "status": "lead-needs-validation"
     }

@@ -1,5 +1,5 @@
 {
-  "name": "mindburn-github-profile",
+  "name": "app-mindburn-web-github-profile",
   "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
   "customizations": {
     "vscode": {

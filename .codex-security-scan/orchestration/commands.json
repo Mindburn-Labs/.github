@@ -1,12 +1,12 @@
 {
-  "generated_at": "2026-05-26T18:35:52.577058+00:00",
+  "generated_at": "2026-05-26T19:22:24.948629+00:00",
   "commands": [
     {
       "name": "repo_mapper",
       "status": "completed",
       "exit_code": 0,
-      "started_at": "2026-05-26T18:35:52.305302+00:00",
-      "finished_at": "2026-05-26T18:35:52.362281+00:00",
+      "started_at": "2026-05-26T19:22:24.661250+00:00",
+      "finished_at": "2026-05-26T19:22:24.725733+00:00",
       "command": [
         "/Users/ivan/.local/share/mise/installs/python/3.12.11/bin/python3",
         "/Users/ivan/.codex/skills/security-scan-mythos/scripts/mythos_repo_mapper.py",
@@ -22,8 +22,8 @@
       "name": "rank_surface",
       "status": "completed",
       "exit_code": 0,
-      "started_at": "2026-05-26T18:35:52.362331+00:00",
-      "finished_at": "2026-05-26T18:35:52.386037+00:00",
+      "started_at": "2026-05-26T19:22:24.725773+00:00",
+      "finished_at": "2026-05-26T19:22:24.754268+00:00",
       "command": [
         "/Users/ivan/.local/share/mise/installs/python/3.12.11/bin/python3",
         "/Users/ivan/.codex/skills/security-scan-mythos/scripts/mythos_rank_surface.py",
@@ -39,8 +39,8 @@
       "name": "task_queue",
       "status": "completed",
       "exit_code": 0,
-      "started_at": "2026-05-26T18:35:52.386083+00:00",
-      "finished_at": "2026-05-26T18:35:52.410006+00:00",
+      "started_at": "2026-05-26T19:22:24.754531+00:00",
+      "finished_at": "2026-05-26T19:22:24.783545+00:00",
       "command": [
         "/Users/ivan/.local/share/mise/installs/python/3.12.11/bin/python3",
         "/Users/ivan/.codex/skills/security-scan-mythos/scripts/mythos_task_queue.py",
@@ -58,8 +58,8 @@
       "name": "grep_baseline",
       "status": "completed",
       "exit_code": 0,
-      "started_at": "2026-05-26T18:35:52.410109+00:00",
-      "finished_at": "2026-05-26T18:35:52.461213+00:00",
+      "started_at": "2026-05-26T19:22:24.783595+00:00",
+      "finished_at": "2026-05-26T19:22:24.842514+00:00",
       "command": [
         "/Users/ivan/.local/share/mise/installs/python/3.12.11/bin/python3",
         "/Users/ivan/.codex/skills/security-scan-mythos/scripts/mythos_grep_baseline.py",
@@ -72,11 +72,11 @@
       "stderr_file": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/orchestration/grep_baseline.stderr.txt"
     },
     {
-      "name": "tool_runner_offline",
+      "name": "tool_runner",
       "status": "completed",
       "exit_code": 0,
-      "started_at": "2026-05-26T18:35:52.461273+00:00",
-      "finished_at": "2026-05-26T18:35:52.501102+00:00",
+      "started_at": "2026-05-26T19:22:24.842566+00:00",
+      "finished_at": "2026-05-26T19:22:24.948603+00:00",
       "command": [
         "/Users/ivan/.local/share/mise/installs/python/3.12.11/bin/python3",
         "/Users/ivan/.codex/skills/security-scan-mythos/scripts/mythos_tool_runner.py",
@@ -84,66 +84,12 @@
         "/Users/ivan/Code/Mindburn-Labs/.github-repo",
         "--out-dir",
         "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/tool_runs",
-        "--offline",
         "--timeout",
-        "90"
+        "180",
+        "--allow-network"
       ],
-      "stdout_file": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/orchestration/tool_runner_offline.stdout.txt",
-      "stderr_file": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/orchestration/tool_runner_offline.stderr.txt"
-    },
-    {
-      "name": "findings_validate",
-      "status": "completed",
-      "exit_code": 0,
-      "started_at": "2026-05-26T18:35:52.502593+00:00",
-      "finished_at": "2026-05-26T18:35:52.526546+00:00",
-      "command": [
-        "/Users/ivan/.local/share/mise/installs/python/3.12.11/bin/python3",
-        "/Users/ivan/.codex/skills/security-scan-mythos/scripts/mythos_findings.py",
-        "validate",
-        "--input",
-        "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/findings.raw.json",
-        "--schema",
-        "/Users/ivan/.codex/skills/security-scan-mythos/assets/finding.schema.json"
-      ],
-      "stdout_file": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/orchestration/findings_validate.stdout.txt",
-      "stderr_file": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/orchestration/findings_validate.stderr.txt"
-    },
-    {
-      "name": "findings_dedupe",
-      "status": "completed",
-      "exit_code": 0,
-      "started_at": "2026-05-26T18:35:52.526598+00:00",
-      "finished_at": "2026-05-26T18:35:52.550858+00:00",
-      "command": [
-        "/Users/ivan/.local/share/mise/installs/python/3.12.11/bin/python3",
-        "/Users/ivan/.codex/skills/security-scan-mythos/scripts/mythos_findings.py",
-        "dedupe",
-        "--input",
-        "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/findings.raw.json",
-        "--out",
-        "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/findings.deduped.json"
-      ],
-      "stdout_file": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/orchestration/findings_dedupe.stdout.txt",
-      "stderr_file": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/orchestration/findings_dedupe.stderr.txt"
-    },
-    {
-      "name": "findings_render",
-      "status": "completed",
-      "exit_code": 0,
-      "started_at": "2026-05-26T18:35:52.550920+00:00",
-      "finished_at": "2026-05-26T18:35:52.576683+00:00",
-      "command": [
-        "/Users/ivan/.local/share/mise/installs/python/3.12.11/bin/python3",
-        "/Users/ivan/.codex/skills/security-scan-mythos/scripts/mythos_findings.py",
-        "render",
-        "--input",
-        "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/findings.deduped.json",
-        "--out-md",
-        "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/findings_report.md"
-      ],
-      "stdout_file": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/orchestration/findings_render.stdout.txt",
-      "stderr_file": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/orchestration/findings_render.stderr.txt"
+      "stdout_file": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/orchestration/tool_runner.stdout.txt",
+      "stderr_file": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/orchestration/tool_runner.stderr.txt"
     }
   ]
 }

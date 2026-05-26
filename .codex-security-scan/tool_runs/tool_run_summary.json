@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-05-26T18:35:52.496964+00:00",
+  "generated_at": "2026-05-26T19:22:24.943930+00:00",
   "root": "/Users/ivan/Code/Mindburn-Labs/.github-repo",
   "out_dir": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/tool_runs",
-  "offline": true,
-  "allow_network": false,
+  "offline": false,
+  "allow_network": true,
   "executed_count": 0,
   "skipped_count": 19,
   "results": [],
@@ -23,7 +23,7 @@
     {
       "name": "semgrep",
       "category": "sast",
-      "reason": "network-backed tool skipped; rerun with --allow-network if approved",
+      "reason": "no matching project files detected",
       "network_required": true
     },
     {
@@ -41,19 +41,19 @@
     {
       "name": "npm-audit",
       "category": "dependency",
-      "reason": "network-backed tool skipped; rerun with --allow-network if approved",
+      "reason": "no matching project files detected",
       "network_required": true
     },
     {
       "name": "pnpm-audit",
       "category": "dependency",
-      "reason": "network-backed tool skipped; rerun with --allow-network if approved",
+      "reason": "no matching project files detected",
       "network_required": true
     },
     {
       "name": "yarn-audit",
       "category": "dependency",
-      "reason": "network-backed tool skipped; rerun with --allow-network if approved",
+      "reason": "no matching project files detected",
       "network_required": true
     },
     {
@@ -65,13 +65,13 @@
     {
       "name": "cargo-audit",
       "category": "rust-dependency",
-      "reason": "network-backed tool skipped; rerun with --allow-network if approved",
+      "reason": "no matching project files detected",
       "network_required": true
     },
     {
       "name": "govulncheck",
       "category": "go-dependency",
-      "reason": "network-backed tool skipped; rerun with --allow-network if approved",
+      "reason": "no matching project files detected",
       "network_required": true
     },
     {
@@ -113,7 +113,7 @@
     {
       "name": "trivy-fs",
       "category": "dependency/container/iac",
-      "reason": "network-backed tool skipped; rerun with --allow-network if approved",
+      "reason": "no matching project files detected",
       "network_required": true
     },
     {

@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-05-26T18:35:52.405862+00:00",
+  "generated_at": "2026-05-26T19:22:24.777763+00:00",
   "source_ranked": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
   "mode": "exhaustive",
   "task_count": 41,
@@ -18,7 +18,7 @@
       "scope": [
         "profile/README.md"
       ],
-      "rank_score": 156.69,
+      "rank_score": 181.09,
       "tags": [
         "entrypoint",
         "authn/session",
@@ -76,7 +76,7 @@
         "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
         "reasons": [
           "entrypoint hint",
-          "security signal density: +129"
+          "security signal density: +152"
         ]
       }
     },
@@ -89,7 +89,7 @@
       "scope": [
         "profile/README.md"
       ],
-      "rank_score": 156.69,
+      "rank_score": 181.09,
       "tags": [
         "entrypoint",
         "authn/session",
@@ -147,7 +147,7 @@
         "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
         "reasons": [
           "entrypoint hint",
-          "security signal density: +129"
+          "security signal density: +152"
         ]
       }
     },
@@ -160,7 +160,7 @@
       "scope": [
         "profile/README.md"
       ],
-      "rank_score": 156.69,
+      "rank_score": 181.09,
       "tags": [
         "entrypoint",
         "authn/session",
@@ -218,7 +218,7 @@
         "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
         "reasons": [
           "entrypoint hint",
-          "security signal density: +129"
+          "security signal density: +152"
         ]
       }
     },
@@ -231,7 +231,7 @@
       "scope": [
         "profile/README.md"
       ],
-      "rank_score": 156.69,
+      "rank_score": 181.09,
       "tags": [
         "entrypoint",
         "authn/session",
@@ -289,7 +289,7 @@
         "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
         "reasons": [
           "entrypoint hint",
-          "security signal density: +129"
+          "security signal density: +152"
         ]
       }
     },
@@ -302,7 +302,7 @@
       "scope": [
         "profile/README.md"
       ],
-      "rank_score": 156.69,
+      "rank_score": 181.09,
       "tags": [
         "entrypoint",
         "authn/session",
@@ -360,7 +360,7 @@
         "ranked_source": "/Users/ivan/Code/Mindburn-Labs/.github-repo/.codex-security-scan/attack_surface_ranked.json",
         "reasons": [
           "entrypoint hint",
-          "security signal density: +129"
+          "security signal density: +152"
         ]
       }
     },

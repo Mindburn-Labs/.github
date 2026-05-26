@@ -178,9 +178,9 @@
       "report": "/Users/ivan/Code/Mindburn-Labs/contracts-schema-catalog/.codex-security-scan/security_scan_report.md"
     },
     {
-      "repo": "docs-platform",
-      "repo_path": "/Users/ivan/Code/Mindburn-Labs/docs-platform",
-      "scan_dir": "/Users/ivan/Code/Mindburn-Labs/docs-platform/.codex-security-scan",
+      "repo": "app-app-docs-platform",
+      "repo_path": "/Users/ivan/Code/Mindburn-Labs/app-app-docs-platform",
+      "scan_dir": "/Users/ivan/Code/Mindburn-Labs/app-app-docs-platform/.codex-security-scan",
       "generated_at": "2026-05-26T18:38:15.769559+00:00",
       "file_count": 712,
       "ranked_file_count": 712,
@@ -190,7 +190,7 @@
       "tool_skipped_count": 18,
       "confirmed_findings": 0,
       "command_failures": [],
-      "report": "/Users/ivan/Code/Mindburn-Labs/docs-platform/.codex-security-scan/security_scan_report.md"
+      "report": "/Users/ivan/Code/Mindburn-Labs/app-app-docs-platform/.codex-security-scan/security_scan_report.md"
     },
     {
       "repo": "gitops-apps",
@@ -268,9 +268,9 @@
       "report": "/Users/ivan/Code/Mindburn-Labs/helm-compiler-lab/.codex-security-scan/security_scan_report.md"
     },
     {
-      "repo": "helm-console",
-      "repo_path": "/Users/ivan/Code/Mindburn-Labs/helm-console",
-      "scan_dir": "/Users/ivan/Code/Mindburn-Labs/helm-console/.codex-security-scan",
+      "repo": "app-helm-console",
+      "repo_path": "/Users/ivan/Code/Mindburn-Labs/app-app-helm-console",
+      "scan_dir": "/Users/ivan/Code/Mindburn-Labs/app-app-helm-console/.codex-security-scan",
       "generated_at": "2026-05-26T18:39:56.163997+00:00",
       "file_count": 108,
       "ranked_file_count": 108,
@@ -280,7 +280,7 @@
       "tool_skipped_count": 19,
       "confirmed_findings": 0,
       "command_failures": [],
-      "report": "/Users/ivan/Code/Mindburn-Labs/helm-console/.codex-security-scan/security_scan_report.md"
+      "report": "/Users/ivan/Code/Mindburn-Labs/app-app-helm-console/.codex-security-scan/security_scan_report.md"
     },
     {
       "repo": "homebrew-tap",
@@ -388,9 +388,9 @@
       "report": "/Users/ivan/Code/Mindburn-Labs/integration-helm/.codex-security-scan/security_scan_report.md"
     },
     {
-      "repo": "integration-mindburn-platform",
-      "repo_path": "/Users/ivan/Code/Mindburn-Labs/integration-mindburn-platform",
-      "scan_dir": "/Users/ivan/Code/Mindburn-Labs/integration-mindburn-platform/.codex-security-scan",
+      "repo": "integration-app-mindburn-web-platform",
+      "repo_path": "/Users/ivan/Code/Mindburn-Labs/integration-app-mindburn-web-platform",
+      "scan_dir": "/Users/ivan/Code/Mindburn-Labs/integration-app-mindburn-web-platform/.codex-security-scan",
       "generated_at": "2026-05-26T18:40:14.506871+00:00",
       "file_count": 25,
       "ranked_file_count": 25,
@@ -400,7 +400,7 @@
       "tool_skipped_count": 18,
       "confirmed_findings": 0,
       "command_failures": [],
-      "report": "/Users/ivan/Code/Mindburn-Labs/integration-mindburn-platform/.codex-security-scan/security_scan_report.md"
+      "report": "/Users/ivan/Code/Mindburn-Labs/integration-app-mindburn-web-platform/.codex-security-scan/security_scan_report.md"
     },
     {
       "repo": "integration-pilot",
@@ -433,9 +433,9 @@
       "report": "/Users/ivan/Code/Mindburn-Labs/integration-titan/.codex-security-scan/security_scan_report.md"
     },
     {
-      "repo": "mindburn",
-      "repo_path": "/Users/ivan/Code/Mindburn-Labs/mindburn",
-      "scan_dir": "/Users/ivan/Code/Mindburn-Labs/mindburn/.codex-security-scan",
+      "repo": "app-mindburn-web",
+      "repo_path": "/Users/ivan/Code/Mindburn-Labs/app-app-mindburn-web-web",
+      "scan_dir": "/Users/ivan/Code/Mindburn-Labs/app-app-mindburn-web-web/.codex-security-scan",
       "generated_at": "2026-05-26T18:40:51.831077+00:00",
       "file_count": 315,
       "ranked_file_count": 315,
@@ -445,12 +445,12 @@
       "tool_skipped_count": 18,
       "confirmed_findings": 0,
       "command_failures": [],
-      "report": "/Users/ivan/Code/Mindburn-Labs/mindburn/.codex-security-scan/security_scan_report.md"
+      "report": "/Users/ivan/Code/Mindburn-Labs/app-app-mindburn-web-web/.codex-security-scan/security_scan_report.md"
     },
     {
-      "repo": "mindburn-admin",
-      "repo_path": "/Users/ivan/Code/Mindburn-Labs/mindburn-admin",
-      "scan_dir": "/Users/ivan/Code/Mindburn-Labs/mindburn-admin/.codex-security-scan",
+      "repo": "app-app-app-mindburn-web-admin",
+      "repo_path": "/Users/ivan/Code/Mindburn-Labs/app-app-app-mindburn-web-admin",
+      "scan_dir": "/Users/ivan/Code/Mindburn-Labs/app-app-app-mindburn-web-admin/.codex-security-scan",
       "generated_at": "2026-05-26T18:41:01.748952+00:00",
       "file_count": 207,
       "ranked_file_count": 207,
@@ -460,7 +460,7 @@
       "tool_skipped_count": 18,
       "confirmed_findings": 0,
       "command_failures": [],
-      "report": "/Users/ivan/Code/Mindburn-Labs/mindburn-admin/.codex-security-scan/security_scan_report.md"
+      "report": "/Users/ivan/Code/Mindburn-Labs/app-app-app-mindburn-web-admin/.codex-security-scan/security_scan_report.md"
     },
     {
       "repo": "ml-orggenome-compiler",
