@@ -19,6 +19,10 @@ We build the middleware between intelligence and execution. AI models are becomi
 
 ### Repositories
 
+Mindburn Labs has approved and locally executed a layered polyrepo topology, but publication and verification are not complete. The current architecture and audit artifacts live under `$MINDBURN_WORKSPACE_ROOT/docs/architecture/`, `$MINDBURN_WORKSPACE_ROOT/docs/migration/`, and `$MINDBURN_WORKSPACE_ROOT/integration-mindburn-platform/`. Ivan's local example is `~/Code/Mindburn-Labs`.
+
+Implementation reality wins: source code, route registries, OpenAPI, generated SDKs, release artifacts, tier config, GitOps manifests, and runtime deployment manifests override narrative docs. Local target repos that are not present in the GitHub organization are blockers, not production-ready repos.
+
 | Repo                                                                      | Visibility | Purpose                                                          |
 | ------------------------------------------------------------------------- | ---------- | ---------------------------------------------------------------- |
 | [`helm-ai-kernel`](https://github.com/Mindburn-Labs/helm-ai-kernel)                    | 🌐 Public  | HELM AI Kernel — Go core, protocols, SDK, documentation          |

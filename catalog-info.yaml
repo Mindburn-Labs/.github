@@ -1,0 +1,9 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: mindburn-github-profile
+  description: GitHub organization profile and repository manifest mirror.
+spec:
+  type: platform
+  lifecycle: production
+  owner: architecture-platform

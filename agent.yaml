@@ -1,0 +1,19 @@
+repo_type: platform
+owners:
+  team: architecture-platform
+commands:
+  setup: make setup
+  test: make test
+  lint: make lint
+  build: make build
+risk:
+  external_writes: false
+  secrets_required: false
+  protected_paths:
+    - profile/**
+    - repo-manifest.yaml
+agent_entrypoints:
+  default_task: make agent-context
+contracts:
+  canonical_architecture: ../docs/architecture/polyrepo-end-state.md
+  canonical_roadmap: ../docs/migration/polyrepo-roadmap.md

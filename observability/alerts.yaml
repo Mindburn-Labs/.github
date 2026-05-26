@@ -1,0 +1,9 @@
+apiVersion: mindburn.org/v1
+kind: ObservabilityCatalog
+metadata:
+  name: mindburn-github-profile
+spec:
+  slo:
+    - name: profile-metadata-valid
+      target: Profile metadata must parse and mirror the canonical architecture docs.
+  alerts: []

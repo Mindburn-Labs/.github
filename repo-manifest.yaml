@@ -1,0 +1,907 @@
+# Mindburn Labs post-migration repository manifest.
+# Source reality captured locally on 2026-05-26.
+# This manifest is inventory and audit evidence. It does not create repos,
+# publish artifacts, or override source code, route registries, OpenAPI,
+# release artifacts, tier config, GitOps manifests, or runtime behavior.
+
+organization: Mindburn-Labs
+schema_version: post-migration-reality-audit-v1
+generated_at: 2026-05-26
+workspace_root_env: MINDBURN_WORKSPACE_ROOT
+local_workspace_example: ~/Code/Mindburn-Labs
+
+source_truth_priority:
+  - actual_repository_contents
+  - build_test_lint_typecheck_results
+  - route_registries_and_openapi
+  - contract_schemas_and_generated_sdks
+  - gitops_manifests_and_oci_digests
+  - integration_release_manifests
+  - runtime_deployment_manifests
+  - canonical_architecture_docs
+  - roadmaps_and_narrative_docs
+
+audit_summary:
+  github_org_repos_observed:
+    - .github
+    - docs-platform
+    - docs_for_team
+    - helm-ai-enterprise
+    - helm-ai-kernel
+    - homebrew-tap
+    - mindburn
+    - mindburn-admin
+    - orggenome-compiler
+    - pilot
+    - titan
+  unpublished_target_repo_count: 55
+  critical_blockers:
+    - unpublished_extracted_repositories
+    - release_manifest_has_no_verified_immutable_oci_digests
+    - gitops_reconciler_and_overlays_not_verified
+    - service_extraction_docs_were_overclaiming_validation
+    - helm_console_tracks_generated_tool_state
+
+repo_defaults: &repo_defaults
+  owner_team: platform-architecture
+  visibility: local_only_unpublished
+  lifecycle_state: active
+  product_association: platform
+  helm_conformance_status: non_helm
+  deployability: none
+  canonical_source_paths: []
+  previous_source_paths: []
+  current_source_truth_docs: []
+  ci_status: not_verified
+  release_status: blocked_missing_github_repo
+  contract_ownership: none
+  data_ownership: none
+  rollback_class: R0
+  security_classification: internal
+  docs_ownership: platform-architecture
+  deprecation_plan: none
+  github_status: missing_from_org
+  local_checkout: present
+
+repositories:
+  - <<: *repo_defaults
+    name: .github
+    current_role: organization profile, workflow defaults, and repo manifest
+    owner_team: platform-sre
+    visibility: public
+    lifecycle_state: active
+    canonical_source_paths: [.github-repo]
+    current_source_truth_docs: [.github-repo/repo-manifest.yaml]
+    ci_status: not_applicable
+    release_status: no_release_artifacts
+    github_status: present_in_org
+
+  - <<: *repo_defaults
+    name: helm-ai-kernel
+    current_role: HELM AI Kernel fail-closed execution kernel
+    owner_team: helm-core
+    visibility: public
+    product_association: HELM
+    helm_conformance_status: normative
+    deployability: service
+    canonical_source_paths: [helm-ai-kernel]
+    current_source_truth_docs: [helm-ai-kernel/README.md, helm-ai-kernel/core]
+    ci_status: not_run_dirty_worktree
+    release_status: active_core_repo
+    contract_ownership: kernel REST/routes/proof semantics
+    data_ownership: local receipts and ProofGraph artifacts
+    rollback_class: R0
+    security_classification: public_critical
+    docs_ownership: helm-core
+    github_status: present_in_org
+
+  - <<: *repo_defaults
+    name: helm-ai-enterprise
+    current_role: HELM AI Enterprise commercial shell with active transition code still present
+    owner_team: helm-enterprise
+    visibility: private
+    lifecycle_state: active_transition_shell
+    product_association: HELM
+    helm_conformance_status: normative
+    deployability: app
+    canonical_source_paths: [helm-ai-enterprise]
+    current_source_truth_docs: [helm-ai-enterprise/README.md, helm-ai-enterprise/apps, helm-ai-enterprise/core]
+    ci_status: not_run_dirty_worktree
+    release_status: active_transition_shell
+    contract_ownership: enterprise API and commercial integration contracts until extraction is verified
+    data_ownership: enterprise tenant and control-plane state until service ownership is proven
+    rollback_class: R1
+    security_classification: confidential_critical
+    docs_ownership: helm-enterprise
+    deprecation_plan: remain active_transition_shell until extracted services build/test and GitOps release evidence pass
+    github_status: present_in_org
+
+  - <<: *repo_defaults
+    name: titan
+    current_role: Titan product shell and trading system source; explicitly non-HELM conformance
+    owner_team: titan
+    visibility: private
+    lifecycle_state: active_transition_shell
+    product_association: Titan
+    helm_conformance_status: non_helm
+    deployability: app
+    canonical_source_paths: [titan]
+    current_source_truth_docs: [titan/README.md, titan/services]
+    ci_status: not_run_dirty_worktree
+    release_status: active_transition_shell
+    contract_ownership: Titan event/API contracts until producer catalogs are verified
+    data_ownership: Titan trading state and evidence records
+    rollback_class: R3
+    security_classification: confidential_high_risk
+    docs_ownership: titan
+    deprecation_plan: cannot be frozen while active code remains in shell
+    github_status: present_in_org
+
+  - <<: *repo_defaults
+    name: pilot
+    current_role: Pilot product core and downstream HELM consumer
+    owner_team: pilot
+    visibility: public
+    lifecycle_state: active
+    product_association: Pilot
+    helm_conformance_status: non_normative_consumer
+    deployability: app
+    canonical_source_paths: [pilot]
+    current_source_truth_docs: [pilot/README.md, pilot/docs]
+    ci_status: not_run_dirty_worktree
+    release_status: active_core_repo
+    contract_ownership: Pilot routes and MCP interfaces
+    data_ownership: Pilot workspace and mission state
+    rollback_class: R1
+    security_classification: internal
+    docs_ownership: pilot
+    github_status: present_in_org
+
+  - <<: *repo_defaults
+    name: orggenome-compiler
+    current_role: OrgGenome Compiler active transition shell, not archived
+    owner_team: orggenome
+    visibility: private
+    lifecycle_state: active_transition_shell
+    product_association: OrgGenome
+    helm_conformance_status: non_normative_consumer
+    deployability: ml
+    canonical_source_paths: [orggenome-compiler]
+    current_source_truth_docs: [orggenome-compiler/README.md, orggenome-compiler/training, orggenome-compiler/serving]
+    ci_status: not_run_dirty_worktree
+    release_status: active_transition_shell
+    contract_ownership: OrgGenome schemas until ml/service extraction is verified
+    data_ownership: training/eval metadata and serving history until migrated
+    rollback_class: R2
+    security_classification: confidential_ml
+    docs_ownership: orggenome
+    deprecation_plan: archive only after ml-orggenome-compiler and svc-orggenome-inference prove full ownership
+    github_status: present_in_org
+
+  - <<: *repo_defaults
+    name: mindburn
+    current_role: Mindburn public website, not HELM source truth
+    owner_team: brand
+    visibility: private
+    lifecycle_state: active
+    product_association: Mindburn
+    deployability: app
+    canonical_source_paths: [mindburn]
+    current_source_truth_docs: [mindburn/README.md]
+    ci_status: not_run_dirty_worktree
+    release_status: active_core_repo
+    docs_ownership: brand
+    github_status: present_in_org
+
+  - <<: *repo_defaults
+    name: mindburn-admin
+    current_role: private company operating system, not HELM source truth
+    owner_team: operations
+    visibility: private
+    lifecycle_state: active
+    product_association: Mindburn
+    deployability: app
+    canonical_source_paths: [mindburn-admin]
+    current_source_truth_docs: [mindburn-admin/README.md]
+    ci_status: not_run_dirty_worktree
+    release_status: active_core_repo
+    security_classification: confidential
+    docs_ownership: operations
+    github_status: present_in_org
+
+  - <<: *repo_defaults
+    name: docs-platform
+    current_role: product documentation renderer/crawler, not product source truth
+    owner_team: docs
+    visibility: private
+    lifecycle_state: active
+    product_association: docs
+    deployability: app
+    canonical_source_paths: [docs-platform]
+    current_source_truth_docs: [docs-platform/README.md]
+    ci_status: not_run_dirty_worktree
+    release_status: active_core_repo
+    docs_ownership: docs
+    github_status: present_in_org
+
+  - <<: *repo_defaults
+    name: homebrew-tap
+    current_role: public distribution tap
+    owner_team: platform-sre
+    visibility: public
+    lifecycle_state: active
+    product_association: platform
+    deployability: library
+    canonical_source_paths: [homebrew-tap]
+    current_source_truth_docs: [homebrew-tap/README.md]
+    release_status: active_core_repo
+    github_status: present_in_org
+
+  - <<: *repo_defaults
+    name: docs_for_team
+    current_role: legacy internal documentation repository
+    owner_team: docs
+    visibility: internal
+    lifecycle_state: frozen
+    product_association: docs
+    canonical_source_paths: []
+    current_source_truth_docs: []
+    release_status: no_release_artifacts
+    github_status: present_in_org
+    local_checkout: absent
+    deprecation_plan: retain only if still referenced by team workflows
+
+  - <<: *repo_defaults
+    name: platform-actions
+    current_role: central reusable GitHub Actions workflows
+    owner_team: platform-sre
+    product_association: platform
+    deployability: infra
+    canonical_source_paths: [platform-actions]
+    previous_source_paths: [helm-ai-enterprise/.github/workflows]
+
+  - <<: *repo_defaults
+    name: platform-templates
+    current_role: golden-path repository templates and scaffolding
+    owner_team: platform-sre
+    product_association: platform
+    deployability: library
+    canonical_source_paths: [platform-templates]
+
+  - <<: *repo_defaults
+    name: platform-policies
+    current_role: security, IAM, and policy baseline
+    owner_team: platform-security
+    product_association: platform
+    deployability: infra
+    canonical_source_paths: [platform-policies]
+    current_source_truth_docs: [platform-policies/security-baseline.md]
+    ci_status: pass_stub_test_weak_2026-05-26
+    security_classification: confidential_critical
+
+  - <<: *repo_defaults
+    name: platform-observability
+    current_role: shared observability configuration and alerts
+    owner_team: platform-sre
+    product_association: platform
+    deployability: infra
+    canonical_source_paths: [platform-observability]
+
+  - <<: *repo_defaults
+    name: platform-terraform-modules
+    current_role: reusable infrastructure modules
+    owner_team: platform-sre
+    product_association: infra
+    deployability: infra
+    canonical_source_paths: [platform-terraform-modules]
+
+  - <<: *repo_defaults
+    name: platform-agent-substrate
+    current_role: agent execution substrate; HELM-governed consumer, not a second HELM
+    owner_team: platform-security
+    product_association: platform
+    deployability: infra
+    canonical_source_paths: [platform-agent-substrate]
+    security_classification: confidential_high_risk
+
+  - <<: *repo_defaults
+    name: platform-agent-capabilities
+    current_role: agent capability registry and reusable skills
+    owner_team: platform-security
+    product_association: platform
+    deployability: library
+    canonical_source_paths: [platform-agent-capabilities]
+
+  - <<: *repo_defaults
+    name: platform-mcp-registry
+    current_role: MCP tool registry and intent scoping metadata
+    owner_team: platform-security
+    product_association: platform
+    deployability: library
+    canonical_source_paths: [platform-mcp-registry]
+
+  - <<: *repo_defaults
+    name: svc-agent-control-plane
+    current_role: agent task routing and policy coordination service
+    owner_team: platform-security
+    product_association: platform
+    deployability: service
+    canonical_source_paths: [svc-agent-control-plane]
+    rollback_class: R1
+    security_classification: confidential_high_risk
+
+  - <<: *repo_defaults
+    name: svc-agent-sandbox-runner
+    current_role: local sandbox runner for agent workspaces
+    owner_team: platform-security
+    product_association: platform
+    deployability: service
+    canonical_source_paths: [svc-agent-sandbox-runner]
+    rollback_class: R1
+    security_classification: confidential_high_risk
+
+  - <<: *repo_defaults
+    name: integration-agent-evals
+    current_role: multi-agent regression and evidence-level evaluations
+    owner_team: platform-security
+    product_association: integration
+    deployability: none
+    canonical_source_paths: [integration-agent-evals]
+
+  - <<: *repo_defaults
+    name: infra-live
+    current_role: live environment configuration
+    owner_team: platform-sre
+    product_association: infra
+    deployability: infra
+    canonical_source_paths: [infra-live]
+    rollback_class: R3
+    security_classification: confidential_critical
+
+  - <<: *repo_defaults
+    name: infra-networking
+    current_role: networking, DNS, CDN, and edge configuration
+    owner_team: platform-sre
+    product_association: infra
+    deployability: infra
+    canonical_source_paths: [infra-networking]
+    rollback_class: R3
+    security_classification: confidential_critical
+
+  - <<: *repo_defaults
+    name: infra-clusters
+    current_role: cluster definitions and environment bootstrap
+    owner_team: platform-sre
+    product_association: infra
+    deployability: infra
+    canonical_source_paths: [infra-clusters]
+    rollback_class: R3
+    security_classification: confidential_critical
+
+  - <<: *repo_defaults
+    name: gitops-apps
+    current_role: application desired-state overlays
+    owner_team: platform-sre
+    product_association: infra
+    deployability: gitops
+    canonical_source_paths: [gitops-apps]
+    ci_status: pass_yaml_only_weak
+    release_status: blocked_no_verified_reconciler_or_digests
+    rollback_class: R1
+    security_classification: confidential_critical
+
+  - <<: *repo_defaults
+    name: gitops-platform
+    current_role: platform controller desired-state overlays
+    owner_team: platform-sre
+    product_association: infra
+    deployability: gitops
+    canonical_source_paths: [gitops-platform]
+    release_status: blocked_no_verified_reconciler_or_digests
+    rollback_class: R1
+    security_classification: confidential_critical
+
+  - <<: *repo_defaults
+    name: contracts-api-catalog
+    current_role: OpenAPI aggregation catalog; not producer source truth
+    owner_team: platform-contracts
+    product_association: integration
+    deployability: library
+    canonical_source_paths: [contracts-api-catalog]
+    ci_status: pass_yaml_only_weak
+    release_status: blocked_missing_ingestion_and_breaking_change_gate
+    contract_ownership: aggregated REST specs only
+
+  - <<: *repo_defaults
+    name: contracts-event-catalog
+    current_role: AsyncAPI and event schema aggregation catalog
+    owner_team: platform-contracts
+    product_association: integration
+    deployability: library
+    canonical_source_paths: [contracts-event-catalog]
+    release_status: blocked_missing_breaking_change_gate
+    contract_ownership: aggregated event specs only
+
+  - <<: *repo_defaults
+    name: contracts-proto
+    current_role: protobuf aggregation catalog and buf mirror target
+    owner_team: platform-contracts
+    product_association: integration
+    deployability: library
+    canonical_source_paths: [contracts-proto]
+    release_status: blocked_no_proto_fixtures_or_buf_gate_observed
+    contract_ownership: aggregated protobuf specs only
+
+  - <<: *repo_defaults
+    name: contracts-schema-catalog
+    current_role: JSON schema aggregation catalog
+    owner_team: platform-contracts
+    product_association: integration
+    deployability: library
+    canonical_source_paths: [contracts-schema-catalog]
+    release_status: active_but_ingestion_not_verified
+    contract_ownership: aggregated schemas only
+
+  - <<: *repo_defaults
+    name: integration-mindburn-platform
+    current_role: integration release manifest and cross-repo evidence ledger
+    owner_team: platform-integration
+    product_association: integration
+    deployability: none
+    canonical_source_paths: [integration-mindburn-platform]
+    current_source_truth_docs: [integration-mindburn-platform/POST_MIGRATION_AUDIT.md, integration-mindburn-platform/manifests/release-candidate.yaml]
+    ci_status: not_verified_after_audit_changes
+    release_status: blocked_no_verified_immutable_digests
+    rollback_class: R0
+
+  - <<: *repo_defaults
+    name: integration-helm
+    current_role: HELM cross-service integration tests
+    owner_team: helm-enterprise
+    product_association: HELM
+    helm_conformance_status: non_normative_consumer
+    canonical_source_paths: [integration-helm]
+
+  - <<: *repo_defaults
+    name: integration-titan
+    current_role: Titan integration tests; not HELM conformance
+    owner_team: titan
+    product_association: Titan
+    helm_conformance_status: non_helm
+    canonical_source_paths: [integration-titan]
+
+  - <<: *repo_defaults
+    name: integration-pilot
+    current_role: Pilot integration tests; downstream HELM consumer only
+    owner_team: pilot
+    product_association: Pilot
+    helm_conformance_status: non_normative_consumer
+    canonical_source_paths: [integration-pilot]
+
+  - <<: *repo_defaults
+    name: integration-ai-flows
+    current_role: cross-product AI flow integration tests
+    owner_team: platform-integration
+    product_association: integration
+    canonical_source_paths: [integration-ai-flows]
+
+  - <<: *repo_defaults
+    name: app-mindburn-web
+    current_role: target name for Mindburn website
+    owner_team: brand
+    lifecycle_state: target_only
+    product_association: Mindburn
+    deployability: app
+    canonical_source_paths: [mindburn]
+    github_status: missing_from_org_target_alias
+    deprecation_plan: current GitHub repo remains mindburn until rename is approved
+
+  - <<: *repo_defaults
+    name: app-mindburn-admin
+    current_role: target name for private admin portal
+    owner_team: operations
+    lifecycle_state: target_only
+    product_association: Mindburn
+    deployability: app
+    canonical_source_paths: [mindburn-admin]
+    github_status: missing_from_org_target_alias
+
+  - <<: *repo_defaults
+    name: app-docs-platform
+    current_role: target name for docs-platform
+    owner_team: docs
+    lifecycle_state: target_only
+    product_association: docs
+    deployability: app
+    canonical_source_paths: [docs-platform]
+    github_status: missing_from_org_target_alias
+
+  - <<: *repo_defaults
+    name: app-helm-console
+    current_role: canonical HELM Console target name; local checkout is helm-console
+    owner_team: helm-console
+    lifecycle_state: broken
+    product_association: HELM
+    helm_conformance_status: non_normative_consumer
+    deployability: app
+    canonical_source_paths: [helm-console]
+    ci_status: bootstrap_pass_test_pass_analyze_fail_2026-05-26
+    release_status: blocked_local_only_and_generated_files_tracked
+    contract_ownership: generated client consumers only
+    rollback_class: R0
+    security_classification: internal
+    docs_ownership: helm-console
+    github_status: missing_from_org
+
+  - <<: *repo_defaults
+    name: app-developer-portal
+    current_role: developer catalog UI
+    owner_team: platform-sre
+    product_association: platform
+    deployability: app
+    canonical_source_paths: [app-developer-portal]
+    github_status: missing_from_org_no_origin
+
+  - <<: *repo_defaults
+    name: app-titan-console
+    current_role: Titan console; non-HELM
+    owner_team: titan
+    product_association: Titan
+    helm_conformance_status: non_helm
+    deployability: app
+    canonical_source_paths: [app-titan-console]
+
+  - <<: *repo_defaults
+    name: app-titan-twa
+    current_role: Titan Telegram/WebApp surface; non-HELM
+    owner_team: titan
+    product_association: Titan
+    helm_conformance_status: non_helm
+    deployability: app
+    canonical_source_paths: [app-titan-twa]
+
+  - <<: *repo_defaults
+    name: app-pilot-web
+    current_role: Pilot web client; downstream HELM consumer
+    owner_team: pilot
+    product_association: Pilot
+    helm_conformance_status: non_normative_consumer
+    deployability: app
+    canonical_source_paths: [app-pilot-web]
+
+  - <<: *repo_defaults
+    name: app-pilot-telegram-bot
+    current_role: Pilot Telegram bot; downstream HELM consumer
+    owner_team: pilot
+    product_association: Pilot
+    helm_conformance_status: non_normative_consumer
+    deployability: app
+    canonical_source_paths: [app-pilot-telegram-bot]
+
+  - <<: *repo_defaults
+    name: app-pilot-telegram-miniapp
+    current_role: Pilot Telegram miniapp; downstream HELM consumer
+    owner_team: pilot
+    product_association: Pilot
+    helm_conformance_status: non_normative_consumer
+    deployability: app
+    canonical_source_paths: [app-pilot-telegram-miniapp]
+
+  - <<: *repo_defaults
+    name: svc-helm-control-plane
+    current_role: HELM Enterprise control-plane service extraction
+    owner_team: helm-enterprise
+    lifecycle_state: broken
+    product_association: HELM
+    helm_conformance_status: normative
+    deployability: service
+    canonical_source_paths: [svc-helm-control-plane]
+    previous_source_paths: [helm-ai-enterprise/apps/controlplane]
+    current_source_truth_docs: [svc-helm-control-plane/docs/rfc/repo-creation.md, svc-helm-control-plane/docs/rfc/extraction.md]
+    ci_status: pass_local_go_test_2026-05-26
+    release_status: blocked_missing_github_repo_and_unverified_gitops_digest
+    contract_ownership: control-plane REST contracts in producer repo; catalog sync not verified
+    data_ownership: control-plane tenant/entitlement data not fully verified
+    rollback_class: R1_unverified
+    security_classification: confidential_critical
+    docs_ownership: helm-enterprise
+    deprecation_plan: old helm-ai-enterprise path cannot be declared retired until source and target gates pass
+
+  - <<: *repo_defaults
+    name: svc-helm-data-plane
+    current_role: HELM data-plane service extraction
+    owner_team: helm-enterprise
+    lifecycle_state: broken
+    product_association: HELM
+    helm_conformance_status: normative
+    deployability: service
+    canonical_source_paths: [svc-helm-data-plane]
+    previous_source_paths: [helm-ai-enterprise/apps/data-plane]
+    ci_status: pass_local_go_test_2026-05-26
+    release_status: blocked_missing_github_repo_and_unverified_gitops_digest
+    contract_ownership: data-plane event/API contracts in producer repo; catalog sync not verified
+    data_ownership: execution/event projection state not fully verified
+    rollback_class: R1_unverified
+    security_classification: confidential_critical
+
+  - <<: *repo_defaults
+    name: svc-helm-certification
+    current_role: HELM connector certification service
+    owner_team: helm-enterprise
+    lifecycle_state: broken
+    product_association: HELM
+    helm_conformance_status: normative
+    deployability: service
+    canonical_source_paths: [svc-helm-certification]
+    ci_status: pass_local_go_test_2026-05-26
+    release_status: blocked_missing_github_repo
+    contract_ownership: certification contracts not verified
+    rollback_class: R1_unverified
+
+  - <<: *repo_defaults
+    name: worker-helm-launch-worker
+    current_role: HELM launch worker
+    owner_team: helm-enterprise
+    lifecycle_state: broken
+    product_association: HELM
+    helm_conformance_status: normative
+    deployability: worker
+    canonical_source_paths: [worker-helm-launch-worker]
+    ci_status: pass_local_go_test_2026-05-26
+    release_status: blocked_missing_github_repo
+    rollback_class: R0
+
+  - <<: *repo_defaults
+    name: svc-high-risk-loop-bridge
+    current_role: high-risk loop isolation bridge
+    owner_team: helm-enterprise
+    lifecycle_state: broken
+    product_association: HELM
+    helm_conformance_status: normative
+    deployability: service
+    canonical_source_paths: [svc-high-risk-loop-bridge]
+    ci_status: pass_local_go_test_2026-05-26
+    release_status: blocked_missing_github_repo
+    rollback_class: R3_unverified
+    security_classification: confidential_high_risk
+
+  - <<: *repo_defaults
+    name: svc-titan-brain
+    current_role: Titan decision service; non-HELM
+    owner_team: titan
+    product_association: Titan
+    helm_conformance_status: non_helm
+    deployability: service
+    canonical_source_paths: [svc-titan-brain]
+    rollback_class: R3_unverified
+
+  - <<: *repo_defaults
+    name: svc-titan-execution
+    current_role: Titan execution service; non-HELM
+    owner_team: titan
+    product_association: Titan
+    helm_conformance_status: non_helm
+    deployability: service
+    canonical_source_paths: [svc-titan-execution]
+    rollback_class: R3_unverified
+    security_classification: confidential_high_risk
+
+  - <<: *repo_defaults
+    name: worker-titan-phase1-scavenger
+    current_role: Titan phase 1 worker; non-HELM
+    owner_team: titan
+    product_association: Titan
+    helm_conformance_status: non_helm
+    deployability: worker
+    canonical_source_paths: [worker-titan-phase1-scavenger]
+
+  - <<: *repo_defaults
+    name: worker-titan-phase2-hunter
+    current_role: Titan phase 2 worker; non-HELM
+    owner_team: titan
+    product_association: Titan
+    helm_conformance_status: non_helm
+    deployability: worker
+    canonical_source_paths: [worker-titan-phase2-hunter]
+
+  - <<: *repo_defaults
+    name: worker-titan-phase3-sentinel
+    current_role: Titan phase 3 worker; non-HELM
+    owner_team: titan
+    product_association: Titan
+    helm_conformance_status: non_helm
+    deployability: worker
+    canonical_source_paths: [worker-titan-phase3-sentinel]
+    rollback_class: R3_unverified
+
+  - <<: *repo_defaults
+    name: svc-titan-public-api
+    current_role: Titan public API; non-HELM
+    owner_team: titan
+    product_association: Titan
+    helm_conformance_status: non_helm
+    deployability: service
+    canonical_source_paths: [svc-titan-public-api]
+
+  - <<: *repo_defaults
+    name: svc-titan-ops-api
+    current_role: Titan operations API; non-HELM
+    owner_team: titan
+    product_association: Titan
+    helm_conformance_status: non_helm
+    deployability: service
+    canonical_source_paths: [svc-titan-ops-api]
+
+  - <<: *repo_defaults
+    name: svc-titan-vault-manager
+    current_role: Titan vault and current signing boundary; non-HELM
+    owner_team: titan
+    product_association: Titan
+    helm_conformance_status: non_helm
+    deployability: service
+    canonical_source_paths: [svc-titan-vault-manager]
+    rollback_class: R4_unverified
+    security_classification: confidential_crypto
+
+  - <<: *repo_defaults
+    name: svc-titan-signing
+    current_role: planned Titan signing service; current boundary remains svc-titan-vault-manager
+    owner_team: titan
+    lifecycle_state: target_only
+    product_association: Titan
+    helm_conformance_status: non_helm
+    deployability: service
+    canonical_source_paths: []
+    local_checkout: absent
+    rollback_class: R4_unverified
+    security_classification: confidential_crypto
+    deprecation_plan: do not claim migrated until a real repo exists and signing boundary is split
+
+  - <<: *repo_defaults
+    name: svc-titan-capital-gateway
+    current_role: Titan capital gateway; non-HELM
+    owner_team: titan
+    product_association: Titan
+    helm_conformance_status: non_helm
+    deployability: service
+    canonical_source_paths: [svc-titan-capital-gateway]
+    rollback_class: R3_unverified
+
+  - <<: *repo_defaults
+    name: svc-titan-proofd
+    current_role: Titan proof daemon; non-HELM
+    owner_team: titan
+    product_association: Titan
+    helm_conformance_status: non_helm
+    deployability: service
+    canonical_source_paths: [svc-titan-proofd]
+    rollback_class: R3_unverified
+
+  - <<: *repo_defaults
+    name: ml-titan-ai-quant
+    current_role: Titan ML/quant evaluation code; non-HELM
+    owner_team: titan
+    product_association: Titan
+    helm_conformance_status: non_helm
+    deployability: ml
+    canonical_source_paths: [ml-titan-ai-quant]
+    rollback_class: R2_unverified
+
+  - <<: *repo_defaults
+    name: ml-orggenome-compiler
+    current_role: OrgGenome training/evaluation extraction
+    owner_team: orggenome
+    product_association: OrgGenome
+    helm_conformance_status: non_normative_consumer
+    deployability: ml
+    canonical_source_paths: [ml-orggenome-compiler]
+    rollback_class: R2_unverified
+
+  - <<: *repo_defaults
+    name: svc-orggenome-inference
+    current_role: OrgGenome serving/inference extraction
+    owner_team: orggenome
+    product_association: OrgGenome
+    helm_conformance_status: non_normative_consumer
+    deployability: service
+    canonical_source_paths: [svc-orggenome-inference]
+    rollback_class: R2_unverified
+
+  - <<: *repo_defaults
+    name: svc-pilot-mcp-server
+    current_role: Pilot MCP server; downstream HELM consumer
+    owner_team: pilot
+    product_association: Pilot
+    helm_conformance_status: non_normative_consumer
+    deployability: service
+    canonical_source_paths: [svc-pilot-mcp-server]
+
+  - <<: *repo_defaults
+    name: pkg-helm-client-go
+    current_role: generated HELM Go client package
+    owner_team: platform-contracts
+    product_association: HELM
+    helm_conformance_status: non_normative_consumer
+    deployability: library
+    canonical_source_paths: [pkg-helm-client-go]
+    release_status: blocked_generated_drift_not_verified
+    contract_ownership: generated output only
+
+  - <<: *repo_defaults
+    name: pkg-helm-client-python
+    current_role: generated HELM Python client package
+    owner_team: platform-contracts
+    product_association: HELM
+    helm_conformance_status: non_normative_consumer
+    deployability: library
+    canonical_source_paths: [pkg-helm-client-python]
+    release_status: blocked_generated_drift_not_verified
+    contract_ownership: generated output only
+
+  - <<: *repo_defaults
+    name: pkg-helm-client-ts
+    current_role: generated HELM TypeScript client package
+    owner_team: platform-contracts
+    product_association: HELM
+    helm_conformance_status: non_normative_consumer
+    deployability: library
+    canonical_source_paths: [pkg-helm-client-ts]
+    release_status: blocked_generated_drift_not_verified
+    contract_ownership: generated output only
+
+  - <<: *repo_defaults
+    name: pkg-titan-shared
+    current_role: generated Titan event/client package; no trading logic
+    owner_team: titan
+    product_association: Titan
+    helm_conformance_status: non_helm
+    deployability: library
+    canonical_source_paths: [pkg-titan-shared]
+    release_status: blocked_generated_drift_not_verified
+    contract_ownership: generated output only
+
+  - <<: *repo_defaults
+    name: helm-console
+    current_role: local checkout backing target app-helm-console
+    owner_team: helm-console
+    lifecycle_state: broken
+    product_association: HELM
+    helm_conformance_status: non_normative_consumer
+    deployability: app
+    canonical_source_paths: [helm-console]
+    ci_status: bootstrap_pass_test_pass_analyze_fail_2026-05-26
+    release_status: blocked_local_only_and_generated_files_tracked
+    github_status: missing_from_org_no_origin
+
+  - <<: *repo_defaults
+    name: helm-compiler-lab
+    current_role: legacy compiler lab sandbox
+    owner_team: helm-core
+    lifecycle_state: deprecated
+    product_association: HELM
+    helm_conformance_status: non_normative_consumer
+    deployability: none
+    canonical_source_paths: [helm-compiler-lab]
+    release_status: no_release_artifacts
+    github_status: external_or_legacy_origin
+    deprecation_plan: retain as historical sandbox only unless promoted by separate RFC
+
+  - <<: *repo_defaults
+    name: orggenome-compiler-wt-coverage-floor
+    current_role: local worktree, excluded from repo topology
+    owner_team: orggenome
+    lifecycle_state: deprecated
+    product_association: OrgGenome
+    canonical_source_paths: []
+    github_status: worktree_not_repo
+    local_checkout: worktree
+
+  - <<: *repo_defaults
+    name: titan-wt-prod-deploy-hardening
+    current_role: local worktree, excluded from repo topology
+    owner_team: titan
+    lifecycle_state: deprecated
+    product_association: Titan
+    canonical_source_paths: []
+    github_status: worktree_not_repo
+    local_checkout: worktree
