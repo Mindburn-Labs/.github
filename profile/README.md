@@ -16,88 +16,88 @@ We build production-grade middleware for deterministic policy verification, high
 
 ---
 
-### 🗺️ Целевая Архитектура Экосистемы (Target Architecture)
+### 🗺️ Target Ecosystem Architecture
 
-Схема целевого состояния взаимодействия репозиториев в формате A4 для печати и быстрого анализа (Фазы 1–5):
+Diagram of the target repository interactions in A4 format for printing and rapid analysis (Phases 1–5):
 
 ```mermaid
 graph TD
-    %% Стили и Цветовая палитра
+    %% Styling and Color Palette
     classDef ui fill:#1e1b4b,stroke:#818cf8,stroke-width:2px,color:#f8fafc;
     classDef contr fill:#2e1509,stroke:#fb923c,stroke-width:2px,color:#f8fafc;
     classDef prod fill:#064e3b,stroke:#059669,stroke-width:2px,color:#f8fafc;
     classDef platform fill:#0f172a,stroke:#64748b,stroke-width:2px,color:#f8fafc;
 
-    %% 1. Слой Интерфейсов
-    subgraph UI_Layer["1. Слой Интерфейсов и Документации (UI & Docs)"]
-        Console["app-helm-console<br>(Единая Flutter-консоль)"]:::ui
-        Portal["app-developer-portal<br>(Портал разработчика)"]:::ui
-        Docs["app-docs-platform<br>(Сайт документации Cloudflare)"]:::ui
+    %% 1. User Interface Layer
+    subgraph UI_Layer["1. User Interfaces & Documentation (UI & Docs)"]
+        Console["app-helm-console<br>(Unified Flutter Console)"]:::ui
+        Portal["app-developer-portal<br>(Developer Portal)"]:::ui
+        Docs["app-docs-platform<br>(Cloudflare Documentation Site)"]:::ui
     end
 
-    %% 2. Слой Контрактов
-    subgraph Contracts_Layer["2. Слой Схем и Контрактов (Contracts)"]
+    %% 2. Schemas & Contracts Layer
+    subgraph Contracts_Layer["2. Schemas & Contracts Layer (Contracts)"]
         Proto["contracts-proto<br>(Buf / Protobuf)"]:::contr
         API_Cat["contracts-api-catalog<br>(OpenAPI REST Specs)"]:::contr
-        Events["contracts-event-catalog<br>(AsyncAPI / События)"]:::contr
-        Schemas["contracts-schema-catalog<br>(Статические схемы)"]:::contr
+        Events["contracts-event-catalog<br>(AsyncAPI / Events)"]:::contr
+        Schemas["contracts-schema-catalog<br>(Static Schemas)"]:::contr
     end
 
-    %% 3. Слой Продуктового Ядра HELM
-    subgraph HELM_Layer["3. Контур Безопасности HELM (AI Security)"]
-        Kernel["helm-ai-kernel<br>(Локальный демон)"]:::prod
-        H_Ctrl["svc-helm-control-plane<br>(Лицензирование и Лимиты)"]:::prod
-        H_Data["svc-helm-data-plane<br>(Ядро выполнения)"]:::prod
-        H_Cert["svc-helm-certification<br>(Аудит и Сертификация)"]:::prod
-        H_Launch["worker-helm-launch-worker<br>(Фоновый воркер)"]:::prod
-        H_Bridge["svc-high-risk-loop-bridge<br>(Безопасный шлюз WebAuthn)"]:::prod
-        HE_Shell["helm-ai-enterprise<br>(Пакетный шелл - только манифесты)"]:::platform
+    %% 3. HELM Core Product Layer
+    subgraph HELM_Layer["3. HELM Security Boundary (AI Security)"]
+        Kernel["helm-ai-kernel<br>(Local Daemon)"]:::prod
+        H_Ctrl["svc-helm-control-plane<br>(Entitlements & Limits)"]:::prod
+        H_Data["svc-helm-data-plane<br>(Execution Core)"]:::prod
+        H_Cert["svc-helm-certification<br>(Audit & Certification)"]:::prod
+        H_Launch["worker-helm-launch-worker<br>(Background Worker)"]:::prod
+        H_Bridge["svc-high-risk-loop-bridge<br>(Secured WebAuthn Gateway)"]:::prod
+        HE_Shell["helm-ai-enterprise<br>(Packaging Shell - Manifests Only)"]:::platform
     end
 
-    %% 4. Торговый контур Titan
-    subgraph Titan_Layer["4. Торговый контур Titan (Trading Engine)"]
-        T_Brain["svc-titan-brain<br>(Мозг принятия решений)"]:::prod
-        T_Exec["svc-titan-execution<br>(Исполнение сделок)"]:::prod
-        T_Vault["svc-titan-vault-manager<br>(Сейф ключей и подпись)"]:::prod
-        T_Gate["svc-titan-capital-gateway<br>(Доступ к ликвидности)"]:::prod
-        T_Proof["svc-titan-proofd<br>(Аудит транзакций)"]:::prod
-        W_Scav["worker-titan-phase1-scavenger<br>(Сбор рыночных данных)"]:::prod
-        W_Hunt["worker-titan-phase2-hunter<br>(Бэктесты и ML-модели)"]:::prod
-        W_Sent["worker-titan-phase3-sentinel<br>(Мониторинг рисков)"]:::prod
-        T_Shell["titan<br>(Документация и Интеграция)"]:::platform
+    %% 4. Titan Trading Core Layer
+    subgraph Titan_Layer["4. Titan Trading Core (Trading Engine)"]
+        T_Brain["svc-titan-brain<br>(Decision Brain)"]:::prod
+        T_Exec["svc-titan-execution<br>(Trade Execution)"]:::prod
+        T_Vault["svc-titan-vault-manager<br>(Vault Manager & Signing)"]:::prod
+        T_Gate["svc-titan-capital-gateway<br>(Liquidity Access Gateway)"]:::prod
+        T_Proof["svc-titan-proofd<br>(Transaction Audit & Proofs)"]:::prod
+        W_Scav["worker-titan-phase1-scavenger<br>(Market Data Scavenger)"]:::prod
+        W_Hunt["worker-titan-phase2-hunter<br>(Backtests & ML Models)"]:::prod
+        W_Sent["worker-titan-phase3-sentinel<br>(Risk Telemetry Sentinel)"]:::prod
+        T_Shell["titan<br>(Documentation & Integration)"]:::platform
     end
 
-    %% 5. Инфраструктурный слой
-    subgraph Infra_Layer["5. Инфраструктура и GitOps (DevOps & Deploy)"]
-        G_Apps["gitops-apps<br>(Argo CD - Состояние приложений)"]:::platform
-        G_Plat["gitops-platform<br>(Argo CD - Базовый движок)"]:::platform
-        I_Live["infra-live<br>(Сетевая топология и линки)"]:::platform
-        P_Act["platform-actions<br>(Базовые CI-пайплайны)"]:::platform
-        P_Pol["platform-policies<br>(OPA / Kyverno / Git-хуки)"]:::platform
+    %% 5. Infrastructure Layer
+    subgraph Infra_Layer["5. Infrastructure & GitOps (DevOps & Deploy)"]
+        G_Apps["gitops-apps<br>(Argo CD - App States)"]:::platform
+        G_Plat["gitops-platform<br>(Argo CD - Base Engine)"]:::platform
+        I_Live["infra-live<br>(Network Topology & Links)"]:::platform
+        P_Act["platform-actions<br>(Base CI Pipelines)"]:::platform
+        P_Pol["platform-policies<br>(OPA / Kyverno / Git Hooks)"]:::platform
     end
 
-    %% Основные Взаимосвязи и Потоки Данных
-    Console -->|Capabilities / Лицензии| H_Ctrl
-    Console -->|Локальный API| Kernel
-    H_Ctrl -->|Авторизация выполнения| H_Data
-    H_Data -->|Запуск задач| H_Launch
-    H_Data -->|Критическая подпись| H_Bridge
-    H_Data -->|Валидация доказательств| H_Cert
+    %% Main Interconnections & Data Flows
+    Console -->|Capabilities / Entitlements| H_Ctrl
+    Console -->|Local API| Kernel
+    H_Ctrl -->|Authorize Execution| H_Data
+    H_Data -->|Launch Tasks| H_Launch
+    H_Data -->|Critical Signing| H_Bridge
+    H_Data -->|Validate Proofs| H_Cert
     
-    W_Scav -->|Рыночные данные| T_Brain
-    T_Brain -->|Ордер на сделку| T_Exec
-    T_Exec -->|Криптографическая подпись| T_Vault
-    T_Exec -->|Выполнение ордера| T_Gate
-    W_Sent -->|Мониторинг параметров риска| T_Exec
-    T_Exec -->|Логирование доказательств| T_Proof
+    W_Scav -->|Market Data| T_Brain
+    T_Brain -->|Trade Order| T_Exec
+    T_Exec -->|Cryptographic Signature| T_Vault
+    T_Exec -->|Order Execution| T_Gate
+    W_Sent -->|Monitor Risk Parameters| T_Exec
+    T_Exec -->|Log Evidence| T_Proof
 
-    Proto -->|Генерация Dart-клиентов| Console
-    API_Cat -->|Генерация Dart-клиентов| Console
+    Proto -->|Dart Codegen| Console
+    API_Cat -->|Dart Codegen| Console
     
-    P_Act -->|Сборка OCI-образов с подписью Cosign| G_Apps
-    G_Apps -->|Синхронизация Argo CD| UI_Layer
-    G_Apps -->|Синхронизация Argo CD| HELM_Layer
-    G_Apps -->|Синхронизация Argo CD| Titan_Layer
+    P_Act -->|Build OCI Images & Cosign Sign| G_Apps
+    G_Apps -->|Argo CD Sync| UI_Layer
+    G_Apps -->|Argo CD Sync| HELM_Layer
+    G_Apps -->|Argo CD Sync| Titan_Layer
 ```
 
 ---
