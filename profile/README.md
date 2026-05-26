@@ -118,16 +118,15 @@ To direct PR reviews, bug reports, and incident alerts, locate the specific resp
 | **6. User Interfaces** | `@Mindburn-Labs/console-frontend-devs` | Flutter Console, Admin Portal | `@peycheff-com` |
 
 
-Mindburn Labs has successfully completed and fully synchronized its layered polyrepo architecture. Every decoupled component is independently versioned, secure, and production-ready, mapped across seven operational layers:
+Mindburn Labs is in the active transition and execution state of its unified polyrepo architecture. Decoupled microservices, libraries, and frontends are being systematically separated from legacy transition shells into dedicated, first-class repositories across several operational layers:
 
-#### 🌐 1. Product Cores & Transition Shells
+#### 🌐 1. Product Cores, Transition Shells & Archives
 *   [`helm-ai-kernel`](https://github.com/Mindburn-Labs/helm-ai-kernel) [🌐 Public] — The open-source Go core, protocols, SDKs, and ProofGraph engine.
-*   [`pilot`](https://github.com/Mindburn-Labs/pilot) [🌐 Public] — Open-source autonomous founder operating system.
+*   [`pilot`](https://github.com/Mindburn-Labs/pilot) [🌐 Public] — Open-source autonomous founder operating system core.
 *   [`homebrew-tap`](https://github.com/Mindburn-Labs/homebrew-tap) [🌐 Public] — Homebrew tap distribution for Mindburn CLI tools.
-*   [`helm-ai-enterprise`](https://github.com/Mindburn-Labs/helm-ai-enterprise) [🔒 Private] — Commercial overlays, certified enterprise connectors, and enclaves.
-*   [`titan`](https://github.com/Mindburn-Labs/titan) [🔒 Private] — Titan Trading Core, bio-mimetic execution engine.
-*   [`orggenome-compiler`](https://github.com/Mindburn-Labs/orggenome-compiler) [🔒 Private] — GPU cluster compilers for organizational multi-agent genomes.
-*   [`mindburn`](https://github.com/Mindburn-Labs/mindburn) [🔒 Private] — Core corporate platform and website.
+*   [`helm-ai-enterprise`](https://github.com/Mindburn-Labs/helm-ai-enterprise) [🔒 Private] — Commercial packaging wrapper holding product specs and Kustomize catalogs.
+*   [`titan`](https://github.com/Mindburn-Labs/titan) [🔒 Private] — Titan Trading Core, documentation and sub-integration shell.
+*   [`orggenome-compiler`](https://github.com/Mindburn-Labs/orggenome-compiler) [🔒 Private] — [ARCHIVED] Historical repository shell retained strictly for audit compliance.
 
 #### ⚙️ 2. PlatformOps & Infrastructure
 *   [`platform-actions`](https://github.com/Mindburn-Labs/platform-actions) — Shared GitHub Actions pipelines and reusable workflow definitions.
@@ -164,16 +163,34 @@ Mindburn Labs has successfully completed and fully synchronized its layered poly
 *   [`svc-helm-data-plane`](https://github.com/Mindburn-Labs/svc-helm-data-plane) — High-throughput ledger, event router, and transactional gateway.
 *   [`svc-helm-certification`](https://github.com/Mindburn-Labs/svc-helm-certification) — Sandbox and MCP tool conformance verifier.
 *   [`worker-helm-launch-worker`](https://github.com/Mindburn-Labs/worker-helm-launch-worker) — Asynchronous worker for long-running sandboxed steps.
-*   [`svc-high-risk-loop-bridge`](https://github.com/Mindburn-Labs/svc-high-risk-loop-bridge) — Compensating ledger bridge for manual operators.
+*   [`svc-high-risk-loop-bridge`](https://github.com/Mindburn-Labs/svc-high-risk-loop-bridge) — Secured WebAuthn loop bridge.
 *   [`svc-titan-brain`](https://github.com/Mindburn-Labs/svc-titan-brain) — Cognitive model coordinator and portfolio strategy selector.
 *   [`svc-titan-execution`](https://github.com/Mindburn-Labs/svc-titan-execution) — Low-latency orders executor and position risk arbiter.
-*   [`worker-titan-phase1-scavenger`](https://github.com/Mindburn-Labs/worker-titan-phase1-scavenger) — Phase 1 scavenger and scrap pipeline.
-*   ... _and other decoupled microservices for Titan and Pilot operations._
+*   [`worker-titan-phase1-scavenger`](https://github.com/Mindburn-Labs/worker-titan-phase1-scavenger) — Real-time venue ticker data scavenger daemon.
+*   [`worker-titan-phase2-hunter`](https://github.com/Mindburn-Labs/worker-titan-phase2-hunter) — Backtesting and predictive signal algorithm hunter daemon.
+*   [`worker-titan-phase3-sentinel`](https://github.com/Mindburn-Labs/worker-titan-phase3-sentinel) — Operational circuit breaker and risk telemetry sentinel daemon.
+*   [`svc-titan-public-api`](https://github.com/Mindburn-Labs/svc-titan-public-api) — Public endpoints displaying performance metrics.
+*   [`svc-titan-ops-api`](https://github.com/Mindburn-Labs/svc-titan-ops-api) — Back-office API handling config overrides and manual circuit breakers.
+*   [`svc-titan-vault-manager`](https://github.com/Mindburn-Labs/svc-titan-vault-manager) — Wallet custody interface coordinating HSM signing loops.
+*   [`svc-titan-signing`](https://github.com/Mindburn-Labs/svc-titan-signing) — HSM signing engine and proof verifying broker [TARGET].
+*   [`svc-titan-capital-gateway`](https://github.com/Mindburn-Labs/svc-titan-capital-gateway) — Low-latency ledger coordinator managing bank liquidity links.
+*   [`svc-titan-proofd`](https://github.com/Mindburn-Labs/svc-titan-proofd) — Forensic trading proof and evidence compiler daemon.
+*   [`ml-titan-ai-quant`](https://github.com/Mindburn-Labs/ml-titan-ai-quant) — Python trading predictive loops and simulation models.
+*   [`ml-orggenome-compiler`](https://github.com/Mindburn-Labs/ml-orggenome-compiler) — GPU compilation loops and training pipelines.
+*   [`svc-orggenome-inference`](https://github.com/Mindburn-Labs/svc-orggenome-inference) — Serving containers on top of vLLM runtimes.
+*   [`svc-pilot-mcp-server`](https://github.com/Mindburn-Labs/svc-pilot-mcp-server) — Secured Model Context Protocol server exposing Pilot OS capabilities.
 
-#### 💻 6. Frontends & Portals
+#### 💻 6. Frontends, Portals & Aggregators
 *   [`app-docs-platform`](https://github.com/Mindburn-Labs/app-docs-platform) — Central documentation crawler and validation platform.
 *   [`app-developer-portal`](https://github.com/Mindburn-Labs/app-developer-portal) — Backstage developer portal mapping ownership, contracts, and OCI logs.
 *   [`app-mindburn-admin`](https://github.com/Mindburn-Labs/app-mindburn-admin) — Operating dashboard and ground truth visual ledger.
+*   [`app-mindburn-web`](https://github.com/Mindburn-Labs/app-mindburn-web) — Astro-based public website for Mindburn Labs.
+*   [`app-helm-console`](https://github.com/Mindburn-Labs/app-helm-console) — Flutter-based interactive client console.
+*   [`app-titan-console`](https://github.com/Mindburn-Labs/app-titan-console) — UI console displaying algorithmic statistics and risk states.
+*   [`app-titan-twa`](https://github.com/Mindburn-Labs/app-titan-twa) — Telegram MiniApp execution client for Titan operations.
+*   [`app-pilot-web`](https://github.com/Mindburn-Labs/app-pilot-web) — Web workspace UI for orchestrating downstream task flows.
+*   [`app-pilot-telegram-bot`](https://github.com/Mindburn-Labs/app-pilot-telegram-bot) — Telegram messaging gateway bot daemon.
+*   [`app-pilot-telegram-miniapp`](https://github.com/Mindburn-Labs/app-pilot-telegram-miniapp) — Telegram MiniApp dashboard for mobile task execution tracking.
 
 ---
 
