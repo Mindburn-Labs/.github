@@ -19,6 +19,20 @@ We build the middleware between intelligence and execution. AI models are commod
 
 ### SOTA Polyrepo Ecosystem
 
+### 👥 Team Ownership & CODEOWNERS Directory
+
+To direct PR reviews, bug reports, and incident alerts, locate the specific responsible team using the matrix below:
+
+| Operational Layer | Responsible GitHub Team | Primary Area | Lead CODEOWNER |
+| :--- | :--- | :--- | :--- |
+| **1. Product Cores** | `@Mindburn-Labs/helm-core-engineers` | HELM Kernel, ProofGraph | `@peycheff-com` |
+| **2. PlatformOps & Infra** | `@Mindburn-Labs/platformops-leads` | CI, GitOps, Terraform, K8s | `@eipp` |
+| **3. Agent Substrates** | `@Mindburn-Labs/agent-engineers` | Sandbox, Control Plane, MCP | `@mindburnlabs` |
+| **4. Contracts & SDKs** | `@Mindburn-Labs/interface-managers` | OpenAPI, AsyncAPI, SDK codegen | `@peycheff-com` |
+| **5. Decoupled Services** | `@Mindburn-Labs/services-developers` | State services, workers, NATS | `@mindburnlabs` |
+| **6. User Interfaces** | `@Mindburn-Labs/console-frontend-devs` | Flutter Console, Admin Portal | `@peycheff-com` |
+
+
 Mindburn Labs has successfully completed and fully synchronized its layered polyrepo architecture. Every decoupled component is independently versioned, secure, and production-ready, mapped across seven operational layers:
 
 #### 🌐 1. Product Cores & Transition Shells
