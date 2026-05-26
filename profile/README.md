@@ -16,6 +16,92 @@ We build production-grade middleware for deterministic policy verification, high
 
 ---
 
+### 🗺️ Целевая Архитектура Экосистемы (Target Architecture)
+
+Схема целевого состояния взаимодействия репозиториев в формате A4 для печати и быстрого анализа (Фазы 1–5):
+
+```mermaid
+graph TD
+    %% Стили и Цветовая палитра
+    classDef ui fill:#1e1b4b,stroke:#818cf8,stroke-width:2px,color:#f8fafc;
+    classDef contr fill:#2e1509,stroke:#fb923c,stroke-width:2px,color:#f8fafc;
+    classDef prod fill:#064e3b,stroke:#059669,stroke-width:2px,color:#f8fafc;
+    classDef platform fill:#0f172a,stroke:#64748b,stroke-width:2px,color:#f8fafc;
+
+    %% 1. Слой Интерфейсов
+    subgraph UI_Layer["1. Слой Интерфейсов и Документации (UI & Docs)"]
+        Console["app-helm-console<br>(Единая Flutter-консоль)"]:::ui
+        Portal["app-developer-portal<br>(Портал разработчика)"]:::ui
+        Docs["app-docs-platform<br>(Сайт документации Cloudflare)"]:::ui
+    end
+
+    %% 2. Слой Контрактов
+    subgraph Contracts_Layer["2. Слой Схем и Контрактов (Contracts)"]
+        Proto["contracts-proto<br>(Buf / Protobuf)"]:::contr
+        API_Cat["contracts-api-catalog<br>(OpenAPI REST Specs)"]:::contr
+        Events["contracts-event-catalog<br>(AsyncAPI / События)"]:::contr
+        Schemas["contracts-schema-catalog<br>(Статические схемы)"]:::contr
+    end
+
+    %% 3. Слой Продуктового Ядра HELM
+    subgraph HELM_Layer["3. Контур Безопасности HELM (AI Security)"]
+        Kernel["helm-ai-kernel<br>(Локальный демон)"]:::prod
+        H_Ctrl["svc-helm-control-plane<br>(Лицензирование и Лимиты)"]:::prod
+        H_Data["svc-helm-data-plane<br>(Ядро выполнения)"]:::prod
+        H_Cert["svc-helm-certification<br>(Аудит и Сертификация)"]:::prod
+        H_Launch["worker-helm-launch-worker<br>(Фоновый воркер)"]:::prod
+        H_Bridge["svc-high-risk-loop-bridge<br>(Безопасный шлюз WebAuthn)"]:::prod
+        HE_Shell["helm-ai-enterprise<br>(Пакетный шелл - только манифесты)"]:::platform
+    end
+
+    %% 4. Торговый контур Titan
+    subgraph Titan_Layer["4. Торговый контур Titan (Trading Engine)"]
+        T_Brain["svc-titan-brain<br>(Мозг принятия решений)"]:::prod
+        T_Exec["svc-titan-execution<br>(Исполнение сделок)"]:::prod
+        T_Vault["svc-titan-vault-manager<br>(Сейф ключей и подпись)"]:::prod
+        T_Gate["svc-titan-capital-gateway<br>(Доступ к ликвидности)"]:::prod
+        T_Proof["svc-titan-proofd<br>(Аудит транзакций)"]:::prod
+        W_Scav["worker-titan-phase1-scavenger<br>(Сбор рыночных данных)"]:::prod
+        W_Hunt["worker-titan-phase2-hunter<br>(Бэктесты и ML-модели)"]:::prod
+        W_Sent["worker-titan-phase3-sentinel<br>(Мониторинг рисков)"]:::prod
+        T_Shell["titan<br>(Документация и Интеграция)"]:::platform
+    end
+
+    %% 5. Инфраструктурный слой
+    subgraph Infra_Layer["5. Инфраструктура и GitOps (DevOps & Deploy)"]
+        G_Apps["gitops-apps<br>(Argo CD - Состояние приложений)"]:::platform
+        G_Plat["gitops-platform<br>(Argo CD - Базовый движок)"]:::platform
+        I_Live["infra-live<br>(Сетевая топология и линки)"]:::platform
+        P_Act["platform-actions<br>(Базовые CI-пайплайны)"]:::platform
+        P_Pol["platform-policies<br>(OPA / Kyverno / Git-хуки)"]:::platform
+    end
+
+    %% Основные Взаимосвязи и Потоки Данных
+    Console -->|Capabilities / Лицензии| H_Ctrl
+    Console -->|Локальный API| Kernel
+    H_Ctrl -->|Авторизация выполнения| H_Data
+    H_Data -->|Запуск задач| H_Launch
+    H_Data -->|Критическая подпись| H_Bridge
+    H_Data -->|Валидация доказательств| H_Cert
+    
+    W_Scav -->|Рыночные данные| T_Brain
+    T_Brain -->|Ордер на сделку| T_Exec
+    T_Exec -->|Криптографическая подпись| T_Vault
+    T_Exec -->|Выполнение ордера| T_Gate
+    W_Sent -->|Мониторинг параметров риска| T_Exec
+    T_Exec -->|Логирование доказательств| T_Proof
+
+    Proto -->|Генерация Dart-клиентов| Console
+    API_Cat -->|Генерация Dart-клиентов| Console
+    
+    P_Act -->|Сборка OCI-образов с подписью Cosign| G_Apps
+    G_Apps -->|Синхронизация Argo CD| UI_Layer
+    G_Apps -->|Синхронизация Argo CD| HELM_Layer
+    G_Apps -->|Синхронизация Argo CD| Titan_Layer
+```
+
+---
+
 ### Polyrepo Ecosystem
 
 ### 👥 Team Ownership & CODEOWNERS Directory
