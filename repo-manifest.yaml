@@ -24,13 +24,13 @@ source_truth_priority:
 audit_summary:
   github_org_repos_observed:
     - .github
-    - app-app-docs-platform
+    - app-docs-platform
     - docs_for_team
     - helm-ai-enterprise
     - helm-ai-kernel
     - homebrew-tap
     - app-mindburn-web
-    - app-app-app-mindburn-web-admin
+    - app-mindburn-admin
     - orggenome-compiler
     - pilot
     - titan
@@ -194,15 +194,15 @@ repositories:
     github_status: present_in_org
 
   - <<: *repo_defaults
-    name: app-app-app-mindburn-web-admin
+    name: app-mindburn-admin
     current_role: private company operating system, not HELM source truth
     owner_team: operations
     visibility: private
     lifecycle_state: active
     product_association: Mindburn
     deployability: app
-    canonical_source_paths: [app-app-app-mindburn-web-admin]
-    current_source_truth_docs: [app-app-app-mindburn-web-admin/README.md]
+    canonical_source_paths: [app-mindburn-admin]
+    current_source_truth_docs: [app-mindburn-admin/README.md]
     ci_status: not_run_dirty_worktree
     release_status: active_core_repo
     security_classification: confidential
@@ -210,15 +210,15 @@ repositories:
     github_status: present_in_org
 
   - <<: *repo_defaults
-    name: app-app-docs-platform
+    name: app-docs-platform
     current_role: product documentation renderer/crawler, not product source truth
     owner_team: docs
     visibility: private
     lifecycle_state: active
     product_association: docs
     deployability: app
-    canonical_source_paths: [app-app-docs-platform]
-    current_source_truth_docs: [app-app-docs-platform/README.md]
+    canonical_source_paths: [app-docs-platform]
+    current_source_truth_docs: [app-docs-platform/README.md]
     ci_status: not_run_dirty_worktree
     release_status: active_core_repo
     docs_ownership: docs
@@ -486,41 +486,41 @@ repositories:
     canonical_source_paths: [integration-ai-flows]
 
   - <<: *repo_defaults
-    name: app-app-mindburn-web-web
+    name: app-mindburn-web
     current_role: target name for Mindburn website
     owner_team: brand
     lifecycle_state: target_only
     product_association: Mindburn
     deployability: app
     canonical_source_paths: [app-mindburn-web]
-    github_status: missing_from_org_target_alias
-    deprecation_plan: current GitHub repo remains app-mindburn-web until rename is approved
+    github_status: present_in_org
+    deprecation_plan: current GitHub repo is app-mindburn-web
 
   - <<: *repo_defaults
-    name: app-app-app-mindburn-web-admin
+    name: app-mindburn-admin
     current_role: target name for private admin portal
     owner_team: operations
     lifecycle_state: target_only
     product_association: Mindburn
     deployability: app
-    canonical_source_paths: [app-app-app-mindburn-web-admin]
-    github_status: missing_from_org_target_alias
+    canonical_source_paths: [app-mindburn-admin]
+    github_status: present_in_org
 
   - <<: *repo_defaults
-    name: app-app-docs-platform
-    current_role: target name for app-app-docs-platform
+    name: app-docs-platform
+    current_role: target name for app-docs-platform
     owner_team: docs
     lifecycle_state: target_only
     product_association: docs
     deployability: app
-    canonical_source_paths: [app-app-docs-platform]
-    github_status: missing_from_org_target_alias
+    canonical_source_paths: [app-docs-platform]
+    github_status: present_in_org
 
   - <<: *repo_defaults
-    name: app-app-helm-console
+    name: app-helm-console
     current_role: canonical HELM Console target name; local checkout is app-helm-console
     owner_team: app-helm-console
-    lifecycle_state: broken
+    lifecycle_state: active
     product_association: HELM
     helm_conformance_status: non_normative_consumer
     deployability: app
@@ -862,16 +862,16 @@ repositories:
 
   - <<: *repo_defaults
     name: app-helm-console
-    current_role: local checkout backing target app-app-helm-console
+    current_role: local checkout backing target app-helm-console
     owner_team: app-helm-console
-    lifecycle_state: broken
+    lifecycle_state: active
     product_association: HELM
     helm_conformance_status: non_normative_consumer
     deployability: app
     canonical_source_paths: [app-helm-console]
     ci_status: bootstrap_pass_test_pass_analyze_fail_2026-05-26
-    release_status: blocked_local_only_and_generated_files_tracked
-    github_status: missing_from_org_no_origin
+    release_status: active_core_repo
+    github_status: present_in_org
 
   - <<: *repo_defaults
     name: helm-compiler-lab
