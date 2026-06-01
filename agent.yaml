@@ -15,5 +15,6 @@ risk:
 agent_entrypoints:
   default_task: make agent-context
 contracts:
-  canonical_architecture: ../docs/architecture/polyrepo-end-state.md
-  canonical_roadmap: ../docs/migration/polyrepo-roadmap.md
+  canonical_architecture: ../docs/architecture/repo-topology.md
+  canonical_source_truth: ../docs/architecture/source-truth.md
+  production_state: ../docs/architecture/production-state.md
