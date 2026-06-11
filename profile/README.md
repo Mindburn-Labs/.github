@@ -1,45 +1,47 @@
 # Mindburn Labs, Inc.
 
-**infrastructure for deterministic software execution.**
+**Models propose. HELM governs execution.**
+
+We build HELM, the fail-closed execution authority for AI agents: every consequential agent action passes a policy boundary, returns an ALLOW / DENY / ESCALATE verdict, and leaves a signed, offline-verifiable receipt.
+
+**No receipt, no production.**
 
 ---
 
 ### What We Build
 
-We build production-grade middleware for deterministic policy verification, high-integrity transaction execution, and strict cryptographic audit logging.
-
-| Core Engine | Description | Primary Stack | Repository |
+| Product | Description | Stack | Links |
 | :--- | :--- | :--- | :--- |
-| **HELM** | The deterministic execution layer for the agent economy. Fail-closed policy enforcement, cryptographic receipts, replayable proofs. | Go · WASI · Ed25519 | [🌐 helm-ai-kernel](https://github.com/Mindburn-Labs/helm-ai-kernel) |
-| **Pilot** | The open-source autonomous founder operating system core for workflow orchestration and capabilities execution. | Python · TypeScript | [🌐 pilot](https://github.com/Mindburn-Labs/pilot) |
+| **HELM AI Kernel** | Public, self-hostable execution boundary for AI agents. Fail-closed policy enforcement, MCP server quarantine, signed receipts, replayable EvidencePacks. Apache-2.0. | Go · WASM (wazero) · Ed25519 | [Repo](https://github.com/Mindburn-Labs/helm-ai-kernel) · [Docs](https://helm.docs.mindburn.org/helm-ai-kernel) |
+| **HELM AI Company OS** | Reviewed-access operating layer for governed company work around the same Kernel boundary. | Go · TypeScript | [Overview](https://mindburn.org/helm/company-ai-os/) |
+| **Pilot** | Open-source autonomous founder operating system core, run behind the HELM trust boundary. | TypeScript · Python | [Repo](https://github.com/Mindburn-Labs/pilot) |
+
+Company site: [mindburn.org](https://mindburn.org/) · Documentation: [helm.docs.mindburn.org](https://helm.docs.mindburn.org/) · Integration examples: [helm-agent-integrations](https://github.com/Mindburn-Labs/helm-agent-integrations)
 
 ---
 
-### Core Architecture Principles
+### How HELM Works
 
-To enable absolute sovereignty and deterministic execution, our software engineering processes strictly adhere to three architectural pillars:
+```text
+proposal → HELM boundary → ALLOW / DENY / ESCALATE → signed receipt → verification
+```
 
-1.  **Decoupled & Contract-First Interface Design**
-    All system boundaries are governed by explicit, backward-compatible API definitions. Communication is strictly structured through statically validated REST (OpenAPI), Event-Driven (AsyncAPI NATS), and Protobuf (Buf Connect) schemas.
-    
-2.  **Fail-Closed Policy Enforcement**
-    Security is not advisory; it is compile-time and runtime-enforced. Inter-process communication and task execution route through sandboxed enclaves (WASI runtimes) with strict execution boundaries and real-time cryptographic audit logging.
-    
-3.  **Stateless Determinism & Replayability**
-    Computations must yield mathematically identical outcomes regardless of the environment. Every execution step is verified, signed, and packaged into tamper-proof proof graphs for historical audit compliance.
+1. **Fail-closed by default.** Unknown or unapproved actions are denied. Unknown MCP servers stay quarantined until a human approves them.
+2. **Deterministic evidence.** Receipts and EvidencePacks are canonicalized with JCS (RFC 8785) + SHA-256 and signed with Ed25519, so anyone can verify them offline. Evidence is tamper-evident and replayable.
+3. **Contract-first boundaries.** Public surfaces are governed by versioned schemas (OpenAPI, Protobuf, JSON Schema); changes are checked for backward compatibility.
 
----
-
-### Zero-Trust Secure SDLC
-
-All organization repositories operate under a **zero-trust security architecture**:
-*   **OIDC Token Federation**: Direct, passwordless OpenID Connect federation is used for container publishing and cloud deployments.
-*   **Zero Static Keys**: Storing long-lived cloud credentials or environment tokens in repository variables is **strictly forbidden**. All secrets route dynamically through secure cloud brokers.
-*   **Vulnerability Gates**: Continuous automated dependency updates (Dependabot/Renovate) and automatic Push Protection are enabled across all repositories.
+Orchestration decides what to attempt; HELM decides what may execute.
 
 ---
 
-### Collaboration & Support
+### Security Posture
 
-*   **Contributing**: We welcome developers and researchers to contribute to our open-source repositories (`helm-ai-kernel` and `pilot`). Please refer to each repository's local `CONTRIBUTING.md` for specific onboarding and licensing details.
-*   **Security Disclosures**: Please report potential security vulnerabilities to our engineering team following the instructions in [SECURITY.md](https://github.com/Mindburn-Labs/.github/blob/main/SECURITY.md).
+*   **OIDC token federation** for container publishing and cloud deployments; long-lived static credentials in repository variables are forbidden.
+*   **Automated dependency and vulnerability gates** (Renovate, push protection, CodeQL) across organization repositories.
+*   **Security disclosures**: see [SECURITY.md](https://github.com/Mindburn-Labs/.github/blob/main/SECURITY.md) or the live policy at [mindburn.org/security](https://mindburn.org/security/).
+
+---
+
+### Collaboration
+
+Contributions to the open-source repositories (`helm-ai-kernel`, `helm-agent-integrations`, `pilot`) are welcome — see each repository's `CONTRIBUTING.md`. For HELM evaluation or reviewed access, use [mindburn.org/contact](https://mindburn.org/contact/).
