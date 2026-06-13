@@ -13,6 +13,7 @@ lint:
 	@test -f profile/README.md
 	@test -f AGENTS.md
 	@test -f SECURITY.md
+	@test -f docs/radar/ai-security-competitor-watchlist.md
 
 build: lint
 
