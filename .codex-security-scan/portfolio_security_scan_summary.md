@@ -30,7 +30,6 @@ Generated: `2026-05-26T18:45:45.772659+00:00`
 | svc-helm-control-plane        | 246   | 806   | 754   | 1     | /Users/ivan/Code/Mindburn-Labs/svc-helm-control-plane/.codex-security-scan/security_scan_report.md        |
 | svc-titan-brain               | 681   | 1500  | 738   | 1     | /Users/ivan/Code/Mindburn-Labs/svc-titan-brain/.codex-security-scan/security_scan_report.md               |
 | pilot                         | 655   | 1500  | 716   | 2     | /Users/ivan/Code/Mindburn-Labs/pilot/.codex-security-scan/security_scan_report.md                         |
-| app-mindburn-admin                | 207   | 689   | 521   | 1     | /Users/ivan/Code/Mindburn-Labs/app-mindburn-admin/.codex-security-scan/security_scan_report.md                |
 | orggenome-compiler            | 210   | 558   | 429   | 2     | /Users/ivan/Code/Mindburn-Labs/orggenome-compiler/.codex-security-scan/security_scan_report.md            |
 | app-mindburn-web                      | 315   | 887   | 424   | 1     | /Users/ivan/Code/Mindburn-Labs/app-mindburn-web/.codex-security-scan/security_scan_report.md                      |
 | ml-titan-ai-quant             | 172   | 449   | 372   | 1     | /Users/ivan/Code/Mindburn-Labs/ml-titan-ai-quant/.codex-security-scan/security_scan_report.md             |
