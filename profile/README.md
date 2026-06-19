@@ -14,7 +14,6 @@ We build HELM, the fail-closed execution authority for AI agents: every conseque
 | :--- | :--- | :--- | :--- |
 | **HELM AI Kernel** | Public, self-hostable execution boundary for AI agents. Fail-closed policy enforcement, MCP server quarantine, signed receipts, replayable EvidencePacks. Apache-2.0. | Go · WASM (wazero) · Ed25519 | [Repo](https://github.com/Mindburn-Labs/helm-ai-kernel) · [Docs](https://helm.docs.mindburn.org/helm-ai-kernel) |
 | **HELM AI Company OS** | Reviewed-access operating layer for governed company work around the same Kernel boundary. | Go · TypeScript | [Overview](https://mindburn.org/helm/company-ai-os/) |
-| **Pilot** | Open-source autonomous founder operating system core, run behind the HELM trust boundary. | TypeScript · Python | [Repo](https://github.com/Mindburn-Labs/pilot) |
 
 Company site: [mindburn.org](https://mindburn.org/) · Documentation: [helm.docs.mindburn.org](https://helm.docs.mindburn.org/) · Integration examples: [helm-agent-integrations](https://github.com/Mindburn-Labs/helm-agent-integrations)
 
@@ -44,4 +43,4 @@ Orchestration decides what to attempt; HELM decides what may execute.
 
 ### Collaboration
 
-Contributions to the open-source repositories (`helm-ai-kernel`, `helm-agent-integrations`, `pilot`) are welcome — see each repository's `CONTRIBUTING.md`. For HELM evaluation or reviewed access, use [mindburn.org/contact](https://mindburn.org/contact/).
+Contributions to the open-source repositories (`helm-ai-kernel`, `helm-agent-integrations`) are welcome — see each repository's `CONTRIBUTING.md`. For HELM evaluation or reviewed access, use [mindburn.org/contact](https://mindburn.org/contact/).
