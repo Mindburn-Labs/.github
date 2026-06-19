@@ -54,10 +54,6 @@ repositories:
     visibility: private
     archived: false
     updated_at: "2026-06-12T18:12:02Z"
-  - name: app-mindburn-admin
-    visibility: private
-    archived: false
-    updated_at: "2026-06-11T10:19:18Z"
   - name: app-mindburn-web
     visibility: private
     archived: false
