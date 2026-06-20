@@ -13,18 +13,17 @@ source_truth_priority:
   - org_inventory
 
 inventory_summary:
-  total_repositories: 65
-  active_repositories: 64
-  archived_repositories:
-    - orggenome-compiler
+  total_repositories: 43
+  active_repositories: 43
+  archived_repositories: []
   public_repositories:
     - .github
     - helm-agent-integrations
     - helm-ai-kernel
     - homebrew-tap
-    - pilot
   internal_repositories:
     - docs_for_team
+    - mindburn-infra
   production_release_status: not_released
   production_release_source: integration-mindburn-platform/manifests/release-candidate.yaml
   production_release_evidence: integration-mindburn-platform/manifests/final-state-evidence.yaml
@@ -58,26 +57,6 @@ repositories:
     visibility: private
     archived: false
     updated_at: "2026-06-13T12:45:35Z"
-  - name: app-pilot-telegram-bot
-    visibility: private
-    archived: false
-    updated_at: "2026-05-27T14:50:16Z"
-  - name: app-pilot-telegram-miniapp
-    visibility: private
-    archived: false
-    updated_at: "2026-05-26T20:28:56Z"
-  - name: app-pilot-web
-    visibility: private
-    archived: false
-    updated_at: "2026-05-26T20:28:59Z"
-  - name: app-titan-console
-    visibility: private
-    archived: false
-    updated_at: "2026-05-26T20:29:00Z"
-  - name: app-titan-twa
-    visibility: private
-    archived: false
-    updated_at: "2026-05-26T20:29:01Z"
   - name: contracts-catalog
     visibility: private
     archived: false
@@ -90,6 +69,10 @@ repositories:
     visibility: internal
     archived: false
     updated_at: "2026-06-13T11:31:25Z"
+  - name: dev-orchestration
+    visibility: private
+    archived: false
+    updated_at: "2026-06-18T01:10:02Z"
   - name: gitops-apps
     visibility: private
     archived: false
@@ -150,34 +133,14 @@ repositories:
     visibility: private
     archived: false
     updated_at: "2026-06-13T11:34:02Z"
-  - name: integration-pilot
-    visibility: private
+  - name: mindburn-infra
+    visibility: internal
     archived: false
-    updated_at: "2026-05-31T18:13:43Z"
-  - name: integration-titan
-    visibility: private
-    archived: false
-    updated_at: "2026-05-31T18:13:41Z"
+    updated_at: "2026-06-19T21:35:46Z"
   - name: ml-orggenome-compiler
     visibility: private
     archived: false
     updated_at: "2026-06-10T20:41:02Z"
-  - name: ml-titan-ai-quant
-    visibility: private
-    archived: false
-    updated_at: "2026-05-26T20:29:53Z"
-  - name: orggenome-compiler
-    visibility: private
-    archived: true
-    updated_at: "2026-06-10T15:39:07Z"
-  - name: pilot
-    visibility: public
-    archived: false
-    updated_at: "2026-06-03T13:54:17Z"
-  - name: pkg-titan-shared
-    visibility: private
-    archived: false
-    updated_at: "2026-05-26T20:30:01Z"
   - name: platform-actions
     visibility: private
     archived: false
@@ -190,6 +153,10 @@ repositories:
     visibility: private
     archived: false
     updated_at: "2026-05-31T18:13:18Z"
+  - name: platform-design-system
+    visibility: private
+    archived: false
+    updated_at: "2026-06-18T20:39:53Z"
   - name: platform-mcp-registry
     visibility: private
     archived: false
@@ -238,59 +205,7 @@ repositories:
     visibility: private
     archived: false
     updated_at: "2026-05-26T20:30:29Z"
-  - name: svc-pilot-mcp-server
-    visibility: private
-    archived: false
-    updated_at: "2026-06-04T18:41:32Z"
-  - name: svc-titan-brain
-    visibility: private
-    archived: false
-    updated_at: "2026-06-04T18:07:30Z"
-  - name: svc-titan-capital-gateway
-    visibility: private
-    archived: false
-    updated_at: "2026-05-26T20:30:30Z"
-  - name: svc-titan-execution
-    visibility: private
-    archived: false
-    updated_at: "2026-05-27T15:47:21Z"
-  - name: svc-titan-ops-api
-    visibility: private
-    archived: false
-    updated_at: "2026-05-27T15:47:21Z"
-  - name: svc-titan-proofd
-    visibility: private
-    archived: false
-    updated_at: "2026-05-26T20:30:36Z"
-  - name: svc-titan-public-api
-    visibility: private
-    archived: false
-    updated_at: "2026-05-27T15:47:21Z"
-  - name: svc-titan-signing
-    visibility: private
-    archived: false
-    updated_at: "2026-05-26T20:30:39Z"
-  - name: svc-titan-vault-manager
-    visibility: private
-    archived: false
-    updated_at: "2026-05-27T15:47:41Z"
-  - name: titan
-    visibility: private
-    archived: false
-    updated_at: "2026-05-31T20:10:39Z"
   - name: worker-helm-launch-worker
     visibility: private
     archived: false
     updated_at: "2026-05-26T20:30:45Z"
-  - name: worker-titan-phase1-scavenger
-    visibility: private
-    archived: false
-    updated_at: "2026-05-26T20:30:45Z"
-  - name: worker-titan-phase2-hunter
-    visibility: private
-    archived: false
-    updated_at: "2026-05-27T15:47:22Z"
-  - name: worker-titan-phase3-sentinel
-    visibility: private
-    archived: false
-    updated_at: "2026-05-27T15:47:20Z"
