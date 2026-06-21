@@ -8,9 +8,9 @@ The canonical inventory is `repo-manifest.yaml`.
 
 Current verified state:
 
-- 65 repositories in the `Mindburn-Labs` GitHub organization.
-- 64 active repositories.
-- `orggenome-compiler` is archived.
+- 43 repositories in the `Mindburn-Labs` GitHub organization.
+- 43 active repositories.
+- No repositories are archived.
 - Production release readiness is tracked in `integration-mindburn-platform/manifests/release-candidate.yaml`.
 - Final-state evidence is tracked in `integration-mindburn-platform/manifests/final-state-evidence.yaml`.
 

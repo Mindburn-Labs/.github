@@ -13,10 +13,9 @@ source_truth_priority:
   - org_inventory
 
 inventory_summary:
-  total_repositories: 44
+  total_repositories: 43
   active_repositories: 43
-  archived_repositories:
-    - orggenome-compiler
+  archived_repositories: []
   public_repositories:
     - .github
     - helm-agent-integrations
@@ -142,10 +141,6 @@ repositories:
     visibility: private
     archived: false
     updated_at: "2026-06-10T20:41:02Z"
-  - name: orggenome-compiler
-    visibility: private
-    archived: true
-    updated_at: "2026-06-10T15:39:07Z"
   - name: platform-actions
     visibility: private
     archived: false
