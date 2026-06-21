@@ -2,6 +2,11 @@
 
 All notable changes to the `.github` organization configurations repository will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+- Removed the deleted `orggenome-compiler` archive from the verified organization inventory.
+
 ## [1.0.2] - 2026-06-01
 
 ### Changed
