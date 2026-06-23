@@ -55,7 +55,13 @@ end
 
 def read_json(path, required: true)
   if !File.exist?(path)
-    hint = path == MIGRATION_INDEX_PATH ? " Run `ruby scripts/estate-control-plane.rb` from the workspace root first." : ""
+    hint = if path == MIGRATION_INDEX_PATH
+             " Run `ruby scripts/estate-control-plane.rb` from the workspace root first."
+           elsif path == ESTATE_INVENTORY_PATH
+             " Run from a full Mindburn workspace checkout, not a repo-only checkout."
+           else
+             ""
+           end
     raise "#{path} is missing.#{hint}" if required
 
     return {}
