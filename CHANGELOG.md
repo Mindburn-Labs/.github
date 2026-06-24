@@ -5,6 +5,8 @@ All notable changes to the `.github` organization configurations repository will
 ## [Unreleased]
 
 ### Changed
+- Added the MIN-408 Linear release gate contract for release pipelines,
+  merge-to-verification behavior, and evidence-backed `Done` transitions.
 - Removed the deleted `orggenome-compiler` archive from the verified organization inventory.
 
 ## [1.0.2] - 2026-06-01
