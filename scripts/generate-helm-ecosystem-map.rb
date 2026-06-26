@@ -293,6 +293,7 @@ def render_markdown(state)
       ["Total repositories", "`#{manifest_summary.fetch("total_repositories")}`"],
       ["Active repositories", "`#{manifest_summary.fetch("active_repositories")}`"],
       ["Archived repositories", Array(manifest_summary.fetch("archived_repositories")).empty? ? "none" : Array(manifest_summary.fetch("archived_repositories")).map { |name| "`#{name}`" }.join(", ")],
+      ["Deleted repositories", Array(manifest_summary.fetch("deleted_repositories", [])).empty? ? "none" : Array(manifest_summary.fetch("deleted_repositories")).map { |name| "`#{name}`" }.join(", ")],
       ["Production release status", "`#{manifest_summary.fetch("production_release_status")}`"],
       ["Production release source", "`#{manifest_summary.fetch("production_release_source")}`"],
       ["Production release evidence", "`#{manifest_summary.fetch("production_release_evidence")}`"]
@@ -417,6 +418,9 @@ def validate_state!(state, markdown)
 
   state.fetch(:manifest_summary).fetch("archived_repositories").each do |name|
     errors << "archived repository #{name} is not present in manifest repo names" unless manifest_names.include?(name)
+  end
+  state.fetch(:manifest_summary).fetch("deleted_repositories", []).each do |name|
+    errors << "deleted repository #{name} is still present in manifest repo names" if manifest_names.include?(name)
   end
 
   production_status = state.fetch(:manifest_summary).fetch("production_release_status")
