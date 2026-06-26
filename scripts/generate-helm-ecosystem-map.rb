@@ -174,7 +174,14 @@ def compatibility_dirs(local_dirs, estate_entries)
   (from_estate + from_names).uniq.sort
 end
 
-def local_classification(name, estate_entry, compat_policy)
+def local_classification(name, estate_entry, compat_policy, deleted_names)
+  if deleted_names.include?(name)
+    if estate_entry
+      return "`deleted_repo_local_snapshot`; #{estate_entry["domain"]} / #{estate_entry["system"]}; lifecycle `deleted`"
+    end
+    return "`deleted_repo_local_snapshot`; local snapshot of deleted GitHub repo"
+  end
+
   return "task checkout directory by naming convention" if name.include?("-wt-")
 
   if compat_policy.fetch("compatibility_directories", {}).key?(name)
@@ -196,6 +203,7 @@ def render_markdown(state)
   migration_entries = state.fetch(:migration_entries)
   compat_policy = state.fetch(:compat_policy)
   manifest_only_policy = state.fetch(:manifest_only_policy)
+  deleted_names = Array(manifest_summary.fetch("deleted_repositories", []))
   generated_at = state.fetch(:generated_at)
   snapshot_date = Date.parse(generated_at).iso8601
 
@@ -217,7 +225,7 @@ def render_markdown(state)
     [
       "`#{name}`",
       alias_local_paths.include?(name) ? "manifest alias target" : "local-only",
-      local_classification(name, estate[name], compat_policy)
+      local_classification(name, estate[name], compat_policy, deleted_names)
     ]
   end
 
