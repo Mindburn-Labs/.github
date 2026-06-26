@@ -282,7 +282,7 @@ def render_markdown(state)
   lines << "This file is generated. Do not edit it by hand."
   lines << ""
   lines << "> [!IMPORTANT]"
-  lines << "> `/Users/ivan/Code/Mindburn-Labs` is a polyrepo workspace, not one git repository. `.github-repo/repo-manifest.yaml` controls GitHub repo existence, visibility, and archive status. `production-readiness/estate/estate-inventory.json` controls local path classification only."
+  lines << "> `$MINDBURN_WORKSPACE_ROOT` is a polyrepo workspace, not one git repository. `.github-repo/repo-manifest.yaml` controls GitHub repo existence, visibility, and archive status. `production-readiness/estate/estate-inventory.json` controls local path classification only."
   lines << ""
   lines << "## Current Manifest Truth"
   lines << ""
