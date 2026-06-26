@@ -150,6 +150,16 @@ def strict_classification(name, estate_entry)
   "`#{kind}`; #{domain} / #{system}; lifecycle `#{lifecycle}`"
 end
 
+def manifest_classification(repo, estate_entry)
+  return strict_classification(repo.fetch("name"), estate_entry) unless repo["archived"] == true
+
+  if estate_entry
+    "`archived_repo`; #{estate_entry["domain"]} / #{estate_entry["system"]}; lifecycle `archived`"
+  else
+    "`archived_repo`; manifest archived"
+  end
+end
+
 def markdown_table(headers, rows)
   lines = []
   lines << "| #{headers.join(" | ")} |"
@@ -196,7 +206,7 @@ def render_markdown(state)
       "`#{name}`",
       "`#{repo.fetch("visibility")}`",
       local_checkout_for(name, local_dirs, aliases),
-      strict_classification(name, estate[name])
+      manifest_classification(repo, estate[name])
     ]
   end
 
