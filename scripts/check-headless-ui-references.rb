@@ -21,7 +21,7 @@ manifest = YAML.safe_load(
 
 aliases_path = File.join(repo_root, "manifest-local-policy.yaml")
 aliases = if File.file?(aliases_path)
-            YAML.safe_load(File.read(aliases_path), aliases: true).fetch("aliases", {})
+            YAML.safe_load(File.read(aliases_path), permitted_classes: [Date, Time], aliases: true).fetch("aliases", {})
           else
             {}
           end
