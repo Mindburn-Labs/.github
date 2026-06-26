@@ -102,8 +102,10 @@ def group_for(name)
   case name
   when ".github"
     "GitHub Metadata"
-  when "app-helm-console", "app-docs-platform", "app-developer-portal", "app-mindburn-web"
+  when "app-developer-portal"
     "Frontend / User Surfaces"
+  when "app-helm-console", "app-docs-platform", "app-mindburn-web", "platform-design-system"
+    "Archived UI / Design"
   when "helm-ai-kernel", "helm-ai-enterprise", "helm-agent-integrations", "helm-compiler-lab", "worker-helm-launch-worker", "helm-rollout-evidence"
     "HELM Core / Product"
   when /^svc-/
@@ -330,9 +332,9 @@ def render_markdown(state)
     [
       ["Kernel verdicts, receipts, EvidencePacks, conformance", "`helm-ai-kernel`"],
       ["Paid HELM AI Enterprise backend/product logic", "`helm-ai-enterprise`, then `svc-helm-control-plane`"],
-      ["Console UX", "`app-helm-console`, with backend truth from `svc-helm-control-plane`"],
-      ["Public docs", "`app-docs-platform`, plus `docs/architecture/source-truth.md`"],
-      ["Public marketing site", "`app-mindburn-web`"],
+      ["Console UX", "Future React console repo; backend truth from `svc-helm-control-plane`"],
+      ["Public docs", "Future website/docs React repo plus headless contract docs"],
+      ["Public marketing site", "Future website/docs React repo"],
       ["Connector contracts or packs", "`helm-ai-enterprise`, `contracts-catalog`, `svc-helm-certification`, `integration-helm`"],
       ["Production release state", "`integration-mindburn-platform`, `gitops-apps`, `gitops-platform`"],
       ["Infrastructure/server access", "`mindburn-infra`, `docs_for_team`"],
