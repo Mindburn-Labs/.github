@@ -12,9 +12,10 @@ source_truth_priority:
 - runbooks_and_architecture_docs
 - org_inventory
 inventory_summary:
-  total_repositories: 39
+  total_repositories: 40
   active_repositories: 39
-  archived_repositories: []
+  archived_repositories:
+  - orggenome-compiler
   deleted_repositories:
   - app-docs-platform
   - app-helm-console
@@ -130,6 +131,10 @@ repositories:
   visibility: private
   archived: false
   updated_at: '2026-06-10T20:41:02Z'
+- name: orggenome-compiler
+  visibility: private
+  archived: true
+  updated_at: '2026-06-10T15:39:07Z'
 - name: platform-actions
   visibility: private
   archived: false
