@@ -23,16 +23,14 @@ summary = manifest.fetch("inventory_summary")
 repos = manifest.fetch("repositories")
 repo_by_name = repos.to_h { |repo| [repo.fetch("name"), repo] }
 archived = Array(summary.fetch("archived_repositories"))
+deleted = Array(summary.fetch("deleted_repositories"))
 
 retired_repos.each do |name|
   repo = repo_by_name[name]
-  errors << "retired UI/design repo missing from manifest: #{name}" unless repo
-  errors << "retired UI/design repo not marked archived in repositories: #{name}" if repo && repo["archived"] != true
-  errors << "retired UI/design repo missing from inventory_summary.archived_repositories: #{name}" unless archived.include?(name)
+  errors << "retired UI/design repo still present in active manifest repositories: #{name}" if repo
+  errors << "retired UI/design repo missing from inventory_summary.deleted_repositories: #{name}" unless deleted.include?(name)
+  errors << "retired UI/design repo must not remain archived after deletion: #{name}" if archived.include?(name)
 end
-
-active_retired = repos.select { |repo| retired_repos.include?(repo.fetch("name")) && repo["archived"] != true }.map { |repo| repo.fetch("name") }
-errors << "retired UI/design repos are active: #{active_retired.join(", ")}" unless active_retired.empty?
 
 actual_active_count = repos.count { |repo| repo["archived"] != true }
 declared_active_count = summary.fetch("active_repositories")
@@ -49,4 +47,4 @@ if errors.any?
   exit 1
 end
 
-puts "retired UI/design surfaces remain archived"
+puts "retired UI/design surfaces remain deleted"
