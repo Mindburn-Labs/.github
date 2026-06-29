@@ -32,6 +32,7 @@ Repository inventory does not prove production readiness. When there is a confli
 - Do not mark production released in org docs. Production status belongs in the integration release manifest and GitOps evidence.
 - Do not use floating tags or mutable image references in production release evidence.
 - Keep the organization profile factual, compact, and free of release claims that belong to source or GitOps repos.
+- Keep retired org slugs out of tracked org-repository source; `make lint` runs the recurrence guard.
 
 ## Validation
 
