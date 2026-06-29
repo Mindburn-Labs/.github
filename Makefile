@@ -23,6 +23,7 @@ lint:
 	@test -f AGENTS.md
 	@test -f SECURITY.md
 	@test -f docs/radar/ai-security-competitor-watchlist.md
+	@test -f docs/linear/release-gate-contract.md
 
 build: lint
 
