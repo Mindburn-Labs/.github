@@ -12,12 +12,14 @@ source_truth_priority:
 - runbooks_and_architecture_docs
 - org_inventory
 inventory_summary:
-  total_repositories: 42
-  active_repositories: 41
+  total_repositories: 41
+  active_repositories: 40
   archived_repositories:
   - orggenome-compiler
   deleted_repositories:
   - app-docs-platform
+  - app-helm-console
+  - app-mindburn-web
   - platform-design-system
   public_repositories:
   - ".github"
@@ -49,10 +51,6 @@ repositories:
   visibility: private
   archived: false
   updated_at: '2026-06-28T15:46:22Z'
-- name: app-mindburn-web
-  visibility: private
-  archived: false
-  updated_at: '2026-06-28T15:50:23Z'
 - name: contracts-catalog
   visibility: private
   archived: false
