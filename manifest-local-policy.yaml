@@ -1,0 +1,10 @@
+aliases:
+  .github:
+    local_path: .github-repo
+    reason: local checkout uses explicit alias
+
+manifest_only:
+  helm-rollout-evidence:
+    reason: release evidence repo not checked out locally
+    owner: release-platform
+    expires: 2026-07-15
