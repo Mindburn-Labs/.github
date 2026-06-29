@@ -1,0 +1,29 @@
+compatibility_directories:
+  contracts-api-catalog:
+    canonical: contracts-catalog
+    action: quarantine_or_delete
+    expires: 2026-07-15
+  contracts-event-catalog:
+    canonical: contracts-catalog
+    action: quarantine_or_delete
+    expires: 2026-07-15
+  contracts-proto:
+    canonical: contracts-catalog
+    action: quarantine_or_delete
+    expires: 2026-07-15
+  contracts-schema-catalog:
+    canonical: contracts-catalog
+    action: quarantine_or_delete
+    expires: 2026-07-15
+  pkg-helm-client-go:
+    canonical: helm-ai-kernel/sdk/*
+    action: quarantine_or_delete
+    expires: 2026-07-15
+  pkg-helm-client-python:
+    canonical: helm-ai-kernel/sdk/*
+    action: quarantine_or_delete
+    expires: 2026-07-15
+  pkg-helm-client-ts:
+    canonical: helm-ai-kernel/sdk/*
+    action: quarantine_or_delete
+    expires: 2026-07-15
