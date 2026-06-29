@@ -8,3 +8,7 @@ manifest_only:
     reason: release evidence repo not checked out locally
     owner: release-platform
     expires: 2026-07-15
+  orggenome-compiler:
+    reason: archived 2026-06-10; split into ml-orggenome-compiler + svc-orggenome-inference; local checkout removed
+    owner: ml-platform
+    expires: 2027-06-30
