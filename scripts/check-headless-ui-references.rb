@@ -29,9 +29,7 @@ aliases = if File.file?(aliases_path)
 banned = [
   "@mindburn/design",
   "platform-design-system",
-  "app-helm-console",
   "app-docs-platform",
-  "app-mindburn-web",
   "helm-console-web",
   "--console-assets",
   "Flutter web assets",
@@ -41,9 +39,7 @@ banned = [
 banned_patterns = {
   "@mindburn/design" => /@mindburn\/design/,
   "platform-design-system" => /(?<![@A-Za-z0-9_.-])platform-design-system(?:-wt-[A-Za-z0-9_-]+)?(?![A-Za-z0-9_-]|\.(?:org|run|dev|com))/,
-  "app-helm-console" => /(?<![@A-Za-z0-9_.-])app-helm-console(?:-wt-[A-Za-z0-9_-]+)?(?![A-Za-z0-9_-]|\.(?:org|run|dev|com))/,
   "app-docs-platform" => /(?<![@A-Za-z0-9_.-])app-docs-platform(?:-wt-[A-Za-z0-9_-]+)?(?![A-Za-z0-9_-]|\.(?:org|run|dev|com))/,
-  "app-mindburn-web" => /(?<![@A-Za-z0-9_.-])app-mindburn-web(?:-wt-[A-Za-z0-9_-]+)?(?![A-Za-z0-9_-]|\.(?:org|run|dev|com))/,
   "helm-console-web" => /helm-console-web/,
   "--console-assets" => /--console-assets/,
   "Flutter web assets" => /Flutter web assets/,

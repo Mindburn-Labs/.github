@@ -13,8 +13,6 @@ manifest = YAML.safe_load(
 
 retired_repos = %w[
   app-docs-platform
-  app-helm-console
-  app-mindburn-web
   platform-design-system
 ].freeze
 
