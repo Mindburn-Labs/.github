@@ -102,10 +102,12 @@ def group_for(name)
   case name
   when ".github"
     "GitHub Metadata"
-  when "app-developer-portal"
+  when "app-developer-portal", "app-helm-console", "app-mindburn-web"
     "Frontend / User Surfaces"
-  when "app-helm-console", "app-docs-platform", "app-mindburn-web", "platform-design-system"
+  when "app-docs-platform", "platform-design-system"
     "Archived UI / Design"
+  when "pkg-mindburn-helm-ds", "pkg-mindburn-web-ds"
+    "Design Systems"
   when "helm-ai-kernel", "helm-ai-enterprise", "helm-agent-integrations", "helm-compiler-lab", "worker-helm-launch-worker", "helm-rollout-evidence"
     "HELM Core / Product"
   when /^svc-/
