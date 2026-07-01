@@ -12,14 +12,12 @@ source_truth_priority:
 - runbooks_and_architecture_docs
 - org_inventory
 inventory_summary:
-  total_repositories: 41
-  active_repositories: 40
+  total_repositories: 46
+  active_repositories: 45
   archived_repositories:
   - orggenome-compiler
   deleted_repositories:
   - app-docs-platform
-  - app-helm-console
-  - app-mindburn-web
   - platform-design-system
   public_repositories:
   - ".github"
@@ -36,8 +34,8 @@ release_readiness:
   repository_inventory: verified
   production_promotion_allowed: false
   reason: Repository existence is verified. Production release remains disabled while
-    old UI/design repos are deleted and backend/headless contracts are reset for
-    future React systems.
+    UI and design-system repos remain preview surfaces and backend/headless contracts
+    are reset for future React systems.
 repositories:
 - name: ".github"
   visibility: public
@@ -47,14 +45,26 @@ repositories:
   visibility: private
   archived: false
   updated_at: '2026-06-11T10:22:22Z'
+- name: app-helm-console
+  visibility: private
+  archived: false
+  updated_at: '2026-07-01T17:00:54Z'
 - name: app-helm-docs
   visibility: private
   archived: false
   updated_at: '2026-06-28T15:46:22Z'
+- name: app-mindburn-web
+  visibility: private
+  archived: false
+  updated_at: '2026-07-01T20:14:34Z'
 - name: contracts-catalog
   visibility: private
   archived: false
   updated_at: '2026-06-10T15:40:42Z'
+- name: docs
+  visibility: private
+  archived: false
+  updated_at: '2026-07-01T18:36:10Z'
 - name: docs-engineering-handbook
   visibility: private
   archived: false
@@ -139,6 +149,14 @@ repositories:
   visibility: private
   archived: true
   updated_at: '2026-06-10T15:39:07Z'
+- name: pkg-mindburn-helm-ds
+  visibility: private
+  archived: false
+  updated_at: '2026-06-29T13:19:22Z'
+- name: pkg-mindburn-web-ds
+  visibility: private
+  archived: false
+  updated_at: '2026-07-01T20:20:45Z'
 - name: platform-actions
   visibility: private
   archived: false
