@@ -1,0 +1,108 @@
+name: Docs Truth Public Reusable
+
+permissions:
+  contents: read
+
+on:
+  workflow_call:
+    inputs:
+      repo:
+        required: false
+        type: string
+      changed_base:
+        required: false
+        type: string
+    secrets:
+      MINDBURN_ORG_READ_TOKEN:
+        required: true
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: Repository name to check. Defaults to the current repo.
+        required: false
+        type: string
+      changed_base:
+        description: Optional base ref for source/doc drift checks.
+        required: false
+        type: string
+
+jobs:
+  docs-truth:
+    name: docs-truth
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve subject repo
+        id: subject
+        shell: bash
+        run: |
+          repo="${{ inputs.repo }}"
+          if [ -z "$repo" ]; then
+            repo="${GITHUB_REPOSITORY#*/}"
+          fi
+          local_name="$repo"
+          if [ "$repo" = ".github" ]; then
+            local_name=".github-repo"
+          fi
+          echo "repo=$repo" >> "$GITHUB_OUTPUT"
+          echo "local_name=$local_name" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout subject repo
+        uses: actions/checkout@v4
+        with:
+          repository: Mindburn-Labs/${{ steps.subject.outputs.repo }}
+          path: workspace/${{ steps.subject.outputs.local_name }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.repo != '' && 'main' || github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          token: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}
+
+      - name: Checkout .github inventory
+        if: steps.subject.outputs.repo != '.github'
+        uses: actions/checkout@v4
+        with:
+          repository: Mindburn-Labs/.github
+          path: workspace/.github-repo
+          fetch-depth: 1
+          token: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}
+
+      - name: Checkout docs truth ledger
+        if: steps.subject.outputs.repo != 'docs'
+        uses: actions/checkout@v4
+        with:
+          repository: Mindburn-Labs/docs
+          path: workspace/docs
+          fetch-depth: 1
+          token: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}
+
+      - name: Checkout docs-truth runner
+        uses: actions/checkout@v4
+        with:
+          repository: Mindburn-Labs/dev-orchestration
+          path: workspace/dev-orchestration
+          fetch-depth: 1
+          token: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}
+
+      - name: Run docs truth gate
+        shell: bash
+        run: |
+          args=(
+            --mode local
+            --workspace-root "$GITHUB_WORKSPACE/workspace"
+            --repo "${{ steps.subject.outputs.repo }}"
+            --report "$RUNNER_TEMP/docs-truth-report.json"
+          )
+          changed_base="${{ inputs.changed_base }}"
+          if [ -z "$changed_base" ] && [ "${{ github.event_name }}" = "pull_request" ]; then
+            changed_base="${{ github.event.pull_request.base.sha }}"
+          fi
+          if [ -n "$changed_base" ]; then
+            args+=(--changed-base "$changed_base")
+          fi
+          ruby "$GITHUB_WORKSPACE/workspace/dev-orchestration/estate-control-plane/scripts/docs-truth-org.rb" "${args[@]}"
+
+      - name: Upload docs truth report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-truth-report
+          path: ${{ runner.temp }}/docs-truth-report.json
+          if-no-files-found: ignore
