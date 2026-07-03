@@ -2,6 +2,11 @@ name: Docs Truth Public Reusable
 
 permissions:
   contents: read
+  # Needed by the "Post orphan-ledger PR comment" step to upsert a comment on
+  # PRs when the report contains missing_ledger_row failures. Caller workflows
+  # must also declare pull-requests: write for the token to actually carry
+  # that permission — a reusable declaration alone is not enough.
+  pull-requests: write
 
 on:
   workflow_call:
@@ -107,3 +112,141 @@ jobs:
           name: docs-truth-report
           path: ${{ runner.temp }}/docs-truth-report.json
           if-no-files-found: ignore
+
+      # Post-hoc: on a pull_request run, if the report contains any
+      # missing_ledger_row failures, upsert a PR comment that lists the offending
+      # files and gives the reader a copy-paste-ready block of CSV rows to add
+      # to Mindburn-Labs/docs/audit/markdown-estate-ledger.csv. The intent is to
+      # remove the "recurring silent-orphan" pain-point where autonomous agents
+      # add tracked markdown without opening the paired ledger PR (root cause of
+      # multiple docs-truth stalls this week; see the fixes in Mindburn-Labs/docs
+      # #27 and #28). If the report is clean, any prior orphan comment on this PR
+      # is deleted so a re-opened PR doesn't carry stale advice.
+      - name: Post orphan-ledger PR comment
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          REPORT_PATH: ${{ runner.temp }}/docs-truth-report.json
+          SUBJECT_REPO: ${{ steps.subject.outputs.repo }}
+        with:
+          script: |
+            const fs = require('fs');
+            const MARKER = '<!-- docs-truth-orphan-comment -->';
+            const path = process.env.REPORT_PATH;
+
+            async function findExistingComment() {
+              const comments = await github.paginate(
+                github.rest.issues.listComments,
+                {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  per_page: 100,
+                }
+              );
+              return comments.find((c) => (c.body || '').startsWith(MARKER));
+            }
+
+            async function deleteIfExists() {
+              const existing = await findExistingComment();
+              if (existing) {
+                await github.rest.issues.deleteComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: existing.id,
+                });
+                core.info(`Deleted stale orphan-ledger comment ${existing.id}`);
+              }
+            }
+
+            if (!fs.existsSync(path)) {
+              core.info('No docs-truth-report.json found — nothing to comment on.');
+              await deleteIfExists();
+              return;
+            }
+
+            let report;
+            try {
+              report = JSON.parse(fs.readFileSync(path, 'utf8'));
+            } catch (err) {
+              core.warning(`Could not parse docs-truth-report.json: ${err.message}`);
+              return;
+            }
+
+            const orphans = (report.failures || []).filter(
+              (f) => f.code === 'missing_ledger_row'
+            );
+
+            if (orphans.length === 0) {
+              // Report is clean of orphan failures — remove any stale comment
+              // from a previous run so the PR reads accurately.
+              await deleteIfExists();
+              return;
+            }
+
+            const subject = process.env.SUBJECT_REPO;
+            const sourceRefs = [
+              `${subject}:Makefile`,
+              `${subject}:catalog-info.yaml`,
+              `${subject}:agent.yaml`,
+              `.github-repo:repo-manifest.yaml`,
+            ].join(';');
+            const notes =
+              'initial docs-truth inventory row generated from tracked markdown; source_refs name owning repo evidence or gates';
+
+            const rows = orphans
+              .map(
+                (f) =>
+                  `${subject},${f.path},active,${subject},repo_docs,${sourceRefs},"",false,"",${notes}`
+              )
+              .join('\n');
+
+            const fileList = orphans.map((f) => `- \`${f.path}\``).join('\n');
+
+            const body = [
+              MARKER,
+              `## Docs Truth: \`missing_ledger_row\` — ${orphans.length} file(s) need ledger rows`,
+              '',
+              `Tracked markdown in \`${subject}\` has no matching row in the org ledger`,
+              `(\`Mindburn-Labs/docs/audit/markdown-estate-ledger.csv\`). This gate will stay`,
+              `red on \`main\` after merge until the rows are added there.`,
+              '',
+              '<details><summary>Files that need ledger rows</summary>',
+              '',
+              fileList,
+              '',
+              '</details>',
+              '',
+              '### Fix — open a small PR against `Mindburn-Labs/docs`',
+              '',
+              `Append these rows to \`audit/markdown-estate-ledger.csv\` (schema: \`repo,path,status,owner,truth_kind,source_refs,truth_gate,public_surface,superseded_by,notes\`):`,
+              '',
+              '```csv',
+              rows,
+              '```',
+              '',
+              `Adjust \`source_refs\` if \`${subject}\` does not have all four of \`Makefile\`, \`catalog-info.yaml\`, \`agent.yaml\`, and the \`.github-repo:repo-manifest.yaml\` entry — grep neighboring \`${subject},\` rows in the CSV to see the canonical set for this repo. Keep the new rows alphabetically ordered inside the \`${subject},\` block.`,
+              '',
+              `Once the ledger PR merges, re-run this job (\`gh run rerun ${context.runId} --repo ${context.repo.owner}/${context.repo.repo} --failed\`) to turn this gate green.`,
+              '',
+              `<sub>Auto-generated by \`Mindburn-Labs/.github/.github/workflows/docs-truth-public.yml\`. Longer-term refactor of the two-repo ledger flow is tracked in [HELM-41](https://linear.app/mindburn/issue/HELM-41).</sub>`,
+            ].join('\n');
+
+            const existing = await findExistingComment();
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+              core.info(`Updated orphan-ledger comment ${existing.id}`);
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+              core.info(`Created orphan-ledger comment on PR #${context.issue.number}`);
+            }
