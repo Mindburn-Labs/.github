@@ -194,14 +194,55 @@ jobs:
             const notes =
               'initial docs-truth inventory row generated from tracked markdown; source_refs name owning repo evidence or gates';
 
+            // A PR author can smuggle backticks or newlines through a
+            // crafted markdown filename and inject arbitrary content into
+            // this bot-authored comment. Escape every untrusted value
+            // (report.failures[].path) before interpolating.
+            //
+            //   - Markdown escape: backslash-escape backticks and backslashes
+            //     inside the inline-code span; CR/LF replaced with visible
+            //     literals so a single log-line stays on one line.
+            //   - CSV escape: RFC 4180 — wrap every field in ", double any
+            //     internal ", visualize CR/LF so the row stays single-line.
+            //     Applied to every column (including the static ones) so the
+            //     block round-trips cleanly if a reader pastes it into the
+            //     ledger CSV. Ledger fields treat "" and unquoted "" as
+            //     equivalent empty strings.
+            const escapeMarkdownInline = (value) =>
+              String(value)
+                .replace(/\\/g, '\\\\')
+                .replace(/`/g, '\\`')
+                .replace(/\r/g, '\\r')
+                .replace(/\n/g, '\\n');
+
+            const escapeCsvField = (value) =>
+              `"${String(value)
+                .replace(/"/g, '""')
+                .replace(/\r/g, '\\r')
+                .replace(/\n/g, '\\n')}"`;
+
             const rows = orphans
-              .map(
-                (f) =>
-                  `${subject},${f.path},active,${subject},repo_docs,${sourceRefs},"",false,"",${notes}`
+              .map((f) =>
+                [
+                  subject,
+                  f.path,
+                  'active',
+                  subject,
+                  'repo_docs',
+                  sourceRefs,
+                  '',
+                  'false',
+                  '',
+                  notes,
+                ]
+                  .map(escapeCsvField)
+                  .join(',')
               )
               .join('\n');
 
-            const fileList = orphans.map((f) => `- \`${f.path}\``).join('\n');
+            const fileList = orphans
+              .map((f) => `- \`${escapeMarkdownInline(f.path)}\``)
+              .join('\n');
 
             const body = [
               MARKER,
