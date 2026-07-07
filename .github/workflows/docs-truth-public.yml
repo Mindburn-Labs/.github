@@ -82,7 +82,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: Mindburn-Labs/dev-orchestration
-          ref: 014aa7eb6c542caa9e75004fed151f9f5198d017
+          ref: e7de93c58f9037e86db50ed3976574bea8f4d65b
           path: workspace/dev-orchestration
           fetch-depth: 1
           token: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}
