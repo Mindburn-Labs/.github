@@ -9,6 +9,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import time
@@ -29,6 +30,8 @@ MAX_BUNDLE_BYTES = 4 << 20
 MAX_CONTEXT_BYTES = 2 << 20
 MAX_PROMPT_BYTES = 2 << 20
 MAX_PATCH_BYTES = 4 << 20
+MAX_REVIEW_BYTES = 2 << 20
+MODEL_REVIEW_PROVIDERS = ("anthropic", "openai")
 WORKFLOW_NAME = "HELM Autonomous Release Permit"
 WORKFLOW_PATH = ".github/workflows/ci.yml"
 SIGNER_WORKFLOW = "Mindburn-Labs/.github/.github/workflows/ci.yml"
@@ -155,6 +158,36 @@ def extract_trusted_context(archive: bytes) -> bytes:
     return context
 
 
+def extract_model_review(archive: bytes, provider: str) -> bytes:
+    if provider not in MODEL_REVIEW_PROVIDERS:
+        raise PermitInputError(f"unsupported model review provider: {provider}")
+    expected_name = f"review-{provider}.json"
+    try:
+        with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
+            entries = bundle.infolist()
+            if len(entries) != 1 or entries[0].filename != expected_name:
+                raise PermitInputError(
+                    f"{provider} review artifact must contain exactly {expected_name}",
+                )
+            entry = entries[0]
+            if (
+                entry.is_dir()
+                or entry.file_size <= 0
+                or entry.file_size > MAX_REVIEW_BYTES
+            ):
+                raise PermitInputError(
+                    f"{provider} review artifact exceeds the size limit"
+                )
+            review = bundle.read(entry)
+    except zipfile.BadZipFile as exc:
+        raise PermitInputError(
+            f"{provider} review artifact is not a valid ZIP archive"
+        ) from exc
+    if not review or len(review) > MAX_REVIEW_BYTES:
+        raise PermitInputError(f"{provider} review artifact exceeds the size limit")
+    return review
+
+
 def load_json_file(path: Path, *, label: str) -> dict[str, Any]:
     try:
         value = parse_json_strict(path.read_text(encoding="utf-8"), label=label)
@@ -275,6 +308,86 @@ def artifact_for_run(
     return matches[0]["id"]
 
 
+def write_model_reviews(
+    client: GitHubReadClient,
+    repository: str,
+    run_id: int,
+    directory: Path,
+) -> dict[str, Path]:
+    reviews: dict[str, bytes] = {}
+    for provider in MODEL_REVIEW_PROVIDERS:
+        artifact_id = artifact_for_run(
+            client,
+            repository,
+            run_id,
+            f"release-review-{provider}",
+        )
+        if artifact_id is None:
+            raise PermitInputError(
+                f"candidate run is missing the {provider} review artifact"
+            )
+        reviews[provider] = extract_model_review(
+            client.get_bytes(
+                f"/repos/{repository}/actions/artifacts/{artifact_id}/zip",
+                accept="application/vnd.github+json",
+            ),
+            provider,
+        )
+
+    directory.mkdir(parents=True, exist_ok=True)
+    paths: dict[str, Path] = {}
+    for provider in MODEL_REVIEW_PROVIDERS:
+        path = directory / f"review-{provider}.json"
+        path.write_bytes(reviews[provider])
+        paths[provider] = path
+    return paths
+
+
+def verify_permit_reduction(
+    kernel_verifier: Path,
+    permit_path: Path,
+    context_path: Path,
+    review_paths: dict[str, Path],
+    output_path: Path,
+) -> None:
+    if set(review_paths) != set(MODEL_REVIEW_PROVIDERS):
+        raise PermitInputError(
+            "parent reduction requires the exact distinct-provider review artifacts"
+        )
+    command = [
+        str(kernel_verifier.resolve()),
+        "--context",
+        str(context_path.resolve()),
+    ]
+    for provider in MODEL_REVIEW_PROVIDERS:
+        command.extend(("--review", str(review_paths[provider].resolve())))
+    command.extend(("--output", str(output_path.resolve())))
+    process = subprocess.run(
+        command,
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    permit = load_json_file(permit_path, label="candidate reduced permit")
+    expected_status = {"ALLOW": 0, "DENY": 3}.get(permit.get("decision"))
+    if expected_status is None or process.returncode != expected_status:
+        detail = process.stderr.decode("utf-8", errors="replace").strip()
+        raise PermitInputError(
+            "parent Kernel did not independently reproduce the candidate decision"
+            + (f": {detail}" if detail else ""),
+        )
+    try:
+        recomputed = output_path.read_bytes()
+    except FileNotFoundError as exc:
+        raise PermitInputError(
+            "parent Kernel did not emit a recomputed permit"
+        ) from exc
+    if recomputed != permit_path.read_bytes():
+        raise PermitInputError(
+            "candidate permit differs from the parent Kernel reduction"
+        )
+
+
 def wait_for_canary(
     args: argparse.Namespace, client: GitHubReadClient
 ) -> dict[str, Any]:
@@ -336,7 +449,14 @@ def wait_for_canary(
             args.output.write_bytes(permit_bytes)
             args.bundle.write_bytes(bundle_bytes)
             args.context.write_bytes(context_bytes)
+            review_dir = args.context.parent / "reviews"
             try:
+                review_paths = write_model_reviews(
+                    client,
+                    args.repository,
+                    run_id,
+                    review_dir,
+                )
                 permit = verify_candidate_permit(
                     args.output,
                     args.bundle,
@@ -350,10 +470,19 @@ def wait_for_canary(
                     kernel_verifier=args.kernel_verifier,
                     attestation_token=client.token,
                 )
+                verify_permit_reduction(
+                    args.kernel_verifier,
+                    args.output,
+                    args.context,
+                    review_paths,
+                    review_dir / "parent-kernel-permit.json",
+                )
             except PermitInputError:
                 args.output.unlink(missing_ok=True)
                 args.bundle.unlink(missing_ok=True)
                 args.context.unlink(missing_ok=True)
+                if review_dir.exists():
+                    shutil.rmtree(review_dir)
                 rejected_runs.add(run_id)
                 continue
             return {

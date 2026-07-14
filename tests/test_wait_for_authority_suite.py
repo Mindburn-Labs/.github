@@ -50,6 +50,90 @@ class FakeJobClient:
 
 
 class AuthoritySuiteTests(unittest.TestCase):
+    def test_allow_and_deny_cases_are_both_reduced_by_parent_kernel(self) -> None:
+        for expected, conclusion in (("ALLOW", "success"), ("DENY", "failure")):
+            with (
+                self.subTest(expected=expected),
+                tempfile.TemporaryDirectory() as tmpdir,
+            ):
+                root = Path(tmpdir)
+                output_dir = root / "suite"
+                output_dir.mkdir()
+                evidence = root / "evidence"
+                evidence.mkdir()
+                permit_path = evidence / "release-permit.json"
+                bundle_path = evidence / "release-permit.attestation.json"
+                context_path = evidence / "context.json"
+                review_paths = {
+                    provider: evidence / f"review-{provider}.json"
+                    for provider in ("anthropic", "openai")
+                }
+                for path in (
+                    permit_path,
+                    bundle_path,
+                    context_path,
+                    *review_paths.values(),
+                ):
+                    path.write_text("{}\n", encoding="utf-8")
+                permit = {
+                    "permit_id": "sha256:" + "a" * 64,
+                    "merge_sha": "b" * 40,
+                    "merge_tree_sha": "c" * 40,
+                }
+                args = mock.Mock(
+                    output_dir=output_dir,
+                    kernel_verifier=root / "release-permit-verify",
+                )
+                client = mock.Mock(token="observer-token")
+                with (
+                    mock.patch.object(
+                        MODULE,
+                        "write_attested_case",
+                        return_value=(
+                            permit_path,
+                            bundle_path,
+                            context_path,
+                            review_paths,
+                        ),
+                    ),
+                    mock.patch.object(
+                        MODULE,
+                        "verify_candidate_permit",
+                        return_value=permit,
+                    ),
+                    mock.patch.object(
+                        MODULE,
+                        "validate_deny_permit",
+                        return_value=permit,
+                    ),
+                    mock.patch.object(MODULE, "verify_permit_reduction") as reduce,
+                ):
+                    receipt = MODULE.verify_case(
+                        args,
+                        client,
+                        case={
+                            "id": f"case-{expected.lower()}",
+                            "expected": expected,
+                            "pull_request": 8,
+                            "head_sha": "d" * 40,
+                        },
+                        run={"id": 42, "run_attempt": 1, "conclusion": conclusion},
+                        repository="Mindburn-Labs/contracts-autonomous-release-lab",
+                        authority={"generation": 2},
+                        workflow_sha="e" * 40,
+                    )
+                self.assertEqual(receipt["expected"], expected)
+                reduce.assert_called_once_with(
+                    args.kernel_verifier,
+                    permit_path,
+                    context_path,
+                    review_paths,
+                    output_dir
+                    / "cases"
+                    / f"case-{expected.lower()}"
+                    / "parent-kernel-permit.json",
+                )
+
     def test_trigger_must_exactly_match_source_contract(self) -> None:
         contract = MODULE.load_json(
             ROOT / "config" / "autonomous-release-control-plane.json",

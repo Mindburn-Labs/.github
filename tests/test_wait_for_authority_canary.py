@@ -4,6 +4,7 @@ import importlib.util
 import io
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 from unittest import mock
 import zipfile
@@ -136,6 +137,124 @@ class AuthorityCanaryTests(unittest.TestCase):
                 self.assertRaises(MODULE.PermitInputError),
             ):
                 MODULE.extract_trusted_context(payload)
+
+    def test_extract_model_review_accepts_only_exact_bounded_provider_entry(
+        self,
+    ) -> None:
+        review = b'{"schema":"mindburn.release-review/v1"}\n'
+        self.assertEqual(
+            MODULE.extract_model_review(
+                archive({"review-openai.json": review}),
+                "openai",
+            ),
+            review,
+        )
+        for payload in (
+            archive(
+                {
+                    "review-openai.json": review,
+                    "untrusted-extra.json": b"{}",
+                },
+            ),
+            archive({"../review-openai.json": review}),
+            archive(
+                {
+                    "review-openai.json": b"x" * (MODULE.MAX_REVIEW_BYTES + 1),
+                },
+            ),
+        ):
+            with (
+                self.subTest(size=len(payload)),
+                self.assertRaises(MODULE.PermitInputError),
+            ):
+                MODULE.extract_model_review(payload, "openai")
+        with self.assertRaisesRegex(MODULE.PermitInputError, "unsupported"):
+            MODULE.extract_model_review(
+                archive({"review-unknown.json": review}),
+                "unknown",
+            )
+
+    def test_parent_kernel_exactly_recomputes_allow_and_deny(self) -> None:
+        for decision, returncode in (("ALLOW", 0), ("DENY", 3)):
+            with (
+                self.subTest(decision=decision),
+                tempfile.TemporaryDirectory() as tmpdir,
+            ):
+                root = Path(tmpdir)
+                permit_path = root / "release-permit.json"
+                context_path = root / "context.json"
+                output_path = root / "parent-kernel-permit.json"
+                permit_bytes = ('{"decision":"' + decision + '"}\n').encode()
+                permit_path.write_bytes(permit_bytes)
+                context_path.write_text("{}\n", encoding="utf-8")
+                review_paths = {
+                    provider: root / f"review-{provider}.json"
+                    for provider in MODULE.MODEL_REVIEW_PROVIDERS
+                }
+                for path in review_paths.values():
+                    path.write_text("{}\n", encoding="utf-8")
+
+                def reproduce(command, **_kwargs):
+                    Path(command[command.index("--output") + 1]).write_bytes(
+                        permit_bytes
+                    )
+                    return mock.Mock(returncode=returncode, stdout=b"", stderr=b"")
+
+                with mock.patch.object(
+                    MODULE.subprocess,
+                    "run",
+                    side_effect=reproduce,
+                ) as run:
+                    MODULE.verify_permit_reduction(
+                        root / "release-permit-verify",
+                        permit_path,
+                        context_path,
+                        review_paths,
+                        output_path,
+                    )
+                command = run.call_args.args[0]
+                self.assertEqual(command.count("--review"), 2)
+                self.assertLess(
+                    command.index(str(review_paths["anthropic"].resolve())),
+                    command.index(str(review_paths["openai"].resolve())),
+                )
+
+    def test_parent_kernel_reduction_rejects_nonidentical_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            permit_path = root / "release-permit.json"
+            context_path = root / "context.json"
+            output_path = root / "parent-kernel-permit.json"
+            permit_path.write_text('{"decision":"DENY"}\n', encoding="utf-8")
+            context_path.write_text("{}\n", encoding="utf-8")
+            review_paths = {
+                provider: root / f"review-{provider}.json"
+                for provider in MODULE.MODEL_REVIEW_PROVIDERS
+            }
+            for path in review_paths.values():
+                path.write_text("{}\n", encoding="utf-8")
+
+            def mismatch(command, **_kwargs):
+                Path(command[command.index("--output") + 1]).write_text(
+                    '{"decision":"ALLOW"}\n',
+                    encoding="utf-8",
+                )
+                return mock.Mock(returncode=3, stdout=b"", stderr=b"")
+
+            with (
+                mock.patch.object(MODULE.subprocess, "run", side_effect=mismatch),
+                self.assertRaisesRegex(
+                    MODULE.PermitInputError,
+                    "differs from the parent Kernel",
+                ),
+            ):
+                MODULE.verify_permit_reduction(
+                    root / "release-permit-verify",
+                    permit_path,
+                    context_path,
+                    review_paths,
+                    output_path,
+                )
 
 
 if __name__ == "__main__":

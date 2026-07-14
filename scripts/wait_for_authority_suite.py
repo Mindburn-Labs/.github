@@ -9,6 +9,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import sys
 import time
 from typing import Any
@@ -38,6 +39,8 @@ from wait_for_authority_canary import (
     parse_time,
     verify_attestation,
     verify_candidate_permit,
+    verify_permit_reduction,
+    write_model_reviews,
 )
 
 
@@ -360,7 +363,7 @@ def write_attested_case(
     repository: str,
     run_id: int,
     directory: Path,
-) -> tuple[Path, Path, Path]:
+) -> tuple[Path, Path, Path, dict[str, Path]]:
     permit_id = artifact_for_run(client, repository, run_id)
     context_id = artifact_for_run(client, repository, run_id, "release-permit-input")
     if permit_id is None or context_id is None:
@@ -384,7 +387,8 @@ def write_attested_case(
     permit_path.write_bytes(permit_bytes)
     bundle_path.write_bytes(bundle_bytes)
     context_path.write_bytes(context_bytes)
-    return permit_path, bundle_path, context_path
+    review_paths = write_model_reviews(client, repository, run_id, directory)
+    return permit_path, bundle_path, context_path, review_paths
 
 
 def candidate_runs(
@@ -450,7 +454,7 @@ def verify_case(
     if run.get("conclusion") != expected_conclusion:
         raise PermitInputError(f"{case['id']} run has the wrong conclusion")
     directory = args.output_dir / "cases" / case["id"]
-    permit_path, bundle_path, context_path = write_attested_case(
+    permit_path, bundle_path, context_path, review_paths = write_attested_case(
         client,
         repository,
         run["id"],
@@ -488,6 +492,13 @@ def verify_case(
             authority=authority,
             attestation_token=client.token,
         )
+    verify_permit_reduction(
+        args.kernel_verifier,
+        permit_path,
+        context_path,
+        review_paths,
+        directory / "parent-kernel-permit.json",
+    )
     return {
         "id": case["id"],
         "expected": expected,
@@ -548,8 +559,6 @@ def wait_for_suite(
                     rejected[case_id].add(run["id"])
                     case_dir = args.output_dir / "cases" / case_id
                     if case_dir.exists():
-                        import shutil
-
                         shutil.rmtree(case_dir)
                     continue
                 del pending[case_id]
