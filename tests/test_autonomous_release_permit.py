@@ -291,12 +291,18 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8",
         )
+        helper = (ROOT / "scripts" / "autonomous_release_permit.py").read_text(
+            encoding="utf-8",
+        )
         self.assertIn("copilot-requests: write", workflow)
         self.assertNotIn("pull_request_target", workflow)
         self.assertNotIn("cancel-in-progress", workflow)
+        self.assertIn("--available-tools=read", workflow)
         self.assertIn("--allow-tool=read", workflow)
+        self.assertIn('--add-dir="$GITHUB_WORKSPACE/permit-input"', workflow)
         self.assertIn('--add-dir="$GITHUB_WORKSPACE/verifier-source"', workflow)
-        self.assertIn("--deny-tool='shell,write,url,memory'", workflow)
+        for denied_tool in ("shell", "write", "url", "memory"):
+            self.assertIn(f"--deny-tool={denied_tool}", workflow)
         self.assertIn("--no-custom-instructions", workflow)
         self.assertIn("--disable-builtin-mcps", workflow)
         self.assertIn("--no-remote-export", workflow)
@@ -307,6 +313,8 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         )
         self.assertNotIn("npm install --global", workflow)
         self.assertNotIn('path: target\n', workflow[workflow.index("model-review:"):])
+        self.assertNotIn('prompt="$(<permit-input/review-prompt.txt)"', workflow)
+        self.assertIn("No target checkout or network context is available", helper)
         self.assertIn("name: HELM Autonomous Release Permit", workflow)
         self.assertIn("name: local-validation", workflow)
         self.assertIn("push:\n    branches:\n      - main", workflow)
@@ -339,11 +347,11 @@ class AutonomousReleasePermitTests(unittest.TestCase):
             encoding="utf-8",
         )
         self.assertIn("name: Deterministic repository gates", workflow)
-        for command in ('make "$required_target"', "Required make target", "Optional make target"):
-            self.assertIn(command, workflow)
-        self.assertIn("for required_target in lint test", workflow)
-        self.assertIn("has_target setup", workflow)
-        self.assertIn("has_target build", workflow)
+        self.assertIn("Checkout immutable organization gate profiles", workflow)
+        self.assertIn("run_autonomous_release_gates.py", workflow)
+        self.assertIn("config/autonomous-release-gates.json", workflow)
+        self.assertIn('--repository "$GITHUB_REPOSITORY"', workflow)
+        self.assertIn("ref: ${{ github.workflow_sha }}", workflow)
         self.assertIn("ref: ${{ github.sha }}", workflow)
         self.assertIn("--merge-sha \"$MERGE_SHA\"", workflow)
         self.assertIn("persist-credentials: false", workflow)
