@@ -122,7 +122,7 @@ jobs:
           WORKFLOW_SHA: ${{ github.workflow_sha }}
           ANTHROPIC_MODEL: claude-fable-5
           OPENAI_MODEL: gpt-5.6-sol
-          KERNEL_SHA: 2bdb27085c3d09e45a8c3e6c9d65cca2c623d003
+          KERNEL_SHA: 1ee8227af57b0c174d9659c14fcea57f7ea66860
           MAX_PATCH_BYTES: "524288"
           MAX_CHANGED_BLOB_BYTES: "8388608"
         run: |
@@ -189,7 +189,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: Mindburn-Labs/helm-ai-kernel
-          ref: 2bdb27085c3d09e45a8c3e6c9d65cca2c623d003
+          ref: 1ee8227af57b0c174d9659c14fcea57f7ea66860
           persist-credentials: false
           path: verifier-source
           sparse-checkout: |
@@ -316,7 +316,9 @@ jobs:
       - prepare
       - model-review
     permissions:
+      attestations: write
       contents: read
+      id-token: write
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -346,7 +348,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: Mindburn-Labs/helm-ai-kernel
-          ref: 2bdb27085c3d09e45a8c3e6c9d65cca2c623d003
+          ref: 1ee8227af57b0c174d9659c14fcea57f7ea66860
           persist-credentials: false
           path: kernel
 
@@ -402,6 +404,11 @@ jobs:
             echo "::error::HELM autonomous release permit denied or could not be verified"
             exit 1
           fi
+
+      - name: Attest verified permit provenance
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763
+        with:
+          subject-path: release-permit.json
 
       - name: Upload verified permit
         if: ${{ always() && hashFiles('release-permit.json') != '' }}

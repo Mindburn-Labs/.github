@@ -146,6 +146,8 @@ def verify_args(
         candidate_repository=repository,
         candidate_sha=candidate_sha,
         candidate_pr=33,
+        expected_run_id=101,
+        expected_run_attempt=1,
         expected_parent_generation=1,
         expected_parent_workflow_sha=PARENT_SHA,
         output=None,

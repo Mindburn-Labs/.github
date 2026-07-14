@@ -93,7 +93,7 @@ def prepare_args(
         anthropic_model="claude-fable-5",
         openai_model="gpt-5.6-sol",
         authority_manifest=ROOT / "config" / "autonomous-release-authority.json",
-        kernel_sha="2bdb27085c3d09e45a8c3e6c9d65cca2c623d003",
+        kernel_sha="1ee8227af57b0c174d9659c14fcea57f7ea66860",
         gate_profiles=ROOT / "config" / "autonomous-release-gates.json",
         adversarial_corpus=ROOT / "tests" / "fixtures" / "autonomous-release-adversarial.json",
         target_dir=repo,
@@ -405,9 +405,16 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertEqual(workflow.count("= \"$EXPECTED_WORKFLOW_SHA\""), 2)
         self.assertEqual(workflow.count("= \"$GITHUB_RUN_ATTEMPT\""), 2)
         self.assertEqual(
-            workflow.count("ref: 2bdb27085c3d09e45a8c3e6c9d65cca2c623d003"),
+            workflow.count("ref: 1ee8227af57b0c174d9659c14fcea57f7ea66860"),
             2,
         )
+        self.assertIn("attestations: write", workflow)
+        self.assertIn("id-token: write", workflow)
+        self.assertIn(
+            "uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763",
+            workflow,
+        )
+        self.assertIn("subject-path: release-permit.json", workflow)
         self.assertIn("config/autonomous-release-authority.json", workflow)
         self.assertIn("tests/fixtures/autonomous-release-adversarial.json", workflow)
         self.assertIn("path: verifier-source", workflow)

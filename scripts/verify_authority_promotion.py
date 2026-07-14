@@ -210,6 +210,10 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         raise PermitInputError("permit does not ratify the workflow authority repository")
     if permit["pull_request"] != args.candidate_pr:
         raise PermitInputError("permit pull request does not match the candidate")
+    if permit["run_id"] != args.expected_run_id:
+        raise PermitInputError("permit run_id does not match the triggering workflow run")
+    if permit["run_attempt"] != args.expected_run_attempt:
+        raise PermitInputError("permit run_attempt does not match the triggering workflow run")
     if permit["head_sha"] != candidate_sha:
         raise PermitInputError("permit head_sha does not match the candidate commit")
     if permit["workflow_sha"] != parent_sha:
@@ -277,6 +281,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--candidate-repository", type=Path, required=True)
     parser.add_argument("--candidate-sha", required=True)
     parser.add_argument("--candidate-pr", type=int, required=True)
+    parser.add_argument("--expected-run-id", type=int, required=True)
+    parser.add_argument("--expected-run-attempt", type=int, required=True)
     parser.add_argument("--expected-parent-generation", type=int, required=True)
     parser.add_argument("--expected-parent-workflow-sha", required=True)
     parser.add_argument("--output", type=Path)
