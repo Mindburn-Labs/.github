@@ -8,9 +8,9 @@ The canonical inventory is `repo-manifest.yaml`.
 
 Current verified state:
 
-- 43 repositories in the `Mindburn-Labs` GitHub organization.
-- 43 active repositories.
-- No repositories are archived.
+- 48 repositories in the `Mindburn-Labs` GitHub organization.
+- 47 active repositories.
+- 1 repository is archived.
 - Production release readiness is tracked in `integration-mindburn-platform/manifests/release-candidate.yaml`.
 - Final-state evidence is tracked in `integration-mindburn-platform/manifests/final-state-evidence.yaml`.
 
@@ -34,8 +34,17 @@ Repository inventory does not prove production readiness. When there is a confli
 - Keep the organization profile factual, compact, and free of release claims that belong to source or GitOps repos.
 - Keep retired org slugs out of tracked org-repository source; `make lint` runs the recurrence guard.
 
+## Autonomous Release Permit Evaluation
+
+`.github/workflows/autonomous-release-permit.yml` is the public, centrally
+bindable workflow for an evaluation-only machine quorum. It requires the exact
+pull-request head, deterministic repository gates, independent Claude Fable 5
+and GPT-5.6 Sol reviews, and the source-owned HELM Kernel reducer. It is not
+production-promotion authority, and it does not justify removing the existing
+human approval gate until its live positive and negative paths pass.
+
 ## Validation
 
 ```bash
-make lint
+make test
 ```

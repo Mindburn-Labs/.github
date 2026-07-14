@@ -1,8 +1,8 @@
 ---
 organization: Mindburn-Labs
 schema_version: final-production-inventory-v1
-generated_at: '2026-06-26'
-generated_by: ui-removal/headless-reset-2026-06-26 source-truth migration
+generated_at: '2026-07-14'
+generated_by: autonomous-release-permit live organization inventory refresh
 source_truth_priority:
 - source_code_and_route_registries
 - generated_contracts_and_sdks
@@ -12,8 +12,8 @@ source_truth_priority:
 - runbooks_and_architecture_docs
 - org_inventory
 inventory_summary:
-  total_repositories: 46
-  active_repositories: 45
+  total_repositories: 48
+  active_repositories: 47
   archived_repositories:
   - orggenome-compiler
   deleted_repositories:
@@ -101,6 +101,10 @@ repositories:
   visibility: private
   archived: false
   updated_at: '2026-05-26T20:29:22Z'
+- name: helm-desktop
+  visibility: private
+  archived: false
+  updated_at: '2026-07-13T11:27:13Z'
 - name: helm-rollout-evidence
   visibility: private
   archived: false
@@ -217,6 +221,10 @@ repositories:
   visibility: private
   archived: false
   updated_at: '2026-05-26T20:30:29Z'
+- name: tempora
+  visibility: private
+  archived: false
+  updated_at: '2026-07-12T19:13:31Z'
 - name: worker-helm-launch-worker
   visibility: private
   archived: false

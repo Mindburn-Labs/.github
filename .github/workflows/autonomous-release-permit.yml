@@ -1,0 +1,289 @@
+name: HELM Autonomous Release Permit
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+
+permissions: {}
+
+concurrency:
+  group: autonomous-release-permit-${{ github.repository }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  repository-gates:
+    name: Deterministic repository gates
+    if: ${{ github.event.pull_request.draft == false }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact pull-request head
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run required repository gates
+        env:
+          CI: "true"
+        run: |
+          set -euo pipefail
+          if [[ ! -f Makefile ]]; then
+            echo "::error::Makefile is required for organization-wide autonomous merging"
+            exit 1
+          fi
+          make setup
+          make lint
+          make test
+          make build
+
+  prepare:
+    name: Bind immutable review input
+    needs: repository-gates
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact pull-request head
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: target
+
+      - name: Checkout pinned policy helpers
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: Mindburn-Labs/.github
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+          path: policy
+
+      - name: Prepare commit-bound review bundle
+        env:
+          REPOSITORY: ${{ github.repository }}
+          PULL_REQUEST: ${{ github.event.pull_request.number }}
+          BASE_REF: refs/heads/${{ github.event.pull_request.base.ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          WORKFLOW_REPOSITORY: Mindburn-Labs/.github
+          WORKFLOW_PATH: .github/workflows/autonomous-release-permit.yml
+          WORKFLOW_REF: refs/heads/codex/autonomous-release-permit
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          ANTHROPIC_MODEL: claude-fable-5
+          OPENAI_MODEL: gpt-5.6-sol
+          MAX_PATCH_BYTES: "524288"
+        run: |
+          set -euo pipefail
+          python3 policy/scripts/autonomous_release_permit.py prepare \
+            --repository "$REPOSITORY" \
+            --pull-request "$PULL_REQUEST" \
+            --base-ref "$BASE_REF" \
+            --base-sha "$BASE_SHA" \
+            --head-sha "$HEAD_SHA" \
+            --workflow-repository "$WORKFLOW_REPOSITORY" \
+            --workflow-path "$WORKFLOW_PATH" \
+            --workflow-ref "$WORKFLOW_REF" \
+            --workflow-sha "$WORKFLOW_SHA" \
+            --run-id "$RUN_ID" \
+            --run-attempt "$RUN_ATTEMPT" \
+            --issued-at "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+            --anthropic-model "$ANTHROPIC_MODEL" \
+            --openai-model "$OPENAI_MODEL" \
+            --target-dir target \
+            --output-dir permit-input \
+            --max-patch-bytes "$MAX_PATCH_BYTES"
+
+      - name: Upload immutable review input
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-permit-input
+          path: permit-input
+          if-no-files-found: error
+          retention-days: 1
+
+  model-review:
+    name: ${{ matrix.provider }} / ${{ matrix.model }}
+    needs: prepare
+    permissions:
+      contents: read
+      copilot-requests: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - provider: anthropic
+            model: claude-fable-5
+          - provider: openai
+            model: gpt-5.6-sol
+    steps:
+      - name: Checkout exact pull-request head for read-only context
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: target
+
+      - name: Checkout pinned policy helpers
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: Mindburn-Labs/.github
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+          path: policy
+
+      - name: Download immutable review input
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-permit-input
+          path: permit-input
+
+      - name: Set up pinned Node.js runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+
+      - name: Install integrity-checked Copilot CLI
+        env:
+          EXPECTED_INTEGRITY: sha512-onEwx5tod9t31Lc2rT5ns6s/fY6jtdwVWS3Fzs8hKUjCv7LFIMGf71MLcikl4GBXn6cq44+HVdNzCMWnLjYl3g==
+        run: |
+          set -euo pipefail
+          npm pack @github/copilot@1.0.70 --json > copilot-pack.json
+          actual_integrity="$(jq -r '.[0].integrity' copilot-pack.json)"
+          package_file="$(jq -r '.[0].filename' copilot-pack.json)"
+          if [[ "$actual_integrity" != "$EXPECTED_INTEGRITY" ]]; then
+            echo "::error::Copilot CLI package integrity mismatch"
+            exit 1
+          fi
+          npm install --global "./$package_file"
+
+      - name: Run isolated read-only model review
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PROVIDER: ${{ matrix.provider }}
+          MODEL: ${{ matrix.model }}
+        run: |
+          set -euo pipefail
+          prompt="$(<permit-input/review-prompt.txt)"
+          (
+            cd permit-input
+            copilot -p "$prompt" -s \
+              --model "$MODEL" \
+              --allow-tool=read \
+              --add-dir="$GITHUB_WORKSPACE/target" \
+              --deny-tool='shell,write,url,memory' \
+              --no-ask-user
+          ) > "raw-$PROVIDER.json"
+          python3 policy/scripts/autonomous_release_permit.py envelope \
+            --context permit-input/context.json \
+            --raw "raw-$PROVIDER.json" \
+            --provider "$PROVIDER" \
+            --model "$MODEL" \
+            --output "review-$PROVIDER.json"
+
+      - name: Upload commit-bound review envelope
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-review-${{ matrix.provider }}
+          path: review-${{ matrix.provider }}.json
+          if-no-files-found: error
+          retention-days: 14
+
+  permit:
+    name: HELM Autonomous Release Permit
+    if: ${{ always() }}
+    needs:
+      - repository-gates
+      - prepare
+      - model-review
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download permit context
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-permit-input
+          path: permit-input
+
+      - name: Download available independent reviews
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: release-review-*
+          path: reviews
+          merge-multiple: true
+
+      - name: Checkout pinned Kernel verifier
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: Mindburn-Labs/helm-ai-kernel
+          ref: ed9afa8e6931115364efe2bbbd4f6479a1a10d11
+          persist-credentials: false
+          path: kernel
+
+      - name: Set up pinned Kernel toolchain
+        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00
+        with:
+          go-version-file: kernel/core/go.mod
+
+      - name: Build source-owned permit verifier
+        working-directory: kernel/core
+        run: go build -trimpath -o "$GITHUB_WORKSPACE/release-permit-verify" ./cmd/release-permit-verify
+
+      - name: Reduce independent reviews
+        run: |
+          set -euo pipefail
+          review_args=()
+          while IFS= read -r path; do
+            review_args+=(--review "$path")
+          done < <(find reviews -type f -name 'review-*.json' -print | sort)
+          if [[ "${#review_args[@]}" -eq 0 ]]; then
+            echo "::error::No valid model review envelopes were produced"
+            exit 1
+          fi
+
+          set +e
+          ./release-permit-verify \
+            --context permit-input/context.json \
+            "${review_args[@]}" \
+            --output release-permit.json \
+            > permit-output.json
+          verifier_status=$?
+          set -e
+
+          if [[ -f release-permit.json ]]; then
+            {
+              jq -r '"Decision: **" + .decision + "**  \nPermit: `" + .permit_id + "`  \nHead: `" + .head_sha + "`"' release-permit.json
+              echo
+              echo "Reason codes:"
+              jq -r '.reasons[]? | "- " + .code + " [" + (.reviewer // "quorum") + "]"' release-permit.json
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [[ "$verifier_status" -ne 0 ]]; then
+            echo "::error::HELM autonomous release permit denied or could not be verified"
+            exit 1
+          fi
+
+      - name: Upload verified permit
+        if: ${{ always() && hashFiles('release-permit.json') != '' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: helm-autonomous-release-permit
+          path: release-permit.json
+          if-no-files-found: error
+          retention-days: 30
