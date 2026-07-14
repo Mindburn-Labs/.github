@@ -251,7 +251,7 @@ jobs:
               --no-remote-export \
               --stream off \
               --disable-builtin-mcps \
-              --available-tools=read \
+              --available-tools=view \
               --allow-tool=read \
               --add-dir="$GITHUB_WORKSPACE/permit-input" \
               --add-dir="$GITHUB_WORKSPACE/verifier-source" \
