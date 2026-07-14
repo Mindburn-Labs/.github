@@ -94,9 +94,11 @@ python3 scripts/bootstrap_authority.py finalize \
 `finalize` re-verifies every bound digest, signed permit, and exact-head App
 approval; confirms the public approval cutover remains protected by both the
 workflow and machine-review interlocks; atomically moves
-`main` from the exact base SHA to the exact reviewed two-parent merge commit,
-and binds both rulesets to the merged `main` SHA. It is safe to rerun after an
-exact merge or partial ruleset finalization.
+`main` from the exact base SHA to the live PR's current GitHub-generated,
+reviewed two-parent merge commit using an exact `beforeOid`/`afterOid`
+compare-and-swap, and binds both rulesets to the merged `main` SHA. A stale or
+regenerated PR merge fails before the update. It is safe to rerun after an exact
+merge or partial ruleset finalization.
 
 Completion requires all of the following live readbacks:
 

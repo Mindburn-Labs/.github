@@ -22,6 +22,7 @@ class FakeClient:
         self.base_sha = base_sha
         self.head_sha = head_sha
         self.merge_sha = merge_sha
+        self.pull_request_merge_sha = merge_sha
         self.tree_sha = tree_sha
         self.graphql_calls = []
 
@@ -40,7 +41,7 @@ class FakeClient:
                 "state": "closed" if merged else "open",
                 "draft": False,
                 "merged": merged,
-                "merge_commit_sha": self.merge_sha if merged else None,
+                "merge_commit_sha": self.pull_request_merge_sha,
                 "base": {"ref": "main", "sha": self.base_sha},
                 "head": {
                     "sha": self.head_sha,
@@ -95,6 +96,20 @@ class AtomicMergeTests(unittest.TestCase):
             tree_sha=args.tree_sha,
         )
         with self.assertRaisesRegex(MODULE.PermitInputError, "main moved"):
+            MODULE.atomic_merge(args, client)
+        self.assertEqual(client.graphql_calls, [])
+
+    def test_atomic_merge_rejects_stale_github_generated_merge(self) -> None:
+        args = self.args()
+        client = FakeClient(
+            main_sha=args.base_sha,
+            base_sha=args.base_sha,
+            head_sha=args.head_sha,
+            merge_sha=args.merge_sha,
+            tree_sha=args.tree_sha,
+        )
+        client.pull_request_merge_sha = "9" * 40
+        with self.assertRaisesRegex(MODULE.PermitInputError, "current GitHub-generated"):
             MODULE.atomic_merge(args, client)
         self.assertEqual(client.graphql_calls, [])
 

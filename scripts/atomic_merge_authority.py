@@ -143,8 +143,13 @@ def validate_pull_request(
     if merged:
         if pull_request.get("merged") is not True or pull_request.get("merge_commit_sha") != merge_sha:
             raise PermitInputError("pull request is not marked merged at the exact reviewed commit")
-    elif pull_request.get("merged") is True:
-        raise PermitInputError("candidate pull request was already merged")
+    else:
+        if pull_request.get("merged") is True:
+            raise PermitInputError("candidate pull request was already merged")
+        if merge_sha is not None and pull_request.get("merge_commit_sha") != merge_sha:
+            raise PermitInputError(
+                "pull request no longer names the exact current GitHub-generated merge commit",
+            )
 
 
 def atomic_merge(args: argparse.Namespace, client: GitHubMergeClient) -> dict[str, Any]:
@@ -165,6 +170,7 @@ def atomic_merge(args: argparse.Namespace, client: GitHubMergeClient) -> dict[st
         base_sha=base_sha,
         head_sha=head_sha,
         merged=False,
+        merge_sha=merge_sha,
     )
     merge_commit = client.get(f"/repos/{REPOSITORY}/git/commits/{merge_sha}")
     parents = merge_commit.get("parents")
@@ -177,6 +183,11 @@ def atomic_merge(args: argparse.Namespace, client: GitHubMergeClient) -> dict[st
     ):
         raise PermitInputError("reviewed merge commit does not have the exact base, head, and tree")
 
+    # GitHub permits a protected-branch update when it exactly matches the
+    # merge GitHub generated for the approved pull request. The live PR check
+    # above binds this SHA to that current generated merge, while updateRefs
+    # supplies an atomic beforeOid guard so base movement cannot be raced.
+    # https://docs.github.com/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/managing-a-branch-protection-rule
     repository_data = client.graphql(REPOSITORY_ID_QUERY, {})
     repository = repository_data.get("repository")
     if not isinstance(repository, dict) or not isinstance(repository.get("id"), str):

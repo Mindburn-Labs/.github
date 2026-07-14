@@ -201,7 +201,11 @@ exact-head review but cannot read or write contents. The promoter can advance
 and restore exact ruleset bindings and run a permanent seven-attack plus
 one-ALLOW suite, but cannot write repository contents. A separate job with no
 App secret advances `main` only with an exact `beforeOid`/`afterOid`
-compare-and-swap to GitHub's reviewed two-parent merge commit. A later promoter
+compare-and-swap to the pull request's current GitHub-generated, reviewed
+two-parent merge commit. The broker rechecks the live PR's `merge_commit_sha`,
+base, head, parents, and tree immediately before the update. This is the exact
+protected-branch merge GitHub documents as admissible; any regenerated merge or
+base movement fails before the compare-and-swap. A later promoter
 job rebinds only the evaluation ruleset. A separate observer
 re-downloads both permits from their originating runs, verifies their GitHub
 attestations with the exact previous-generation Kernel, compares the merged
@@ -243,8 +247,9 @@ workflow cannot trigger from a file that is not yet on the default branch.
    three public repositories, and only then retire `.github` and Kernel from
    the CODEOWNER-specific organization rule; the `.github` classic one-review
    setting remains active; and
-7. reverify the ready receipt, atomically advance `main` to the exact liveness
-   merge commit, then bind both machine rulesets to that merged `main` SHA.
+7. reverify the ready receipt and the live PR's current GitHub-generated merge,
+   atomically advance `main` to that exact liveness merge commit, then bind both
+   machine rulesets to the merged `main` SHA.
 
 If failure occurs before machine enforcement, the staged candidate pin is
 compensated to generation 1. After machine enforcement begins, recovery leaves
