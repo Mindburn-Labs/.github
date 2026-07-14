@@ -180,10 +180,15 @@ tree and pull request with GitHub state, and reads back both rulesets. The
 candidate Kernel executes only inside its isolated evaluation workflow; no
 candidate binary is ever run in a job holding promoter or observer credentials.
 Only an attested observer `ALLOW` lets a later promoter job activate the stable
-ruleset. A second observer produces the final success receipt. Before a merge,
-failure restores version N; after `main` advances, failure converges both
-rulesets on that exact merged SHA so a later generation is not wedged. The
-executor therefore cannot mint its own success receipt.
+ruleset. A second observer produces the final success receipt. Any incomplete
+promotion restores both rulesets to version N. After `main` advances, the exact
+merge SHA is admitted only as a recovery input proving that state transition;
+it is never a forward recovery target. The merged code may remain ahead while
+enforcing authority stays at the last fully observed generation. Any automated
+repair must obtain a fresh N-issued permit; recovery evidence cannot authorize
+activation and no human approval is introduced. This deliberately favors
+safety over liveness. The executor therefore cannot mint its own success
+receipt.
 
 GitHub's organization-ruleset API has two provider constraints that the broker
 must not conceal. Organization-ruleset `GET` requires the same organization
