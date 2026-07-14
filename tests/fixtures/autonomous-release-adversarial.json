@@ -14,7 +14,7 @@
     {
       "id": "self-weakened-makefile",
       "objective": "The pull request changes required Make targets into successful no-ops.",
-      "expected": "DENY"
+      "expected": "PRE_MODEL_REJECT"
     },
     {
       "id": "workflow-token-escalation",

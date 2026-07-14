@@ -294,7 +294,7 @@ class AutonomousReleasePermitTests(unittest.TestCase):
                     '{"findings":[],"verdict":"ALLOW"}\n',
                 )
 
-    def test_normalize_extracts_unwrapped_response_from_copilot_jsonl(self) -> None:
+    def test_normalize_rejects_wrapped_response_from_copilot_jsonl(self) -> None:
         events = [
             {"type": "assistant.message", "data": {"content": "reading", "toolRequests": [{"name": "view"}]}},
             {
@@ -317,18 +317,16 @@ class AutonomousReleasePermitTests(unittest.TestCase):
                 "\n".join(json.dumps(event) for event in events) + "\n",
                 encoding="utf-8",
             )
-            MODULE.normalize_model_output(
-                argparse.Namespace(
-                    raw=raw,
-                    output=output,
-                    transport_format="copilot-jsonl",
-                    max_transport_bytes=16_777_216,
-                    max_response_bytes=1_048_576,
-                ),
-            )
-            response = json.loads(output.read_text(encoding="utf-8"))
-        self.assertEqual(response["verdict"], "DENY")
-        self.assertEqual(response["findings"][0]["code"], "BOUNDARY")
+            with self.assertRaisesRegex(MODULE.PermitInputError, "invalid JSON"):
+                MODULE.normalize_model_output(
+                    argparse.Namespace(
+                        raw=raw,
+                        output=output,
+                        transport_format="copilot-jsonl",
+                        max_transport_bytes=16_777_216,
+                        max_response_bytes=1_048_576,
+                    ),
+                )
 
     def test_normalize_rejects_ambiguous_terminal_json_suffix(self) -> None:
         events = [
@@ -426,7 +424,7 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertNotIn("--available-tools=read", workflow)
         self.assertIn("--allow-tool=read", workflow)
         self.assertIn('--add-dir="$GITHUB_WORKSPACE/permit-input"', workflow)
-        self.assertIn('--add-dir="$GITHUB_WORKSPACE/verifier-source"', workflow)
+        self.assertIn('--add-dir="$GITHUB_WORKSPACE/runtime/verifier-source"', workflow)
         for denied_tool in ("shell", "write", "url", "memory"):
             self.assertIn(f"--deny-tool={denied_tool}", workflow)
         self.assertIn("--no-custom-instructions", workflow)
@@ -439,6 +437,11 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         )
         self.assertNotIn("npm install --global", workflow)
         self.assertNotIn('path: target\n', workflow[workflow.index("model-review:"):])
+        model_job = workflow[
+            workflow.index("  model-review:"):workflow.index("  permit:")
+        ]
+        self.assertNotIn("contents: read", model_job)
+        self.assertIn("actions: read", model_job)
         self.assertNotIn('prompt="$(<permit-input/review-prompt.txt)"', workflow)
         self.assertIn("No target checkout or network context is available", helper)
         self.assertIn("name: HELM Autonomous Release Permit", workflow)
@@ -469,6 +472,8 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertIn("config/autonomous-release-authority.json", workflow)
         self.assertIn("tests/fixtures/autonomous-release-adversarial.json", workflow)
         self.assertIn("path: verifier-source", workflow)
+        self.assertIn("name: release-review-runtime", workflow)
+        self.assertIn("python3 runtime/policy/scripts/autonomous_release_permit.py", workflow)
         self.assertIn("core/pkg/releasepermit", workflow)
         self.assertIn("core/cmd/release-permit-verify", workflow)
         self.assertIn("Exactly two review envelopes are required", workflow)

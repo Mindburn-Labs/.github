@@ -154,7 +154,13 @@ def verify_attestation(
     repository: str,
     workflow_sha: str,
     source_sha: str,
+    github_token: str | None = None,
 ) -> None:
+    environment = os.environ.copy()
+    if github_token is not None:
+        if not github_token:
+            raise PermitInputError("attestation verification token is empty")
+        environment["GH_TOKEN"] = github_token
     process = subprocess.run(
         [
             "gh",
@@ -176,7 +182,7 @@ def verify_attestation(
         check=False,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        env=os.environ.copy(),
+        env=environment,
     )
     if process.returncode != 0:
         detail = process.stderr.decode("utf-8", errors="replace").strip()
@@ -195,6 +201,7 @@ def verify_candidate_permit(
     expected_workflow_sha: str,
     expected_authority: dict[str, Any],
     kernel_verifier: Path,
+    attestation_token: str | None = None,
 ) -> dict[str, Any]:
     permit = load_json_file(permit_path, label="canary permit")
     authority = validate_permit(permit)
@@ -217,6 +224,7 @@ def verify_candidate_permit(
         repository=repository,
         workflow_sha=expected_workflow_sha,
         source_sha=permit["merge_sha"],
+        github_token=attestation_token,
     )
     verify_permit_with_kernel(kernel_verifier, permit_path, trusted_context_path)
     return permit
@@ -314,6 +322,7 @@ def wait_for_canary(args: argparse.Namespace, client: GitHubReadClient) -> dict[
                     expected_workflow_sha=workflow_sha,
                     expected_authority=authority,
                     kernel_verifier=args.kernel_verifier,
+                    attestation_token=client.token,
                 )
             except PermitInputError:
                 args.output.unlink(missing_ok=True)

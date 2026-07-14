@@ -35,6 +35,7 @@ def execution() -> dict[str, object]:
         "canary_run_id": 202,
         "canary_run_attempt": 1,
         "canary_permit_id": "sha256:" + "6" * 64,
+        "authority_suite_sha256": "7" * 64,
     }
 
 

@@ -24,15 +24,22 @@ MERGE_SHA = "3" * 40
 CANDIDATE_REF = "refs/heads/authority-next"
 
 
-def ruleset(kind: str, sha: str, ref: str) -> dict[str, object]:
+def ruleset(
+    kind: str,
+    sha: str,
+    ref: str,
+    *,
+    enforcement: str | None = None,
+    conditions: dict[str, object] | None = None,
+) -> dict[str, object]:
     stable = kind == "stable"
     return {
         "id": MODULE.STABLE_RULESET_ID if stable else MODULE.CANDIDATE_RULESET_ID,
         "name": MODULE.STABLE_RULESET_NAME if stable else MODULE.CANDIDATE_RULESET_NAME,
         "target": "branch",
-        "enforcement": "active" if stable else "evaluate",
+        "enforcement": enforcement or ("active" if stable else "evaluate"),
         "bypass_actors": [],
-        "conditions": MODULE.expected_conditions(kind),
+        "conditions": conditions or MODULE.expected_conditions(kind),
         "rules": [
             {
                 "type": "workflows",
@@ -53,12 +60,19 @@ def ruleset(kind: str, sha: str, ref: str) -> dict[str, object]:
 
 
 class FakeClient:
-    def __init__(self, stable: dict[str, object], candidate: dict[str, object]) -> None:
+    def __init__(
+        self,
+        stable: dict[str, object],
+        candidate: dict[str, object],
+        *,
+        fail_put: int | None = None,
+    ) -> None:
         self.current = {
             MODULE.STABLE_RULESET_ID: json.loads(json.dumps(stable)),
             MODULE.CANDIDATE_RULESET_ID: json.loads(json.dumps(candidate)),
         }
         self.puts: list[int] = []
+        self.fail_put = fail_put
 
     def request(
         self,
@@ -72,6 +86,9 @@ class FakeClient:
             return MODULE.APIResponse(json.loads(json.dumps(self.current[ruleset_id])))
         if method != "PUT" or payload is None:
             raise AssertionError(f"unexpected request {method} {path}")
+        if self.fail_put == ruleset_id:
+            self.fail_put = None
+            raise MODULE.PermitInputError("simulated ruleset update failure")
         updated = json.loads(json.dumps(payload))
         updated["id"] = ruleset_id
         self.current[ruleset_id] = updated
@@ -90,6 +107,14 @@ def args(operation: str, *, merge_sha: str | None = None) -> argparse.Namespace:
 
 
 class AuthorityRulesetBrokerTests(unittest.TestCase):
+    def test_stable_machine_coverage_is_public_only(self) -> None:
+        conditions = MODULE.expected_conditions("stable")
+        self.assertEqual(
+            conditions["repository_id"]["repository_ids"],
+            list(MODULE.PUBLIC_AUTONOMOUS_REPOSITORY_IDS),
+        )
+        self.assertNotIn("repository_name", conditions)
+
     def test_advance_observe_rebind_then_activate_preserves_safe_order(self) -> None:
         client = FakeClient(
             ruleset("stable", PARENT_SHA, MODULE.MAIN_REF),
@@ -179,6 +204,88 @@ class AuthorityRulesetBrokerTests(unittest.TestCase):
                 with self.assertRaises(MODULE.PermitInputError):
                     MODULE.transition(args("advance"), client)
                 self.assertEqual(client.puts, [])
+
+    def test_generation_one_bootstrap_stages_enforces_then_finalizes(self) -> None:
+        candidate_ref = "refs/heads/codex/autonomous-release-gen2-bootstrap"
+        client = FakeClient(
+            ruleset(
+                "stable",
+                MODULE.LEGACY_STABLE_WORKFLOW_SHA,
+                MODULE.LEGACY_WORKFLOW_REF,
+                enforcement="evaluate",
+                conditions=MODULE.legacy_stable_conditions(),
+            ),
+            ruleset(
+                "candidate",
+                MODULE.LEGACY_PARENT_WORKFLOW_SHA,
+                MODULE.LEGACY_WORKFLOW_REF,
+            ),
+        )
+        bootstrap_args = argparse.Namespace(
+            operation="bootstrap-stage",
+            parent_sha=MODULE.LEGACY_PARENT_WORKFLOW_SHA,
+            candidate_sha=CANDIDATE_SHA,
+            candidate_ref=candidate_ref,
+            merge_sha=None,
+        )
+        MODULE.transition(bootstrap_args, client)
+        self.assertEqual(client.puts, [MODULE.CANDIDATE_RULESET_ID])
+
+        bootstrap_args.operation = "bootstrap-enforce"
+        MODULE.transition(bootstrap_args, client)
+        self.assertEqual(
+            client.puts,
+            [
+                MODULE.CANDIDATE_RULESET_ID,
+                MODULE.STABLE_RULESET_ID,
+            ],
+        )
+        stable = client.current[MODULE.STABLE_RULESET_ID]
+        self.assertEqual(stable["enforcement"], "active")
+        self.assertEqual(stable["conditions"], MODULE.expected_conditions("stable"))
+
+        bootstrap_args.operation = "bootstrap-finalize"
+        bootstrap_args.merge_sha = MERGE_SHA
+        MODULE.transition(bootstrap_args, client)
+        self.assertEqual(
+            client.puts,
+            [
+                MODULE.CANDIDATE_RULESET_ID,
+                MODULE.STABLE_RULESET_ID,
+                MODULE.CANDIDATE_RULESET_ID,
+                MODULE.STABLE_RULESET_ID,
+            ],
+        )
+        for ruleset_id in (MODULE.STABLE_RULESET_ID, MODULE.CANDIDATE_RULESET_ID):
+            binding = MODULE.workflow_binding(client.current[ruleset_id])
+            self.assertEqual((binding["sha"], binding["ref"]), (MERGE_SHA, MODULE.MAIN_REF))
+
+    def test_bootstrap_finalization_compensates_candidate_if_stable_update_fails(self) -> None:
+        candidate_ref = "refs/heads/codex/autonomous-release-gen2-bootstrap"
+        client = FakeClient(
+            ruleset(
+                "stable",
+                CANDIDATE_SHA,
+                candidate_ref,
+            ),
+            ruleset("candidate", CANDIDATE_SHA, candidate_ref),
+            fail_put=MODULE.STABLE_RULESET_ID,
+        )
+        bootstrap_args = argparse.Namespace(
+            operation="bootstrap-finalize",
+            parent_sha=MODULE.LEGACY_PARENT_WORKFLOW_SHA,
+            candidate_sha=CANDIDATE_SHA,
+            candidate_ref=candidate_ref,
+            merge_sha=MERGE_SHA,
+        )
+        with self.assertRaisesRegex(MODULE.PermitInputError, "candidate was restored"):
+            MODULE.transition(bootstrap_args, client)
+        self.assertEqual(
+            client.puts,
+            [MODULE.CANDIDATE_RULESET_ID, MODULE.CANDIDATE_RULESET_ID],
+        )
+        binding = MODULE.workflow_binding(client.current[MODULE.CANDIDATE_RULESET_ID])
+        self.assertEqual((binding["sha"], binding["ref"]), (CANDIDATE_SHA, candidate_ref))
 
 
 if __name__ == "__main__":

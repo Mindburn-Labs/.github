@@ -6,7 +6,33 @@
         ["make", "test"]
       ],
       "protected_files": {
-        "Makefile": "4559934af490cb54f61405c8471fca1e9d287ea5c719ff90192d33c1ec180925"
+        ".github/workflows/ci.yml": "bd72bfc9cb9ee6c914023f6c1d004c8f265a55aa4120a8ae61157cacfecf4691",
+        ".github/workflows/promote-authority.yml": "fd7d1c79061f78e88203566054f1ad4bfd4da2f8f4f7c8908ff2d57c144a7000",
+        "Makefile": "4559934af490cb54f61405c8471fca1e9d287ea5c719ff90192d33c1ec180925",
+        "config/autonomous-release-bootstrap-v1.json": "115db71d1994fd6c275a2adeefa8ecd181e56c64bc98a5a1406cabf058e6c5bf",
+        "config/autonomous-release-control-plane.json": "33f3ab3cd2ac122c2df43e316f476a82d2a86e3fe633a318b60446ce85d00de7",
+        "scripts/atomic_merge_authority.py": "4b96da107ff6c6e110e64cf8d0f067885083d7ce8e5b1815ffe8f31fc976660d",
+        "scripts/authority_ruleset_broker.py": "ac4ea25b43fc7a527f50c63b9b3bfcb8369ef1710cfb899de6d4ff3981b99c42",
+        "scripts/autonomous_release_permit.py": "ed42fd334c5cc4db34a7d338f1f67206a24faed3ef839bd4a8ccfc1a5b40e9c1",
+        "scripts/bootstrap_authority.py": "7ab3e5db3b632a808a30d170e7c248cb08a95a5428c91ad755518c652c26816a",
+        "scripts/observe_authority_promotion.py": "b1a39e6c17d2ef0b30eb851dae23e07fea372f06681ac4834b2d5cf041e97b01",
+        "scripts/remove_human_approval_gates.py": "331f41372c00bb91601829ea4433b133a033e48983e085676a4501019bd1665f",
+        "scripts/run_autonomous_release_gates.py": "e9ab0ed2d91923e93df3e7c148f2ea15381cff9ceb6f4360d3b1fd258ae26f31",
+        "scripts/verify_authority_promotion.py": "b4d9e75f7a35b4c732239481c1e67e7b20d844ae7dbf7a02521a93f07261ff55",
+        "scripts/verify_control_plane.py": "553463ba6e9d534d4cf56f28b0fabdee0b39852c41fffadcb34274d0d9eda912",
+        "scripts/wait_for_authority_canary.py": "c26bb4bdec142bfbca6ff0780265b1e80ff24f9aa0d8c5b4e5b9a53829988b62",
+        "scripts/wait_for_authority_suite.py": "f32b48065cfe72017533db2cfcf64dcef9477add00fc563e6f0384b1a3cfc4d6",
+        "tests/test_atomic_merge_authority.py": "b3ea82bce75286de904549c8bb60b07fa392f6ccab668791194ced806308fe73",
+        "tests/test_authority_ruleset_broker.py": "badec4484bc80ecfce104add6d1544c857d1930ecb92209776edab651eaee98a",
+        "tests/test_autonomous_release_permit.py": "dad14318e92608bb7ef81dcb35bc15dbda801093faa09c36ea6134dc4a4e9d43",
+        "tests/test_bootstrap_authority.py": "371a9cf1a8ce979808e1d04ebbece750fb8e056bf2645ac1472de84058044a52",
+        "tests/test_observe_authority_promotion.py": "9b4466fc05adbb0ba7f6458e2563370cd90a299c92f54dfc5874eeba326cce66",
+        "tests/test_remove_human_approval_gates.py": "a8a58acdf397013a6be90e8e108e1a1152174e56f4e9d1f54e246b9b090e264f",
+        "tests/test_verify_control_plane.py": "75ea25ac513c4cb4804322a0a0697cf66036b03c6eafb4f0183bde7804ab1a51",
+        "tests/test_wait_for_authority_canary.py": "90a93449860aed5e72e76d646e92b8e100927b1d1dacf64f5eb155cb8d6f778f",
+        "tests/test_wait_for_authority_suite.py": "7c1b4ebedf1741530c9805cd9903cfe4e43301a40506b95abc64ae1fdb53ba0f",
+        "tools/offline-attest/attest.mjs": "21c544e689f472039cbd5fd621fab34b801bdd40b92fb68745948253ce621144",
+        "tools/offline-attest/package-lock.json": "a4b898bac65ba7ccbf1b6871d5ec5c6fdcf83d8d38fa976b52ad11bad29ac135"
       }
     },
     "Mindburn-Labs/app-helm-console": {

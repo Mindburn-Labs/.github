@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -61,6 +62,7 @@ EXECUTION_KEYS = {
     "canary_run_id",
     "canary_run_attempt",
     "canary_permit_id",
+    "authority_suite_sha256",
 }
 CANARY_RECEIPT_KEYS = {
     "schema",
@@ -137,6 +139,11 @@ def validate_execution(value: dict[str, Any]) -> dict[str, Any]:
     require_positive_int(value["canary_run_attempt"], label="canary_run_attempt")
     require_permit_id(value["ratification_permit_id"], label="ratification_permit_id")
     require_permit_id(value["canary_permit_id"], label="canary_permit_id")
+    require_sha(
+        value["authority_suite_sha256"],
+        label="authority_suite_sha256",
+        length=64,
+    )
     return value
 
 
@@ -157,6 +164,10 @@ def observe(
     ruleset_client: GitHubRulesetClient,
 ) -> dict[str, Any]:
     execution = validate_execution(load_json(args.execution, label="promotion execution"))
+    if hashlib.sha256(args.authority_suite.read_bytes()).hexdigest() != execution[
+        "authority_suite_sha256"
+    ]:
+        raise PermitInputError("authority suite receipt does not match promotion execution")
     parent_authority = validate_authority_shape(
         load_json(args.parent_authority, label="parent authority"),
         label="parent authority",
@@ -385,6 +396,7 @@ def observe(
         "merged_tree_sha": main_tree_sha,
         "canary_permit_id": permit["permit_id"],
         "ratification_permit_id": ratification_permit["permit_id"],
+        "authority_suite_sha256": execution["authority_suite_sha256"],
         "stable_ruleset_id": STABLE_RULESET_ID,
         "stable_workflow_sha": stable_sha,
         "candidate_ruleset_id": CANDIDATE_RULESET_ID,
@@ -406,6 +418,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--canary-bundle", type=Path, required=True)
     parser.add_argument("--canary-context", type=Path, required=True)
     parser.add_argument("--canary-receipt", type=Path, required=True)
+    parser.add_argument("--authority-suite", type=Path, required=True)
     parser.add_argument("--parent-kernel-verifier", type=Path, required=True)
     parser.add_argument("--promotion-run-id", type=int, required=True)
     parser.add_argument("--promotion-run-attempt", type=int, required=True)

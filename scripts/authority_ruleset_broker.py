@@ -34,6 +34,14 @@ CANDIDATE_REPOSITORY_IDS = (
     1286471668,
     1300498536,
 )
+PUBLIC_AUTONOMOUS_REPOSITORY_IDS = (
+    1158479649,
+    1159255601,
+    1300498536,
+)
+LEGACY_STABLE_WORKFLOW_SHA = "8500b6549a61a9c1caf7575964132651ffb754c8"
+LEGACY_PARENT_WORKFLOW_SHA = "a202531b4e4fd8a5468ac985abcdb2a407a7f381"
+LEGACY_WORKFLOW_REF = "refs/heads/codex/autonomous-release-permit"
 
 
 @dataclass(frozen=True)
@@ -102,11 +110,20 @@ def expected_conditions(kind: str) -> dict[str, Any]:
     if kind == "stable":
         return {
             "ref_name": ref_condition,
-            "repository_name": {"exclude": [], "include": ["~ALL"]},
+            "repository_id": {
+                "repository_ids": list(PUBLIC_AUTONOMOUS_REPOSITORY_IDS),
+            },
         }
     return {
         "ref_name": ref_condition,
         "repository_id": {"repository_ids": list(CANDIDATE_REPOSITORY_IDS)},
+    }
+
+
+def legacy_stable_conditions() -> dict[str, Any]:
+    return {
+        "ref_name": {"exclude": [], "include": ["~DEFAULT_BRANCH"]},
+        "repository_name": {"exclude": [], "include": ["~ALL"]},
     }
 
 
@@ -151,17 +168,20 @@ def validate_ruleset(
     kind: str,
     expected_sha: str,
     expected_ref: str,
+    expected_enforcement: str | None = None,
+    expected_coverage: dict[str, Any] | None = None,
 ) -> None:
     expected_id = STABLE_RULESET_ID if kind == "stable" else CANDIDATE_RULESET_ID
     expected_name = STABLE_RULESET_NAME if kind == "stable" else CANDIDATE_RULESET_NAME
-    expected_enforcement = "active" if kind == "stable" else "evaluate"
+    enforcement = expected_enforcement or ("active" if kind == "stable" else "evaluate")
+    coverage = expected_coverage or expected_conditions(kind)
     if ruleset.get("id") != expected_id or ruleset.get("name") != expected_name:
         raise PermitInputError(f"unexpected {kind} ruleset identity")
-    if ruleset.get("target") != "branch" or ruleset.get("enforcement") != expected_enforcement:
+    if ruleset.get("target") != "branch" or ruleset.get("enforcement") != enforcement:
         raise PermitInputError(f"unexpected {kind} ruleset target or enforcement")
     if ruleset.get("bypass_actors") != []:
         raise PermitInputError(f"{kind} ruleset cannot have bypass actors")
-    if ruleset.get("conditions") != expected_conditions(kind):
+    if ruleset.get("conditions") != coverage:
         raise PermitInputError(f"unexpected {kind} ruleset coverage")
     workflow = workflow_binding(ruleset)
     if workflow["sha"] != expected_sha or workflow["ref"] != expected_ref:
@@ -184,6 +204,8 @@ def update_payload(
     *,
     workflow_sha: str,
     workflow_ref: str,
+    enforcement: str | None = None,
+    conditions: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     require_sha(workflow_sha, label="new workflow sha", length=40)
     validate_ref(workflow_ref, label="new workflow ref")
@@ -192,6 +214,12 @@ def update_payload(
         for key in ("name", "target", "enforcement", "bypass_actors", "conditions", "rules")
     }
     payload = json.loads(json.dumps(payload))
+    if enforcement is not None:
+        if enforcement not in {"active", "evaluate"}:
+            raise PermitInputError("new ruleset enforcement is invalid")
+        payload["enforcement"] = enforcement
+    if conditions is not None:
+        payload["conditions"] = json.loads(json.dumps(conditions))
     payload["rules"][0]["parameters"]["workflows"][0]["sha"] = workflow_sha
     payload["rules"][0]["parameters"]["workflows"][0]["ref"] = workflow_ref
     return payload
@@ -207,6 +235,8 @@ def put_ruleset(
     *,
     workflow_sha: str,
     workflow_ref: str,
+    enforcement: str | None = None,
+    conditions: dict[str, Any] | None = None,
 ) -> APIResponse:
     ruleset_id = current.body["id"]
     refetched = get_ruleset(client, ruleset_id)
@@ -216,6 +246,8 @@ def put_ruleset(
         current.body,
         workflow_sha=workflow_sha,
         workflow_ref=workflow_ref,
+        enforcement=enforcement,
+        conditions=conditions,
     )
     client.request(
         "PUT",
@@ -238,6 +270,197 @@ def transition(args: argparse.Namespace, client: GitHubRulesetClient) -> dict[st
     candidate_ref = validate_ref(args.candidate_ref, label="candidate_ref")
     stable = get_ruleset(client, STABLE_RULESET_ID)
     candidate = get_ruleset(client, CANDIDATE_RULESET_ID)
+
+    if args.operation in {"bootstrap-stage", "bootstrap-restore"}:
+        if parent_sha != LEGACY_PARENT_WORKFLOW_SHA:
+            raise PermitInputError("bootstrap requires the exact generation-1 parent")
+        validate_ruleset(
+            stable.body,
+            kind="stable",
+            expected_sha=LEGACY_STABLE_WORKFLOW_SHA,
+            expected_ref=LEGACY_WORKFLOW_REF,
+            expected_enforcement="evaluate",
+            expected_coverage=legacy_stable_conditions(),
+        )
+
+        if args.operation == "bootstrap-stage":
+            try:
+                validate_ruleset(
+                    candidate.body,
+                    kind="candidate",
+                    expected_sha=candidate_sha,
+                    expected_ref=candidate_ref,
+                )
+            except PermitInputError:
+                validate_ruleset(
+                    candidate.body,
+                    kind="candidate",
+                    expected_sha=LEGACY_PARENT_WORKFLOW_SHA,
+                    expected_ref=LEGACY_WORKFLOW_REF,
+                )
+            else:
+                return receipt(args.operation, parent_sha, candidate_sha, candidate_ref, None)
+            updated = put_ruleset(
+                client,
+                candidate,
+                workflow_sha=candidate_sha,
+                workflow_ref=candidate_ref,
+            )
+            validate_ruleset(
+                updated.body,
+                kind="candidate",
+                expected_sha=candidate_sha,
+                expected_ref=candidate_ref,
+            )
+            return receipt(args.operation, parent_sha, candidate_sha, candidate_ref, None)
+
+        if args.operation == "bootstrap-restore":
+            validate_ruleset(
+                candidate.body,
+                kind="candidate",
+                expected_sha=candidate_sha,
+                expected_ref=candidate_ref,
+            )
+            updated = put_ruleset(
+                client,
+                candidate,
+                workflow_sha=LEGACY_PARENT_WORKFLOW_SHA,
+                workflow_ref=LEGACY_WORKFLOW_REF,
+            )
+            validate_ruleset(
+                updated.body,
+                kind="candidate",
+                expected_sha=LEGACY_PARENT_WORKFLOW_SHA,
+                expected_ref=LEGACY_WORKFLOW_REF,
+            )
+            return receipt(args.operation, parent_sha, candidate_sha, candidate_ref, None)
+
+    if args.operation == "bootstrap-enforce":
+        if parent_sha != LEGACY_PARENT_WORKFLOW_SHA:
+            raise PermitInputError("bootstrap requires the exact generation-1 parent")
+        validate_ruleset(
+            candidate.body,
+            kind="candidate",
+            expected_sha=candidate_sha,
+            expected_ref=candidate_ref,
+        )
+        try:
+            validate_ruleset(
+                stable.body,
+                kind="stable",
+                expected_sha=candidate_sha,
+                expected_ref=candidate_ref,
+            )
+        except PermitInputError:
+            validate_ruleset(
+                stable.body,
+                kind="stable",
+                expected_sha=LEGACY_STABLE_WORKFLOW_SHA,
+                expected_ref=LEGACY_WORKFLOW_REF,
+                expected_enforcement="evaluate",
+                expected_coverage=legacy_stable_conditions(),
+            )
+        else:
+            return receipt(args.operation, parent_sha, candidate_sha, candidate_ref, None)
+        stable_updated = put_ruleset(
+            client,
+            stable,
+            workflow_sha=candidate_sha,
+            workflow_ref=candidate_ref,
+            enforcement="active",
+            conditions=expected_conditions("stable"),
+        )
+        validate_ruleset(
+            stable_updated.body,
+            kind="stable",
+            expected_sha=candidate_sha,
+            expected_ref=candidate_ref,
+        )
+        return receipt(args.operation, parent_sha, candidate_sha, candidate_ref, None)
+
+    if args.operation == "bootstrap-finalize":
+        if parent_sha != LEGACY_PARENT_WORKFLOW_SHA:
+            raise PermitInputError("bootstrap requires the exact generation-1 parent")
+        merge_sha = require_sha(args.merge_sha, label="merge_sha", length=40)
+        try:
+            validate_ruleset(
+                stable.body,
+                kind="stable",
+                expected_sha=merge_sha,
+                expected_ref=MAIN_REF,
+            )
+        except PermitInputError:
+            validate_ruleset(
+                stable.body,
+                kind="stable",
+                expected_sha=candidate_sha,
+                expected_ref=candidate_ref,
+            )
+        else:
+            validate_ruleset(
+                candidate.body,
+                kind="candidate",
+                expected_sha=merge_sha,
+                expected_ref=MAIN_REF,
+            )
+            return receipt(args.operation, parent_sha, candidate_sha, candidate_ref, merge_sha)
+        try:
+            validate_ruleset(
+                candidate.body,
+                kind="candidate",
+                expected_sha=merge_sha,
+                expected_ref=MAIN_REF,
+            )
+            candidate_updated = candidate
+        except PermitInputError:
+            validate_ruleset(
+                candidate.body,
+                kind="candidate",
+                expected_sha=candidate_sha,
+                expected_ref=candidate_ref,
+            )
+            candidate_updated = put_ruleset(
+                client,
+                candidate,
+                workflow_sha=merge_sha,
+                workflow_ref=MAIN_REF,
+            )
+            validate_ruleset(
+                candidate_updated.body,
+                kind="candidate",
+                expected_sha=merge_sha,
+                expected_ref=MAIN_REF,
+            )
+        try:
+            stable_updated = put_ruleset(
+                client,
+                stable,
+                workflow_sha=merge_sha,
+                workflow_ref=MAIN_REF,
+            )
+        except PermitInputError as activation_error:
+            try:
+                put_ruleset(
+                    client,
+                    candidate_updated,
+                    workflow_sha=candidate_sha,
+                    workflow_ref=candidate_ref,
+                )
+            except PermitInputError as compensation_error:
+                raise PermitInputError(
+                    "stable bootstrap finalization and candidate compensation both failed: "
+                    f"activation={activation_error}; compensation={compensation_error}",
+                ) from compensation_error
+            raise PermitInputError(
+                f"stable bootstrap finalization failed; candidate was restored: {activation_error}",
+            ) from activation_error
+        validate_ruleset(
+            stable_updated.body,
+            kind="stable",
+            expected_sha=merge_sha,
+            expected_ref=MAIN_REF,
+        )
+        return receipt(args.operation, parent_sha, candidate_sha, candidate_ref, merge_sha)
 
     if args.operation == "advance":
         validate_ruleset(stable.body, kind="stable", expected_sha=parent_sha, expected_ref=MAIN_REF)
@@ -346,12 +569,25 @@ def receipt(
         "candidate_workflow_sha": candidate_sha,
         "candidate_workflow_ref": candidate_ref,
         "merged_workflow_sha": merge_sha,
+        "public_autonomous_repository_ids": list(PUBLIC_AUTONOMOUS_REPOSITORY_IDS),
     }
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
-    parser.add_argument("operation", choices=("advance", "rebind", "activate", "restore"))
+    parser.add_argument(
+        "operation",
+        choices=(
+            "advance",
+            "rebind",
+            "activate",
+            "restore",
+            "bootstrap-stage",
+            "bootstrap-enforce",
+            "bootstrap-finalize",
+            "bootstrap-restore",
+        ),
+    )
     parser.add_argument("--parent-sha", required=True)
     parser.add_argument("--candidate-sha", required=True)
     parser.add_argument("--candidate-ref", required=True)
@@ -363,10 +599,15 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str]) -> int:
     try:
         args = build_parser().parse_args(argv)
-        if args.operation in {"rebind", "activate"} and not args.merge_sha:
+        if args.operation in {"rebind", "activate", "bootstrap-finalize"} and not args.merge_sha:
             raise PermitInputError(f"{args.operation} requires --merge-sha")
-        if args.operation == "advance" and args.merge_sha:
-            raise PermitInputError("--merge-sha is not valid for advance")
+        if args.operation in {
+            "advance",
+            "bootstrap-stage",
+            "bootstrap-enforce",
+            "bootstrap-restore",
+        } and args.merge_sha:
+            raise PermitInputError(f"--merge-sha is not valid for {args.operation}")
         client = GitHubRulesetClient(
             os.environ.get("GH_TOKEN", ""),
             api_url=os.environ.get("GITHUB_API_URL", "https://api.github.com"),

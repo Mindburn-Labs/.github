@@ -34,20 +34,24 @@ Repository inventory does not prove production readiness. When there is a confli
 - Keep the organization profile factual, compact, and free of release claims that belong to source or GitOps repos.
 - Keep retired org slugs out of tracked org-repository source; `make lint` runs the recurrence guard.
 
-## Autonomous Release Permit Evaluation
+## Autonomous Release Permit
 
-`.github/workflows/ci.yml` is the public, centrally
-bindable workflow for an evaluation-only machine quorum. It requires the exact
+`.github/workflows/ci.yml` is the public, centrally bindable workflow for a
+fail-closed machine quorum. It requires the exact
 GitHub merge tree, deterministic repository gates, separately executed Claude
 Fable 5 and GPT-5.6 Sol provider reviews, and the source-owned HELM Kernel
 reducer. GitHub Copilot remains the shared control plane for both model jobs.
-The common gate contract requires `make lint` and `make test`; `setup` and
-`build` run when present.
-The pre-existing `local-validation` check and push-to-`main` coverage remain in
-place during evaluation.
-The workflow is not production-promotion authority, and it does not justify
-removing the existing human approval gate until its live positive, negative,
-adversarial, and strict-current-base paths pass.
+Every repository has an explicit digest-locked gate profile; no target-owned
+fallback can weaken the required commands. Promotion requires previous-
+generation ratification, all seven permanent attacks plus one inert ALLOW
+canary, independent evidence replay, an exact compare-and-swap merge, and final
+ruleset readback.
+
+The enforcing rule is intentionally public-only while GitHub's paid
+private/internal required-workflow entitlement returns an upgrade error.
+Private/internal human approvals remain in place. This code-merge authority is
+not deployment, customer-production, billing, or migration authority; those
+effects require separate bounded permits and receipts.
 
 ## Validation
 

@@ -46,6 +46,16 @@ jobs:
           persist-credentials: false
           path: broker
 
+      - name: Verify source-owned live control-plane contract
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/verify_control_plane.py \
+            --contract broker/config/autonomous-release-control-plane.json \
+            --adversarial-corpus broker/tests/fixtures/autonomous-release-adversarial.json \
+            --output control-plane-parent.json
+
       - name: Download triggering permit artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
@@ -74,6 +84,11 @@ jobs:
           permit=promotion/release-permit.json
           test -f "$permit"
           parent_sha="$(jq -er '.workflow_sha' "$permit")"
+          parent_generation="$(jq -er '.authority.generation' "$permit")"
+          [[ "$parent_generation" =~ ^[1-9][0-9]*$ ]]
+          # Generation 1 is admitted exactly once by bootstrap_authority.py.
+          # This on-main workflow is authoritative only from generation 2 onward.
+          test "$parent_generation" -ge 2
           test "$parent_sha" = "$GITHUB_SHA"
           test "$(jq -er '.repository' "$permit")" = "Mindburn-Labs/.github"
           test "$(jq -er '.head_sha' "$permit")" = "$TRIGGER_HEAD_SHA"
@@ -83,12 +98,10 @@ jobs:
           base_sha="$(jq -er '.base_sha' "$permit")"
           candidate_pr="$(jq -er '.pull_request' "$permit")"
           kernel_sha="$(jq -er '.authority.kernel_sha' "$permit")"
-          parent_generation="$(jq -er '.authority.generation' "$permit")"
           [[ "$candidate_sha" =~ ^[0-9a-f]{40}$ ]]
           [[ "$base_sha" =~ ^[0-9a-f]{40}$ ]]
           [[ "$kernel_sha" =~ ^[0-9a-f]{40}$ ]]
           [[ "$candidate_pr" =~ ^[1-9][0-9]*$ ]]
-          [[ "$parent_generation" =~ ^[1-9][0-9]*$ ]]
           current_main="$(gh api repos/Mindburn-Labs/.github/git/ref/heads/main --jq '.object.sha')"
           test "$current_main" = "$GITHUB_SHA"
           test "$base_sha" = "$current_main"
@@ -125,7 +138,7 @@ jobs:
             --bundle promotion/release-permit.attestation.json \
             --repo Mindburn-Labs/.github \
             --signer-workflow Mindburn-Labs/.github/.github/workflows/ci.yml \
-            --signer-digest "$GITHUB_SHA" \
+            --signer-digest "${{ steps.metadata.outputs.parent_sha }}" \
             --source-digest "$merge_sha" \
             --deny-self-hosted-runners
 
@@ -198,6 +211,7 @@ jobs:
             promotion/authority-promotion.json
             promotion/candidate-authority.json
             promotion/pull-request.json
+            control-plane-parent.json
           if-no-files-found: error
           retention-days: 30
 
@@ -227,6 +241,16 @@ jobs:
         with:
           name: verified-authority-promotion
           path: promotion
+
+      - name: Recheck live control plane before credential use
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/verify_control_plane.py \
+            --contract broker/config/autonomous-release-control-plane.json \
+            --adversarial-corpus broker/tests/fixtures/autonomous-release-adversarial.json \
+            --output promotion/control-plane-promoter.json
 
       - name: Checkout exact parent Kernel for canary verification
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -272,60 +296,76 @@ jobs:
             --candidate-ref "${{ needs.verify-candidate.outputs.candidate_ref }}" \
             --output promotion/ruleset-advance.json
 
-      - name: Trigger permanent non-production ALLOW canary
-        id: canary-trigger
+      - name: Trigger permanent adversarial suite and non-production ALLOW canary
+        id: suite-trigger
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
-          gh api repos/Mindburn-Labs/contracts-autonomous-release-lab/pulls/8 > promotion/canary-pr-before.json
-          test "$(jq -er '.head.repo.full_name' promotion/canary-pr-before.json)" = "Mindburn-Labs/contracts-autonomous-release-lab"
-          test "$(jq -er '.base.ref' promotion/canary-pr-before.json)" = "main"
-          if [[ "$(jq -er '.state' promotion/canary-pr-before.json)" = "open" ]]; then
-            gh api --method PATCH repos/Mindburn-Labs/contracts-autonomous-release-lab/pulls/8 -f state=closed >/dev/null
-          fi
           started_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-          gh api --method PATCH repos/Mindburn-Labs/contracts-autonomous-release-lab/pulls/8 -f state=open > promotion/canary-pr.json
-          canary_head_sha="$(jq -er '.head.sha' promotion/canary-pr.json)"
-          [[ "$canary_head_sha" =~ ^[0-9a-f]{40}$ ]]
-          echo "head_sha=$canary_head_sha" >> "$GITHUB_OUTPUT"
-          echo "started_at=$started_at" >> "$GITHUB_OUTPUT"
+          while IFS= read -r case_json; do
+            pull_request="$(jq -er '.pull_request' <<<"$case_json")"
+            expected_head="$(jq -er '.head_sha' <<<"$case_json")"
+            gh api "repos/Mindburn-Labs/contracts-autonomous-release-lab/pulls/$pull_request" \
+              > promotion/suite-pr.json
+            test "$(jq -er '.head.repo.full_name' promotion/suite-pr.json)" = \
+              "Mindburn-Labs/contracts-autonomous-release-lab"
+            test "$(jq -er '.base.ref' promotion/suite-pr.json)" = "main"
+            test "$(jq -er '.head.sha' promotion/suite-pr.json)" = "$expected_head"
+            if [[ "$(jq -er '.state' promotion/suite-pr.json)" = "open" ]]; then
+              gh api --method PATCH \
+                "repos/Mindburn-Labs/contracts-autonomous-release-lab/pulls/$pull_request" \
+                -f state=closed >/dev/null
+            fi
+            gh api --method PATCH \
+              "repos/Mindburn-Labs/contracts-autonomous-release-lab/pulls/$pull_request" \
+              -f state=open > promotion/suite-pr.json
+            test "$(jq -er '.head.sha' promotion/suite-pr.json)" = "$expected_head"
+          done < <(jq -c '.adversarial_suite.cases[]' \
+            broker/config/autonomous-release-control-plane.json)
+          jq -n \
+            --arg repository "Mindburn-Labs/contracts-autonomous-release-lab" \
+            --arg started_at "$started_at" \
+            --arg workflow_sha "${{ needs.verify-candidate.outputs.candidate_sha }}" \
+            --slurpfile contract broker/config/autonomous-release-control-plane.json \
+            '{
+              schema: "mindburn.release-authority-suite-trigger/v1",
+              repository: $repository,
+              workflow_sha: $workflow_sha,
+              started_at: $started_at,
+              cases: $contract[0].adversarial_suite.cases
+            }' > promotion/suite-trigger.json
 
-      - name: Require fresh attested candidate-authority ALLOW canary
+      - name: Require fresh candidate-authority adversarial suite and ALLOW canary
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
-          python3 broker/scripts/wait_for_authority_canary.py \
-            --repository Mindburn-Labs/contracts-autonomous-release-lab \
-            --pull-request 8 \
-            --head-sha "${{ steps.canary-trigger.outputs.head_sha }}" \
-            --started-at "${{ steps.canary-trigger.outputs.started_at }}" \
+          python3 broker/scripts/wait_for_authority_suite.py \
+            --contract broker/config/autonomous-release-control-plane.json \
+            --adversarial-corpus broker/tests/fixtures/autonomous-release-adversarial.json \
+            --trigger promotion/suite-trigger.json \
             --expected-workflow-sha "${{ needs.verify-candidate.outputs.candidate_sha }}" \
             --expected-authority promotion/candidate-authority.json \
             --kernel-verifier "$GITHUB_WORKSPACE/parent-permit-verify" \
-            --output promotion/canary-permit.json \
-            --bundle promotion/canary-permit.attestation.json \
-            --context promotion/canary-context.json \
-            --receipt promotion/canary-receipt.json
+            --output-dir promotion/suite \
+            --receipt promotion/authority-suite.json
 
-      - name: Merge exact ratified authority tree through normal branch policy
+      - name: Atomically advance main to the exact ratified merge commit
         id: merge
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          current_main="$(gh api repos/Mindburn-Labs/.github/git/ref/heads/main --jq '.object.sha')"
-          test "$current_main" = "${{ needs.verify-candidate.outputs.base_sha }}"
-          gh api --method PUT "repos/Mindburn-Labs/.github/pulls/${{ needs.verify-candidate.outputs.candidate_pr }}/merge" \
-            -f merge_method=merge \
-            -f sha="${{ needs.verify-candidate.outputs.candidate_sha }}" \
-            > promotion/merge-response.json
-          test "$(jq -er '.merged' promotion/merge-response.json)" = "true"
-          merge_sha="$(jq -er '.sha' promotion/merge-response.json)"
-          [[ "$merge_sha" =~ ^[0-9a-f]{40}$ ]]
-          merge_tree_sha="$(gh api "repos/Mindburn-Labs/.github/git/commits/$merge_sha" --jq '.tree.sha')"
-          test "$merge_tree_sha" = "${{ needs.verify-candidate.outputs.candidate_tree_sha }}"
+          merge_sha="$(jq -er '.merge_sha' promotion/release-permit.json)"
+          python3 broker/scripts/atomic_merge_authority.py \
+            --pull-request "${{ needs.verify-candidate.outputs.candidate_pr }}" \
+            --base-sha "${{ needs.verify-candidate.outputs.base_sha }}" \
+            --head-sha "${{ needs.verify-candidate.outputs.candidate_sha }}" \
+            --merge-sha "$merge_sha" \
+            --tree-sha "${{ needs.verify-candidate.outputs.candidate_tree_sha }}" \
+            --output promotion/merge-response.json
+          merge_tree_sha="$(jq -er '.merge_tree_sha' promotion/merge-response.json)"
           echo "merge_sha=$merge_sha" >> "$GITHUB_OUTPUT"
           echo "merge_tree_sha=$merge_tree_sha" >> "$GITHUB_OUTPUT"
 
@@ -354,7 +394,8 @@ jobs:
             --arg merge_tree_sha "${{ steps.merge.outputs.merge_tree_sha }}" \
             --arg parent_sha "${{ needs.verify-candidate.outputs.parent_sha }}" \
             --slurpfile promotion promotion/authority-promotion.json \
-            --slurpfile canary promotion/canary-receipt.json \
+            --arg authority_suite_sha256 "$(sha256sum promotion/authority-suite.json | awk '{print $1}')" \
+            --slurpfile canary promotion/suite/canary-receipt.json \
             --slurpfile ratification promotion/release-permit.json \
             '{
               schema: "mindburn.release-authority-promotion-execution/v1",
@@ -373,7 +414,8 @@ jobs:
               ratification_run_attempt: $ratification[0].run_attempt,
               canary_run_id: $canary[0].run_id,
               canary_run_attempt: $canary[0].run_attempt,
-              canary_permit_id: $canary[0].permit_id
+              canary_permit_id: $canary[0].permit_id,
+              authority_suite_sha256: $authority_suite_sha256
             }' > promotion/authority-promotion-execution.json
 
       - name: Upload execution evidence for independent observation
@@ -429,6 +471,16 @@ jobs:
           name: helm-authority-promotion-execution
           path: promotion
 
+      - name: Recheck live observer control plane before credential use
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/verify_control_plane.py \
+            --contract broker/config/autonomous-release-control-plane.json \
+            --adversarial-corpus broker/tests/fixtures/autonomous-release-adversarial.json \
+            --output promotion/control-plane-pre-observer.json
+
       # GitHub requires Administration(write) even for org-ruleset GET. This
       # separate App token is consumed only by the observer's GET-only client.
       - name: Mint independent GET-only observer token
@@ -464,6 +516,24 @@ jobs:
         working-directory: parent-kernel/core
         run: go build -trimpath -o "$GITHUB_WORKSPACE/parent-permit-verify" ./cmd/release-permit-verify
 
+      - name: Independently reverify every candidate proof case
+        env:
+          GH_TOKEN: ${{ steps.observer-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/wait_for_authority_suite.py \
+            --contract broker/config/autonomous-release-control-plane.json \
+            --adversarial-corpus broker/tests/fixtures/autonomous-release-adversarial.json \
+            --trigger promotion/suite-trigger.json \
+            --expected-workflow-sha "${{ needs.verify-candidate.outputs.candidate_sha }}" \
+            --expected-authority promotion/candidate-authority.json \
+            --kernel-verifier "$GITHUB_WORKSPACE/parent-permit-verify" \
+            --output-dir observed-suite \
+            --receipt observed-authority-suite.json \
+            --timeout-seconds 60 \
+            --poll-seconds 5
+          cmp --silent observed-authority-suite.json promotion/authority-suite.json
+
       - name: Compare intended and actual staged state
         env:
           GH_TOKEN: ${{ steps.observer-token.outputs.token }}
@@ -477,10 +547,11 @@ jobs:
             --ratification-permit promotion/release-permit.json \
             --ratification-bundle promotion/release-permit.attestation.json \
             --ratification-context promotion/ratification-input/context.json \
-            --canary-permit promotion/canary-permit.json \
-            --canary-bundle promotion/canary-permit.attestation.json \
-            --canary-context promotion/canary-context.json \
-            --canary-receipt promotion/canary-receipt.json \
+            --canary-permit promotion/suite/canary-permit.json \
+            --canary-bundle promotion/suite/canary-permit.attestation.json \
+            --canary-context promotion/suite/canary-context.json \
+            --canary-receipt promotion/suite/canary-receipt.json \
+            --authority-suite promotion/authority-suite.json \
             --parent-kernel-verifier "$GITHUB_WORKSPACE/parent-permit-verify" \
             --promotion-run-id "$GITHUB_RUN_ID" \
             --promotion-run-attempt "$GITHUB_RUN_ATTEMPT" \
@@ -541,6 +612,16 @@ jobs:
         with:
           name: helm-authority-pre-activation-observer
           path: observation
+
+      - name: Recheck live promotion control plane before credential use
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/verify_control_plane.py \
+            --contract broker/config/autonomous-release-control-plane.json \
+            --adversarial-corpus broker/tests/fixtures/autonomous-release-adversarial.json \
+            --output observation/control-plane-activation.json
 
       - name: Verify observer provenance and exact promotion run
         env:
@@ -633,6 +714,16 @@ jobs:
           name: helm-authority-promotion-execution
           path: promotion
 
+      - name: Recheck live observer control plane before credential use
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/verify_control_plane.py \
+            --contract broker/config/autonomous-release-control-plane.json \
+            --adversarial-corpus broker/tests/fixtures/autonomous-release-adversarial.json \
+            --output promotion/control-plane-final-observer.json
+
       # GitHub requires Administration(write) even for org-ruleset GET. This
       # separate App token is consumed only by the observer's GET-only client.
       - name: Mint independent GET-only observer token
@@ -681,10 +772,11 @@ jobs:
             --ratification-permit promotion/release-permit.json \
             --ratification-bundle promotion/release-permit.attestation.json \
             --ratification-context promotion/ratification-input/context.json \
-            --canary-permit promotion/canary-permit.json \
-            --canary-bundle promotion/canary-permit.attestation.json \
-            --canary-context promotion/canary-context.json \
-            --canary-receipt promotion/canary-receipt.json \
+            --canary-permit promotion/suite/canary-permit.json \
+            --canary-bundle promotion/suite/canary-permit.attestation.json \
+            --canary-context promotion/suite/canary-context.json \
+            --canary-receipt promotion/suite/canary-receipt.json \
+            --authority-suite promotion/authority-suite.json \
             --parent-kernel-verifier "$GITHUB_WORKSPACE/parent-permit-verify" \
             --promotion-run-id "$GITHUB_RUN_ID" \
             --promotion-run-attempt "$GITHUB_RUN_ATTEMPT" \

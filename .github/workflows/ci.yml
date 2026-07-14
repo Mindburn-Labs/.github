@@ -106,6 +106,17 @@ jobs:
           persist-credentials: false
           path: policy
 
+      - name: Checkout pinned Kernel verifier source for isolated review
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: Mindburn-Labs/helm-ai-kernel
+          ref: 83cc3eeb1cf512bed44b560254b11a342cee5b15
+          persist-credentials: false
+          path: verifier-source
+          sparse-checkout: |
+            core/pkg/releasepermit
+            core/cmd/release-permit-verify
+
       - name: Prepare commit-bound review bundle
         env:
           REPOSITORY: ${{ github.repository }}
@@ -160,11 +171,27 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      - name: Package immutable read-only review runtime
+        run: |
+          set -euo pipefail
+          mkdir -p release-review-runtime/policy/scripts
+          cp policy/scripts/autonomous_release_permit.py \
+            release-review-runtime/policy/scripts/autonomous_release_permit.py
+          cp -R verifier-source release-review-runtime/verifier-source
+
+      - name: Upload immutable read-only review runtime
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-review-runtime
+          path: release-review-runtime
+          if-no-files-found: error
+          retention-days: 1
+
   model-review:
     name: ${{ matrix.provider }} / ${{ matrix.model }}
     needs: prepare
     permissions:
-      contents: read
+      actions: read
       copilot-requests: write
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -177,30 +204,17 @@ jobs:
           - provider: openai
             model: gpt-5.6-sol
     steps:
-      - name: Checkout pinned policy helpers
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          repository: Mindburn-Labs/.github
-          ref: ${{ github.workflow_sha }}
-          persist-credentials: false
-          path: policy
-
-      - name: Checkout pinned Kernel verifier for read-only review
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          repository: Mindburn-Labs/helm-ai-kernel
-          ref: 83cc3eeb1cf512bed44b560254b11a342cee5b15
-          persist-credentials: false
-          path: verifier-source
-          sparse-checkout: |
-            core/pkg/releasepermit
-            core/cmd/release-permit-verify
-
       - name: Download immutable review input
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: release-permit-input
           path: permit-input
+
+      - name: Download immutable read-only review runtime
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-review-runtime
+          path: runtime
 
       - name: Verify current authority generation
         env:
@@ -260,7 +274,7 @@ jobs:
               --available-tools=view \
               --allow-tool=read \
               --add-dir="$GITHUB_WORKSPACE/permit-input" \
-              --add-dir="$GITHUB_WORKSPACE/verifier-source" \
+              --add-dir="$GITHUB_WORKSPACE/runtime/verifier-source" \
               --deny-tool=shell \
               --deny-tool=write \
               --deny-tool=url \
@@ -277,11 +291,11 @@ jobs:
             echo "::error::$PROVIDER/$MODEL returned an empty response"
             exit 1
           fi
-          python3 policy/scripts/autonomous_release_permit.py normalize \
+          python3 runtime/policy/scripts/autonomous_release_permit.py normalize \
             --raw "raw-$PROVIDER.txt" \
             --transport-format copilot-jsonl \
             --output "normalized-$PROVIDER.json"
-          python3 policy/scripts/autonomous_release_permit.py envelope \
+          python3 runtime/policy/scripts/autonomous_release_permit.py envelope \
             --context permit-input/context.json \
             --raw "normalized-$PROVIDER.json" \
             --provider "$PROVIDER" \

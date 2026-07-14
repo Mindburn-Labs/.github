@@ -1,0 +1,160 @@
+{
+  "classic_branch_protection": {
+    "after": {
+      "allow_deletions": false,
+      "allow_force_pushes": false,
+      "allow_fork_syncing": false,
+      "block_creations": false,
+      "enforce_admins": false,
+      "lock_branch": false,
+      "required_conversation_resolution": true,
+      "required_linear_history": false,
+      "required_pull_request_reviews": null,
+      "required_signatures": false,
+      "required_status_checks": null,
+      "restrictions": null
+    },
+    "before": {
+      "allow_deletions": false,
+      "allow_force_pushes": false,
+      "allow_fork_syncing": false,
+      "block_creations": false,
+      "enforce_admins": false,
+      "lock_branch": false,
+      "required_conversation_resolution": true,
+      "required_linear_history": false,
+      "required_pull_request_reviews": {
+        "dismiss_stale_reviews": true,
+        "require_code_owner_reviews": false,
+        "require_last_push_approval": false,
+        "required_approving_review_count": 1
+      },
+      "required_signatures": false,
+      "required_status_checks": null,
+      "restrictions": null
+    },
+    "branch": "main",
+    "repository": "Mindburn-Labs/.github"
+  },
+  "human_approval_ruleset": {
+    "after_repository_ids": [
+      1158732928,
+      1159314290,
+      1221263927,
+      1229180858,
+      1238885425,
+      1250512749,
+      1250512924,
+      1250513015,
+      1250513208,
+      1250513264,
+      1250513379,
+      1250513431,
+      1250513601,
+      1250513658,
+      1250513950,
+      1250513995,
+      1250514163,
+      1250514296,
+      1250514510,
+      1250514561,
+      1250514732,
+      1250514808,
+      1250514871,
+      1250514974,
+      1250515047,
+      1250515251,
+      1250515315,
+      1250515408,
+      1250515689,
+      1250515749,
+      1250515894,
+      1250516127,
+      1250516199,
+      1250516268,
+      1250569711,
+      1259808438,
+      1260638024,
+      1265227463,
+      1268806323,
+      1270621690,
+      1272809086
+    ],
+    "before_repository_ids": [
+      1158479649,
+      1158732928,
+      1159255601,
+      1159314290,
+      1221263927,
+      1229180858,
+      1238885425,
+      1250512749,
+      1250512924,
+      1250513015,
+      1250513208,
+      1250513264,
+      1250513379,
+      1250513431,
+      1250513601,
+      1250513658,
+      1250513950,
+      1250513995,
+      1250514163,
+      1250514296,
+      1250514510,
+      1250514561,
+      1250514732,
+      1250514808,
+      1250514871,
+      1250514974,
+      1250515047,
+      1250515251,
+      1250515315,
+      1250515408,
+      1250515689,
+      1250515749,
+      1250515894,
+      1250516127,
+      1250516199,
+      1250516268,
+      1250569711,
+      1259808438,
+      1260638024,
+      1265227463,
+      1268806323,
+      1270621690,
+      1272809086
+    ],
+    "id": 17911735,
+    "name": "Mindburn default branch approval gate",
+    "remove_repository_ids": [
+      1158479649,
+      1159255601
+    ],
+    "rules": [
+      {
+        "type": "deletion"
+      },
+      {
+        "type": "non_fast_forward"
+      },
+      {
+        "parameters": {
+          "allowed_merge_methods": [
+            "merge",
+            "squash",
+            "rebase"
+          ],
+          "dismiss_stale_reviews_on_push": true,
+          "require_code_owner_review": true,
+          "require_last_push_approval": true,
+          "required_approving_review_count": 1,
+          "required_review_thread_resolution": true,
+          "required_reviewers": []
+        },
+        "type": "pull_request"
+      }
+    ]
+  },
+  "schema": "mindburn.release-authority-bootstrap/v1"
+}

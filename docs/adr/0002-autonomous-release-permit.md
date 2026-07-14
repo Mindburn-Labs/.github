@@ -2,7 +2,12 @@
 
 ## Status
 
-Proposed for evaluation. It is not production-promotion authority.
+Accepted for controlled public-repository code-merge authority. Runtime
+enforcement remains a GitHub ruleset fact, not a documentation claim. Private
+and internal repositories retain their human approval gate until GitHub
+restores the paid required-workflow entitlement that the organization is
+already billed for. This decision does not authorize customer production,
+deployment, billing, data migration, or other external effects.
 
 ## Decision
 
@@ -52,11 +57,12 @@ Oversized or unsupported work must use a dedicated review lane. Each model
 executes in a separate ephemeral job. Only the strict JSON envelope and content
 digests flow to the Kernel reducer.
 
-The shared repository-gate baseline requires `make lint` and `make test`.
-`make setup` and `make build` run when the target repository defines them. A
-repository without a Makefile, lint target, or test target fails closed during
-evaluation and must receive an explicit source-owned gate profile before
-activation.
+Every admitted repository has an explicit source-owned gate profile. There is
+no command-discovery or Makefile fallback. The profile names an exact command
+vector and SHA-256 digests for every build file that can alter those commands;
+missing, changed, non-regular, or symlinked protected files fail before either
+model runs. Authority-critical profile changes use the same two-generation
+ratification rule as workflow changes.
 
 Every context also binds `config/autonomous-release-authority.json`. The
 manifest names a monotonically increasing generation, the exact Kernel SHA,
@@ -160,10 +166,11 @@ non-authority pull request before it can become enforcing authority. Failed-job
 retries, a branch update, or an administrator editing the pin cannot substitute
 for either generation's evidence.
 
-The promotion transaction is deliberately split across isolated jobs and two
+The steady-state promotion transaction is deliberately split across isolated jobs and two
 GitHub Apps. The promoter can advance and restore exact ruleset bindings, run a
-permanent synthetic canary, merge the already-ratified tree through normal
-branch policy, and rebind only the evaluation ruleset. A separate observer
+permanent seven-attack plus one-ALLOW suite, advance `main` only with an exact
+`beforeOid`/`afterOid` compare-and-swap to GitHub's reviewed two-parent merge
+commit, and rebind only the evaluation ruleset. A separate observer
 re-downloads both permits from their originating runs, verifies their GitHub
 attestations with the exact previous-generation Kernel, compares the merged
 tree and pull request with GitHub state, and reads back both rulesets. The
@@ -184,16 +191,38 @@ each mutation and an exact read-back afterward; the independent observer and
 automatic restoration close the remaining non-atomic drift window. No ETag is
 treated as an atomic compare-and-swap guarantee.
 
+Generation 1 is a one-time source-owned bootstrap because the promotion
+workflow cannot trigger from a file that is not yet on the default branch.
+`scripts/bootstrap_authority.py` is split into `prepare` and `finalize` phases:
+
+1. verify the generation-1 dual-model ALLOW, GitHub Sigstore provenance,
+   trusted context, exact candidate tree, and live environment contract;
+2. stage generation 2 in evaluation mode and freshly execute all eight
+   permanent proof cases;
+3. independently reverify the same signed case artifacts byte-for-byte;
+4. activate the machine rule for only the three proven public repositories;
+5. trigger and verify a fresh generation-2 ALLOW on the authority pull request;
+6. only while that machine rule is active, remove the two covered repositories
+   from the organization human-review rule and remove the `.github` classic
+   one-review setting; and
+7. reverify the ready receipt, atomically advance `main` to the exact liveness
+   merge commit, then bind both machine rulesets to that merged `main` SHA.
+
+If failure occurs before machine enforcement, the staged candidate pin is
+compensated to generation 1. After machine enforcement begins, recovery leaves
+the public machine gate active and resumes from evidence; it never restores an
+unprotected state. The bootstrap credential executes an already signed plan
+but is not an approval identity.
+
 ## Rollout
 
 1. Publish the Kernel reducer and public organization workflow; retain the
    private reusable workflow only as a convenience for private consumers.
-2. Create the organization ruleset in `evaluate` mode for `~ALL` repositories
-   and default branches. Verify effective coverage with live required-workflow
-   runs in public, internal, and private repositories; the organization-level
-   `~ALL` selector alone is not enforcement evidence. Billing, licensing, or
-   plan state that disables rules on private/internal repositories blocks
-   activation.
+2. Keep the candidate ruleset in `evaluate` mode for the selected proof repos.
+   Verify effective coverage with live required-workflow runs. Because GitHub
+   currently returns an upgrade error for paid private/internal rule suites,
+   the enforcing stable rule is explicitly scoped to the three proven public
+   repositories; private/internal human gates remain unchanged.
 3. Prove `ALLOW` on an exact merge tree, structured `DENY` for stale context,
    provider duplication and blocking findings, and a failed check for a missing
    reviewer, malformed response, or model outage.
@@ -202,9 +231,11 @@ treated as an atomic compare-and-swap guarantee.
    both live model jobs, and add a protected lane for changes to workflow, gate,
    test-harness, and Kernel authority files. A target branch must not be able to
    weaken its own required commands or evidence threshold.
-5. Activate the machine workflow rule only after live 2-of-2 evidence exists.
-6. Then reduce the pull-request rule to zero human approvals while retaining the
-   pull-request, deletion, non-fast-forward, and machine-workflow requirements.
+5. Activate the machine workflow rule only after live 2-of-2 evidence and the
+   complete permanent adversarial suite exist.
+6. Then remove human approval requirements only for repositories already under
+   the active machine rule. Preserve deletion, non-fast-forward, conversation,
+   and machine-workflow requirements.
 7. Rebind the ruleset to merged `main` SHAs and retain rollback payloads.
 
 If any proof fails, the existing human gate remains active.
