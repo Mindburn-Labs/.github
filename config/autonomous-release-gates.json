@@ -6,8 +6,8 @@
         ["make", "test"]
       ],
       "protected_files": {
-        ".github/workflows/ci.yml": "bd72bfc9cb9ee6c914023f6c1d004c8f265a55aa4120a8ae61157cacfecf4691",
-        ".github/workflows/promote-authority.yml": "fd7d1c79061f78e88203566054f1ad4bfd4da2f8f4f7c8908ff2d57c144a7000",
+        ".github/workflows/ci.yml": "cfa8ead0cbe9fa8b464c38a3a0a85372c57e08a1582f4856c942ee5ecc4b4e0a",
+        ".github/workflows/promote-authority.yml": "6b78eed973bc646caf1457f632e8bb50d5794392794ff7678cdaf86865fd6da3",
         "Makefile": "4559934af490cb54f61405c8471fca1e9d287ea5c719ff90192d33c1ec180925",
         "config/autonomous-release-bootstrap-v1.json": "115db71d1994fd6c275a2adeefa8ecd181e56c64bc98a5a1406cabf058e6c5bf",
         "config/autonomous-release-control-plane.json": "33f3ab3cd2ac122c2df43e316f476a82d2a86e3fe633a318b60446ce85d00de7",
@@ -24,7 +24,8 @@
         "scripts/wait_for_authority_suite.py": "f32b48065cfe72017533db2cfcf64dcef9477add00fc563e6f0384b1a3cfc4d6",
         "tests/test_atomic_merge_authority.py": "b3ea82bce75286de904549c8bb60b07fa392f6ccab668791194ced806308fe73",
         "tests/test_authority_ruleset_broker.py": "badec4484bc80ecfce104add6d1544c857d1930ecb92209776edab651eaee98a",
-        "tests/test_autonomous_release_permit.py": "dad14318e92608bb7ef81dcb35bc15dbda801093faa09c36ea6134dc4a4e9d43",
+        "tests/test_authority_promotion_workflow.py": "a337b3dd5925b628b701c8c94ba8f05820e2e9336b75bf561383cca3a7ba7784",
+        "tests/test_autonomous_release_permit.py": "e4207c2b1d8f99064ce10cf78453bcb9e6a044540574fc7265185e98307bbda5",
         "tests/test_bootstrap_authority.py": "371a9cf1a8ce979808e1d04ebbece750fb8e056bf2645ac1472de84058044a52",
         "tests/test_observe_authority_promotion.py": "9b4466fc05adbb0ba7f6458e2563370cd90a299c92f54dfc5874eeba326cce66",
         "tests/test_remove_human_approval_gates.py": "a8a58acdf397013a6be90e8e108e1a1152174e56f4e9d1f54e246b9b090e264f",

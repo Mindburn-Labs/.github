@@ -174,16 +174,16 @@ jobs:
       - name: Package immutable read-only review runtime
         run: |
           set -euo pipefail
-          mkdir -p release-review-runtime/policy/scripts
+          mkdir -p autonomous-review-runtime/policy/scripts
           cp policy/scripts/autonomous_release_permit.py \
-            release-review-runtime/policy/scripts/autonomous_release_permit.py
-          cp -R verifier-source release-review-runtime/verifier-source
+            autonomous-review-runtime/policy/scripts/autonomous_release_permit.py
+          cp -R verifier-source autonomous-review-runtime/verifier-source
 
       - name: Upload immutable read-only review runtime
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: release-review-runtime
-          path: release-review-runtime
+          name: autonomous-review-runtime
+          path: autonomous-review-runtime
           if-no-files-found: error
           retention-days: 1
 
@@ -213,7 +213,7 @@ jobs:
       - name: Download immutable read-only review runtime
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: release-review-runtime
+          name: autonomous-review-runtime
           path: runtime
 
       - name: Verify current authority generation

@@ -114,7 +114,8 @@ jobs:
           test "$(jq -er '.head.repo.full_name' promotion/pull-request.json)" = "Mindburn-Labs/.github"
           candidate_branch="$(jq -er '.head.ref' promotion/pull-request.json)"
           candidate_ref="refs/heads/$candidate_branch"
-          [[ "$candidate_ref" =~ ^refs/heads/[^[:cntrl:]]{1,220}$ ]]
+          [[ "$candidate_ref" =~ ^refs/heads/[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$ ]]
+          git check-ref-format "$candidate_ref"
           candidate_generation="$(jq -er '.generation' broker/config/autonomous-release-authority.json)"
           test "$candidate_generation" = "$parent_generation"
           {
@@ -287,13 +288,14 @@ jobs:
       - name: Advance evaluation-only candidate authority
         id: advance
         env:
+          CANDIDATE_REF: ${{ needs.verify-candidate.outputs.candidate_ref }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
           python3 broker/scripts/authority_ruleset_broker.py advance \
             --parent-sha "${{ needs.verify-candidate.outputs.parent_sha }}" \
             --candidate-sha "${{ needs.verify-candidate.outputs.candidate_sha }}" \
-            --candidate-ref "${{ needs.verify-candidate.outputs.candidate_ref }}" \
+            --candidate-ref "$CANDIDATE_REF" \
             --output promotion/ruleset-advance.json
 
       - name: Trigger permanent adversarial suite and non-production ALLOW canary
@@ -372,22 +374,25 @@ jobs:
       - name: Rebind evaluation-only candidate to merged main
         id: rebind
         env:
+          CANDIDATE_REF: ${{ needs.verify-candidate.outputs.candidate_ref }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
           python3 broker/scripts/authority_ruleset_broker.py rebind \
             --parent-sha "${{ needs.verify-candidate.outputs.parent_sha }}" \
             --candidate-sha "${{ needs.verify-candidate.outputs.candidate_sha }}" \
-            --candidate-ref "${{ needs.verify-candidate.outputs.candidate_ref }}" \
+            --candidate-ref "$CANDIDATE_REF" \
             --merge-sha "${{ steps.merge.outputs.merge_sha }}" \
             --output promotion/ruleset-rebind.json
 
       - name: Build non-authoritative execution bundle
+        env:
+          CANDIDATE_REF: ${{ needs.verify-candidate.outputs.candidate_ref }}
         run: |
           set -euo pipefail
           jq -n \
             --arg candidate_sha "${{ needs.verify-candidate.outputs.candidate_sha }}" \
-            --arg candidate_ref "${{ needs.verify-candidate.outputs.candidate_ref }}" \
+            --arg candidate_ref "$CANDIDATE_REF" \
             --arg candidate_tree_sha "${{ needs.verify-candidate.outputs.candidate_tree_sha }}" \
             --argjson candidate_pr "${{ needs.verify-candidate.outputs.candidate_pr }}" \
             --arg merge_sha "${{ steps.merge.outputs.merge_sha }}" \
@@ -429,6 +434,7 @@ jobs:
       - name: Restore last-known-good rulesets after any incomplete transition
         if: ${{ failure() && steps.advance.outcome == 'success' }}
         env:
+          CANDIDATE_REF: ${{ needs.verify-candidate.outputs.candidate_ref }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           MERGE_SHA: ${{ steps.merge.outputs.merge_sha }}
         run: |
@@ -440,7 +446,7 @@ jobs:
           python3 broker/scripts/authority_ruleset_broker.py restore \
             --parent-sha "${{ needs.verify-candidate.outputs.parent_sha }}" \
             --candidate-sha "${{ needs.verify-candidate.outputs.candidate_sha }}" \
-            --candidate-ref "${{ needs.verify-candidate.outputs.candidate_ref }}" \
+            --candidate-ref "$CANDIDATE_REF" \
             "${merge_args[@]}" \
             --output promotion/ruleset-restore.json
 
@@ -668,13 +674,14 @@ jobs:
 
       - name: Activate merged authority only after observer ALLOW
         env:
+          CANDIDATE_REF: ${{ needs.verify-candidate.outputs.candidate_ref }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
           python3 broker/scripts/authority_ruleset_broker.py activate \
             --parent-sha "${{ needs.verify-candidate.outputs.parent_sha }}" \
             --candidate-sha "${{ needs.verify-candidate.outputs.candidate_sha }}" \
-            --candidate-ref "${{ needs.verify-candidate.outputs.candidate_ref }}" \
+            --candidate-ref "$CANDIDATE_REF" \
             --merge-sha "${{ needs.promote.outputs.merge_sha }}" \
             --output observation/ruleset-activate.json
 
@@ -853,13 +860,14 @@ jobs:
 
       - name: Restore both rulesets to the parent generation
         env:
+          CANDIDATE_REF: ${{ needs.verify-candidate.outputs.candidate_ref }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
           python3 broker/scripts/authority_ruleset_broker.py restore \
             --parent-sha "${{ needs.verify-candidate.outputs.parent_sha }}" \
             --candidate-sha "${{ needs.verify-candidate.outputs.candidate_sha }}" \
-            --candidate-ref "${{ needs.verify-candidate.outputs.candidate_ref }}" \
+            --candidate-ref "$CANDIDATE_REF" \
             --merge-sha "${{ needs.promote.outputs.merge_sha }}" \
             --output ruleset-rollback.json
 

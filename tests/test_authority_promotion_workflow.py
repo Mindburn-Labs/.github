@@ -64,6 +64,13 @@ class AuthorityPromotionWorkflowTests(unittest.TestCase):
         self.assertIn("authority_ruleset_broker.py restore", workflow)
         self.assertIn("atomic_merge_authority.py", workflow)
         self.assertNotIn("repos/Mindburn-Labs/.github/pulls/${{", workflow)
+        self.assertIn(
+            '[[ "$candidate_ref" =~ ^refs/heads/[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$ ]]',
+            workflow,
+        )
+        self.assertIn('git check-ref-format "$candidate_ref"', workflow)
+        self.assertNotIn('--candidate-ref "${{', workflow)
+        self.assertEqual(workflow.count('--candidate-ref "$CANDIDATE_REF"'), 5)
         self.assertIn("--tree-sha \"${{ needs.verify-candidate.outputs.candidate_tree_sha }}\"", workflow)
         self.assertIn("Build non-authoritative execution bundle", workflow)
         self.assertNotIn("Attest authority promotion receipt", workflow)
