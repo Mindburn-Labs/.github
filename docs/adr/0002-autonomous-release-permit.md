@@ -75,6 +75,55 @@ OpenAI. Activation therefore requires treating Copilot or Actions outage,
 misrouting, malformed output, and missing-provider evidence as fail-closed
 conditions rather than claiming infrastructure independence.
 
+## No-human target architecture
+
+Removing independent human approval does not mean giving one model or one
+workflow unilateral authority. The target is a machine separation-of-powers
+system:
+
+1. A versioned **constitution** defines risk classes, evidence schemas, model
+   quorum, budgets, rollout bounds, and automatic stop conditions. A candidate
+   constitution is evaluated by the previously active immutable version; it
+   cannot authorize itself.
+2. A deterministic **planner** binds the exact desired change, current state,
+   merge tree, production target, budget, and rollback to one intent digest.
+3. Distinct-provider **critics** review that digest in isolated, read-only jobs.
+   Higher-risk lanes add specialist critics and simulations; they never lower
+   the two-provider floor.
+4. The HELM Kernel **reducer** accepts only complete, current, schema-valid,
+   digest-bound evidence and emits a short-lived permit. Missing, stale,
+   conflicting, duplicate-provider, or malformed evidence is `DENY`.
+5. A narrow GitHub App or deployment broker **executes** only the action named
+   by the permit. Models never receive repository-admin, cloud-admin, billing,
+   or production credentials directly.
+6. Independent **observers** compare expected and actual state, enforce canary
+   and error-budget limits, produce receipts, and automatically roll back or
+   freeze the lane on drift. The executor cannot mint its own success receipt.
+
+Risk changes the required evidence rather than reintroducing a person:
+
+- reversible code and documentation: exact-tree tests, two-model quorum, merge
+  queue, automatic rollback;
+- data, infrastructure, auth, or public behavior: hermetic rehearsal, policy
+  simulation, bounded canary, delayed expansion, two-model quorum plus a
+  domain critic;
+- constitution, reviewer prompt, reducer, ruleset, credential broker, or test
+  harness: previous-version ratification, adversarial corpus, time delay, and
+  automatic rollback to the last known-good authority bundle;
+- destructive or economically unbounded actions: denied until a machine-
+  enforceable blast-radius and rollback contract exists.
+
+Before serving clients, this can run in a production-shaped development cell:
+synthetic or explicitly non-customer data, isolated accounts and namespaces,
+hard spend ceilings, no customer notification channels, reversible migrations,
+canary traffic, immutable receipts, and an automatic freeze on any unmet SLO or
+evidence invariant. This exercises the real end-to-end product without
+pretending that an unbounded production environment is a safe test fixture.
+
+Commit trailers remain metadata, not authorization. Useful provenance comes
+from the GitHub actor and app identity, immutable SHAs, signed build and deploy
+attestations, permit digests, and observed-effect receipts.
+
 ## Rollout
 
 1. Publish the Kernel reducer and public organization workflow; retain the
