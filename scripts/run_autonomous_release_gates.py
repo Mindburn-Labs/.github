@@ -14,9 +14,9 @@ import sys
 from typing import Any
 
 
-PROFILE_SCHEMA = "mindburn.autonomous-release-gates/v1"
+PROFILE_SCHEMA = "mindburn.autonomous-release-gates/v2"
 REPOSITORY_PATTERN = re.compile(r"^Mindburn-Labs/[A-Za-z0-9_.-]+$")
-TARGET_PATTERN_TEMPLATE = r"^{}:([^=]|$)"
+SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 
 class GateProfileError(ValueError):
@@ -51,7 +51,23 @@ def require_exact_keys(value: dict[str, Any], required: set[str], label: str) ->
         )
 
 
-def load_profiles(path: Path) -> dict[str, list[list[str]]]:
+def validate_protected_path(value: Any, *, label: str) -> str:
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value) > 255
+        or value.startswith("/")
+        or "\\" in value
+        or any(ord(character) < 32 or ord(character) == 127 for character in value)
+    ):
+        raise GateProfileError(f"{label} must be a bounded relative POSIX path")
+    parts = value.split("/")
+    if any(part in {"", ".", ".."} for part in parts):
+        raise GateProfileError(f"{label} must not contain empty or traversal components")
+    return value
+
+
+def load_profiles(path: Path) -> dict[str, dict[str, Any]]:
     document = parse_json_strict(path)
     if not isinstance(document, dict):
         raise GateProfileError("gate profile document must be an object")
@@ -61,13 +77,17 @@ def load_profiles(path: Path) -> dict[str, list[list[str]]]:
     if not isinstance(document["profiles"], dict):
         raise GateProfileError("profiles must be an object")
 
-    profiles: dict[str, list[list[str]]] = {}
+    profiles: dict[str, dict[str, Any]] = {}
     for repository, profile in document["profiles"].items():
         if not isinstance(repository, str) or not REPOSITORY_PATTERN.fullmatch(repository):
             raise GateProfileError(f"invalid profile repository: {repository!r}")
         if not isinstance(profile, dict):
             raise GateProfileError(f"profile {repository} must be an object")
-        require_exact_keys(profile, {"commands"}, f"profile {repository}")
+        require_exact_keys(
+            profile,
+            {"commands", "protected_files"},
+            f"profile {repository}",
+        )
         commands = profile["commands"]
         if not isinstance(commands, list) or not commands or len(commands) > 32:
             raise GateProfileError(f"profile {repository} must contain 1-32 commands")
@@ -90,51 +110,62 @@ def load_profiles(path: Path) -> dict[str, list[list[str]]]:
                     f"profile {repository} command {index} must use a PATH executable",
                 )
             validated_commands.append(command)
-        profiles[repository] = validated_commands
+        protected_files = profile["protected_files"]
+        if (
+            not isinstance(protected_files, dict)
+            or not protected_files
+            or len(protected_files) > 32
+        ):
+            raise GateProfileError(
+                f"profile {repository} must protect 1-32 gate-definition files",
+            )
+        validated_protected_files: dict[str, str] = {}
+        for protected_path, digest in protected_files.items():
+            validated_path = validate_protected_path(
+                protected_path,
+                label=f"profile {repository} protected path",
+            )
+            if not isinstance(digest, str) or not SHA256_PATTERN.fullmatch(digest):
+                raise GateProfileError(
+                    f"profile {repository} protected digest for {validated_path!r} is invalid",
+                )
+            validated_protected_files[validated_path] = digest
+        profiles[repository] = {
+            "commands": validated_commands,
+            "protected_files": validated_protected_files,
+        }
     return profiles
 
 
-def default_make_commands(target: Path) -> list[list[str]]:
-    makefile = target / "Makefile"
-    if not makefile.is_file():
-        raise GateProfileError(
-            "repository has no immutable profile and no Makefile fallback",
-        )
-    database = subprocess.run(
-        ["make", "-qp"],
-        cwd=target,
-        check=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True,
-    ).stdout
-
-    def has_target(name: str) -> bool:
-        return re.search(TARGET_PATTERN_TEMPLATE.format(re.escape(name)), database, re.MULTILINE) is not None
-
-    for required_target in ("lint", "test"):
-        if not has_target(required_target):
-            raise GateProfileError(f"required make target {required_target!r} is not defined")
-
-    commands: list[list[str]] = []
-    if has_target("setup"):
-        commands.append(["make", "setup"])
-    commands.extend((["make", "lint"], ["make", "test"]))
-    if has_target("build"):
-        commands.append(["make", "build"])
-    return commands
+def verify_protected_files(target: Path, protected_files: dict[str, str]) -> None:
+    for relative_path, expected_digest in protected_files.items():
+        candidate = target.joinpath(*relative_path.split("/"))
+        if candidate.is_symlink() or not candidate.is_file():
+            raise GateProfileError(
+                f"protected gate-definition file is missing or not regular: {relative_path}",
+            )
+        actual_digest = hashlib.sha256(candidate.read_bytes()).hexdigest()
+        if actual_digest != expected_digest:
+            raise GateProfileError(
+                f"protected gate-definition file changed before its source-owned profile: "
+                f"{relative_path}",
+            )
 
 
 def resolve_commands(
     repository: str,
     target: Path,
-    profiles: dict[str, list[list[str]]],
+    profiles: dict[str, dict[str, Any]],
 ) -> tuple[str, list[list[str]]]:
     if not REPOSITORY_PATTERN.fullmatch(repository):
         raise GateProfileError("repository must be a Mindburn-Labs owner/name pair")
-    if repository in profiles:
-        return "explicit", profiles[repository]
-    return "make-fallback", default_make_commands(target)
+    if repository not in profiles:
+        raise GateProfileError(
+            "repository has no immutable source-owned gate profile; Makefile fallback is forbidden",
+        )
+    profile = profiles[repository]
+    verify_protected_files(target, profile["protected_files"])
+    return "explicit", profile["commands"]
 
 
 def run(args: argparse.Namespace) -> None:
