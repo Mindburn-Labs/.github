@@ -37,7 +37,10 @@ the Kernel verifier by exact commit SHA. Target repositories therefore cannot
 replace the reviewer prompt, provider quorum, reducer, or final status. Model
 jobs also receive a sparse, read-only checkout of the exact pinned Kernel
 source and tests, so a safety-critical reducer is inspectable evidence rather
-than an opaque external commit hash. The private
+than an opaque external commit hash. The trusted invocation passes that
+checkout's absolute path to each reviewer in addition to allowlisting it; a
+review that cannot inspect the source fails closed instead of treating the
+commit identifier as proof. The private
 `Mindburn-Labs/platform-actions` repository may expose an equivalent
 reusable workflow for private consumers, but GitHub does not make private
 reusable workflows available to public repositories, so it is not the

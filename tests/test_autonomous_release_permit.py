@@ -483,6 +483,11 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertIn("--allow-tool=read", workflow)
         self.assertIn('--add-dir="$GITHUB_WORKSPACE/permit-input"', workflow)
         self.assertIn('--add-dir="$GITHUB_WORKSPACE/verifier-source"', workflow)
+        self.assertIn(
+            "The exact pinned Kernel verifier source and tests are at "
+            "$GITHUB_WORKSPACE/verifier-source",
+            workflow,
+        )
         for denied_tool in ("shell", "write", "url", "memory"):
             self.assertIn(f"--deny-tool={denied_tool}", workflow)
         self.assertIn("--no-custom-instructions", workflow)
@@ -514,6 +519,10 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertIn("steps.approver-token.outputs.app-slug", workflow)
         self.assertIn("steps.approver-token.outputs.installation-id", workflow)
         self.assertIn("No target checkout or network context is available", helper)
+        self.assertIn(
+            "trusted model invocation supplies the absolute path",
+            helper,
+        )
         self.assertIn("name: HELM Autonomous Release Permit", workflow)
         self.assertIn("name: local-validation", workflow)
         self.assertIn("name: Candidate workflow provenance", workflow)
