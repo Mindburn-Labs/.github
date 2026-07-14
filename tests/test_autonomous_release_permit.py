@@ -122,6 +122,8 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         )
         self.assertIn("+head", prompt)
         self.assertIn("zero authorization weight", prompt)
+        self.assertIn("The governing workflow is Mindburn-Labs/.github/", prompt)
+        self.assertIn("exact pinned reducer source and tests", prompt)
 
     def test_prepare_rejects_stale_checkout(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -137,6 +139,19 @@ class AutonomousReleasePermitTests(unittest.TestCase):
             repo, _base, head, merge = build_repo(root)
             args = prepare_args(repo, head, head, merge, root / "permit-input")
             with self.assertRaisesRegex(MODULE.PermitInputError, "parents do not exactly match"):
+                MODULE.prepare(args)
+
+    def test_prepare_rejects_self_reviewing_authority(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo, base, head, merge = build_repo(root)
+            args = prepare_args(repo, base, head, merge, root / "permit-input")
+            args.repository = args.workflow_repository
+            args.workflow_sha = merge
+            with self.assertRaisesRegex(
+                MODULE.PermitInputError,
+                "authority workflow cannot review its own head or merge commit",
+            ):
                 MODULE.prepare(args)
 
     def test_prepare_rejects_oversized_patch(self) -> None:
@@ -238,6 +253,7 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertNotIn("pull_request_target", workflow)
         self.assertNotIn("cancel-in-progress", workflow)
         self.assertIn("--allow-tool=read", workflow)
+        self.assertIn('--add-dir="$GITHUB_WORKSPACE/verifier-source"', workflow)
         self.assertIn("--deny-tool='shell,write,url,memory'", workflow)
         self.assertIn("@github/copilot@1.0.70", workflow)
         self.assertIn(
@@ -255,10 +271,16 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertEqual(workflow.count("name: Verify current authority generation"), 2)
         self.assertEqual(workflow.count("= \"$EXPECTED_WORKFLOW_SHA\""), 2)
         self.assertEqual(workflow.count("= \"$GITHUB_RUN_ATTEMPT\""), 2)
-        self.assertIn(
-            "ref: 1abe6c1247a558b8ef0eeeb5ce19c56e2c50436f",
-            workflow,
+        self.assertEqual(
+            workflow.count("ref: 05eda40bd28087eb6d67d676bd1ae736d4294818"),
+            2,
         )
+        self.assertIn("path: verifier-source", workflow)
+        self.assertIn("core/pkg/releasepermit", workflow)
+        self.assertIn("core/cmd/release-permit-verify", workflow)
+        self.assertIn("Exactly two review envelopes are required", workflow)
+        self.assertIn("exact distinct-provider quorum", workflow)
+        self.assertIn("returned an empty response", workflow)
 
     def test_workflow_requires_deterministic_repository_gates(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(

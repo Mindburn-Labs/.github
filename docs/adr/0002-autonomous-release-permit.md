@@ -29,8 +29,11 @@ The organization ruleset must point at the wrapper workflow in
 ref, and commit SHA. The wrapper must load its policy helpers from its own
 immutable workflow SHA and pin
 the Kernel verifier by exact commit SHA. Target repositories therefore cannot
-replace the reviewer prompt, provider quorum, reducer, or final status. The
-private `Mindburn-Labs/platform-actions` repository may expose an equivalent
+replace the reviewer prompt, provider quorum, reducer, or final status. Model
+jobs also receive a sparse, read-only checkout of the exact pinned Kernel
+source and tests, so a safety-critical reducer is inspectable evidence rather
+than an opaque external commit hash. The private
+`Mindburn-Labs/platform-actions` repository may expose an equivalent
 reusable workflow for private consumers, but GitHub does not make private
 reusable workflows available to public repositories, so it is not the
 organization-wide authority source.
@@ -42,6 +45,9 @@ Git LFS pointers, non-UTF-8 changes, changed blobs larger than 8 MiB, more than
 400 changed paths, or a patch larger than 512 KiB. It verifies the
 GitHub-generated merge commit has the exact event base and head as parents,
 then reviews and tests that merge tree.
+When the target is the workflow authority repository itself, both the input
+builder and Kernel reject a context whose workflow SHA equals the target head
+or merge SHA. Version N may evaluate N+1; N+1 cannot evaluate itself.
 Oversized or unsupported work must use a dedicated review lane. Each model
 executes in a separate ephemeral job. Only the strict JSON envelope and content
 digests flow to the Kernel reducer.

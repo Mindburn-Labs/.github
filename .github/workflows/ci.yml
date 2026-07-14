@@ -197,6 +197,17 @@ jobs:
           persist-credentials: false
           path: policy
 
+      - name: Checkout pinned Kernel verifier for read-only review
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: Mindburn-Labs/helm-ai-kernel
+          ref: 05eda40bd28087eb6d67d676bd1ae736d4294818
+          persist-credentials: false
+          path: verifier-source
+          sparse-checkout: |
+            core/pkg/releasepermit
+            core/cmd/release-permit-verify
+
       - name: Download immutable review input
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
@@ -245,9 +256,14 @@ jobs:
               --model "$MODEL" \
               --allow-tool=read \
               --add-dir="$GITHUB_WORKSPACE/target" \
+              --add-dir="$GITHUB_WORKSPACE/verifier-source" \
               --deny-tool='shell,write,url,memory' \
               --no-ask-user
           ) > "raw-$PROVIDER.json"
+          if ! grep -q '[^[:space:]]' "raw-$PROVIDER.json"; then
+            echo "::error::$PROVIDER/$MODEL returned an empty response"
+            exit 1
+          fi
           python3 policy/scripts/autonomous_release_permit.py envelope \
             --context permit-input/context.json \
             --raw "raw-$PROVIDER.json" \
@@ -301,7 +317,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: Mindburn-Labs/helm-ai-kernel
-          ref: 1abe6c1247a558b8ef0eeeb5ce19c56e2c50436f
+          ref: 05eda40bd28087eb6d67d676bd1ae736d4294818
           persist-credentials: false
           path: kernel
 
@@ -317,12 +333,22 @@ jobs:
       - name: Reduce distinct-provider reviews
         run: |
           set -euo pipefail
+          mapfile -t review_paths < <(find reviews -type f -name 'review-*.json' -print | sort)
+          if [[ "${#review_paths[@]}" -ne 2 ]]; then
+            echo "::error::Exactly two review envelopes are required; found ${#review_paths[@]}"
+            exit 1
+          fi
+
+          reviewer_identities=()
           review_args=()
-          while IFS= read -r path; do
+          for path in "${review_paths[@]}"; do
+            reviewer_identities+=("$(jq -er '[.reviewer.provider, .reviewer.model] | join("/")' "$path")")
             review_args+=(--review "$path")
-          done < <(find reviews -type f -name 'review-*.json' -print | sort)
-          if [[ "${#review_args[@]}" -eq 0 ]]; then
-            echo "::error::No valid model review envelopes were produced"
+          done
+          reviewer_set="$(printf '%s\n' "${reviewer_identities[@]}" | sort -u)"
+          expected_reviewer_set=$'anthropic/claude-fable-5\nopenai/gpt-5.6-sol'
+          if [[ "$reviewer_set" != "$expected_reviewer_set" ]]; then
+            echo "::error::Review envelopes do not contain the exact distinct-provider quorum"
             exit 1
           fi
 
