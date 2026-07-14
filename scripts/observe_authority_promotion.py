@@ -33,6 +33,7 @@ from wait_for_authority_canary import (
     GitHubReadClient,
     artifact_for_run,
     extract_attested_permit,
+    extract_trusted_context,
     verify_candidate_permit,
 )
 
@@ -229,24 +230,38 @@ def observe(
     )
     if ratification_artifact_id is None:
         raise PermitInputError("ratification workflow run has no permit artifact")
+    ratification_context_artifact_id = artifact_for_run(
+        read_client,
+        AUTHORITY_REPOSITORY,
+        execution["ratification_run_id"],
+        "release-permit-input",
+    )
+    if ratification_context_artifact_id is None:
+        raise PermitInputError("ratification workflow run has no permit context artifact")
     ratification_artifact = read_client.get_bytes(
         f"/repos/{AUTHORITY_REPOSITORY}/actions/artifacts/{ratification_artifact_id}/zip",
     )
     artifact_ratification, artifact_ratification_bundle = extract_attested_permit(
         ratification_artifact,
     )
+    ratification_context_artifact = read_client.get_bytes(
+        f"/repos/{AUTHORITY_REPOSITORY}/actions/artifacts/{ratification_context_artifact_id}/zip",
+    )
+    artifact_ratification_context = extract_trusted_context(ratification_context_artifact)
     supplied_ratification = args.ratification_permit.read_bytes()
     supplied_ratification_bundle = args.ratification_bundle.read_bytes()
     if (
         artifact_ratification != supplied_ratification
         or artifact_ratification_bundle != supplied_ratification_bundle
+        or artifact_ratification_context != args.ratification_context.read_bytes()
     ):
         raise PermitInputError(
-            "supplied ratification permit or bundle is not the run artifact",
+            "supplied ratification permit, bundle, or context is not the run artifact",
         )
     ratification_permit = verify_candidate_permit(
         args.ratification_permit,
         args.ratification_bundle,
+        args.ratification_context,
         run=ratification_run,
         repository=AUTHORITY_REPOSITORY,
         pull_request=execution["candidate_pull_request"],
@@ -297,17 +312,34 @@ def observe(
     artifact_id = artifact_for_run(read_client, CANARY_REPOSITORY, execution["canary_run_id"])
     if artifact_id is None:
         raise PermitInputError("canary workflow run has no permit artifact")
+    context_artifact_id = artifact_for_run(
+        read_client,
+        CANARY_REPOSITORY,
+        execution["canary_run_id"],
+        "release-permit-input",
+    )
+    if context_artifact_id is None:
+        raise PermitInputError("canary workflow run has no permit context artifact")
     artifact = read_client.get_bytes(
         f"/repos/{CANARY_REPOSITORY}/actions/artifacts/{artifact_id}/zip",
     )
     artifact_permit, artifact_bundle = extract_attested_permit(artifact)
+    context_artifact = read_client.get_bytes(
+        f"/repos/{CANARY_REPOSITORY}/actions/artifacts/{context_artifact_id}/zip",
+    )
+    artifact_context = extract_trusted_context(context_artifact)
     supplied_permit = args.canary_permit.read_bytes()
     supplied_bundle = args.canary_bundle.read_bytes()
-    if artifact_permit != supplied_permit or artifact_bundle != supplied_bundle:
-        raise PermitInputError("supplied canary permit or bundle is not the run artifact")
+    if (
+        artifact_permit != supplied_permit
+        or artifact_bundle != supplied_bundle
+        or artifact_context != args.canary_context.read_bytes()
+    ):
+        raise PermitInputError("supplied canary permit, bundle, or context is not the run artifact")
     permit = verify_candidate_permit(
         args.canary_permit,
         args.canary_bundle,
+        args.canary_context,
         run=run,
         repository=CANARY_REPOSITORY,
         pull_request=CANARY_PULL_REQUEST,
@@ -369,8 +401,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--candidate-authority", type=Path, required=True)
     parser.add_argument("--ratification-permit", type=Path, required=True)
     parser.add_argument("--ratification-bundle", type=Path, required=True)
+    parser.add_argument("--ratification-context", type=Path, required=True)
     parser.add_argument("--canary-permit", type=Path, required=True)
     parser.add_argument("--canary-bundle", type=Path, required=True)
+    parser.add_argument("--canary-context", type=Path, required=True)
     parser.add_argument("--canary-receipt", type=Path, required=True)
     parser.add_argument("--parent-kernel-verifier", type=Path, required=True)
     parser.add_argument("--promotion-run-id", type=int, required=True)

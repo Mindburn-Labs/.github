@@ -140,9 +140,12 @@ def verify_args(
     permit_path: Path,
     verifier: Path,
 ) -> argparse.Namespace:
+    trusted_context = permit_path.parent / "context.json"
+    trusted_context.write_text("{}\n", encoding="utf-8")
     return argparse.Namespace(
         permit=permit_path,
         permit_verifier=verifier,
+        trusted_context=trusted_context,
         candidate_repository=repository,
         candidate_sha=candidate_sha,
         candidate_pr=33,

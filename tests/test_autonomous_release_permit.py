@@ -93,7 +93,7 @@ def prepare_args(
         anthropic_model="claude-fable-5",
         openai_model="gpt-5.6-sol",
         authority_manifest=ROOT / "config" / "autonomous-release-authority.json",
-        kernel_sha="f267bf75266264a35e2ddd645171deb125a43efd",
+        kernel_sha="83cc3eeb1cf512bed44b560254b11a342cee5b15",
         gate_profiles=ROOT / "config" / "autonomous-release-gates.json",
         adversarial_corpus=ROOT / "tests" / "fixtures" / "autonomous-release-adversarial.json",
         target_dir=repo,
@@ -447,7 +447,7 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertEqual(workflow.count("= \"$EXPECTED_WORKFLOW_SHA\""), 2)
         self.assertEqual(workflow.count("= \"$GITHUB_RUN_ATTEMPT\""), 2)
         self.assertEqual(
-            workflow.count("ref: f267bf75266264a35e2ddd645171deb125a43efd"),
+            workflow.count("ref: 83cc3eeb1cf512bed44b560254b11a342cee5b15"),
             2,
         )
         self.assertIn("attestations: write", workflow)

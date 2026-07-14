@@ -26,6 +26,8 @@ API_VERSION = "2026-03-10"
 MAX_API_BYTES = 4 << 20
 MAX_PERMIT_BYTES = 2 << 20
 MAX_BUNDLE_BYTES = 4 << 20
+MAX_CONTEXT_BYTES = 2 << 20
+MAX_PROMPT_BYTES = 2 << 20
 WORKFLOW_NAME = "HELM Autonomous Release Permit"
 WORKFLOW_PATH = ".github/workflows/ci.yml"
 SIGNER_WORKFLOW = "Mindburn-Labs/.github/.github/workflows/ci.yml"
@@ -109,6 +111,32 @@ def extract_attested_permit(archive: bytes) -> tuple[bytes, bytes]:
     return permit, attestation
 
 
+def extract_trusted_context(archive: bytes) -> bytes:
+    try:
+        with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
+            entries = bundle.infolist()
+            expected = {
+                "context.json": MAX_CONTEXT_BYTES,
+                "review-prompt.txt": MAX_PROMPT_BYTES,
+            }
+            if len(entries) != len(expected) or {entry.filename for entry in entries} != set(expected):
+                raise PermitInputError(
+                    "permit-input artifact must contain exactly the context and review prompt",
+                )
+            by_name = {entry.filename: entry for entry in entries}
+            if any(
+                entry.is_dir() or entry.file_size <= 0 or entry.file_size > expected[name]
+                for name, entry in by_name.items()
+            ):
+                raise PermitInputError("permit-input artifact exceeds the size limit")
+            context = bundle.read(by_name["context.json"])
+    except zipfile.BadZipFile as exc:
+        raise PermitInputError("permit-input artifact is not a valid ZIP archive") from exc
+    if not context or len(context) > MAX_CONTEXT_BYTES:
+        raise PermitInputError("permit context exceeds the size limit")
+    return context
+
+
 def load_json_file(path: Path, *, label: str) -> dict[str, Any]:
     try:
         value = parse_json_strict(path.read_text(encoding="utf-8"), label=label)
@@ -158,6 +186,7 @@ def verify_attestation(
 def verify_candidate_permit(
     permit_path: Path,
     bundle_path: Path,
+    trusted_context_path: Path,
     *,
     run: dict[str, Any],
     repository: str,
@@ -167,7 +196,6 @@ def verify_candidate_permit(
     expected_authority: dict[str, Any],
     kernel_verifier: Path,
 ) -> dict[str, Any]:
-    verify_permit_with_kernel(kernel_verifier, permit_path)
     permit = load_json_file(permit_path, label="canary permit")
     authority = validate_permit(permit)
     expected = {
@@ -190,10 +218,16 @@ def verify_candidate_permit(
         workflow_sha=expected_workflow_sha,
         source_sha=permit["merge_sha"],
     )
+    verify_permit_with_kernel(kernel_verifier, permit_path, trusted_context_path)
     return permit
 
 
-def artifact_for_run(client: GitHubReadClient, repository: str, run_id: int) -> int | None:
+def artifact_for_run(
+    client: GitHubReadClient,
+    repository: str,
+    run_id: int,
+    artifact_name: str = "helm-autonomous-release-permit",
+) -> int | None:
     artifacts = client.get_json(f"/repos/{repository}/actions/runs/{run_id}/artifacts")
     values = artifacts.get("artifacts")
     if not isinstance(values, list):
@@ -202,7 +236,7 @@ def artifact_for_run(client: GitHubReadClient, repository: str, run_id: int) -> 
         artifact
         for artifact in values
         if isinstance(artifact, dict)
-        and artifact.get("name") == "helm-autonomous-release-permit"
+        and artifact.get("name") == artifact_name
         and artifact.get("expired") is False
     ]
     if not matches:
@@ -243,7 +277,13 @@ def wait_for_canary(args: argparse.Namespace, client: GitHubReadClient) -> dict[
             ):
                 continue
             artifact_id = artifact_for_run(client, args.repository, run_id)
-            if artifact_id is None:
+            context_artifact_id = artifact_for_run(
+                client,
+                args.repository,
+                run_id,
+                "release-permit-input",
+            )
+            if artifact_id is None or context_artifact_id is None:
                 rejected_runs.add(run_id)
                 continue
             archive = client.get_bytes(
@@ -251,14 +291,22 @@ def wait_for_canary(args: argparse.Namespace, client: GitHubReadClient) -> dict[
                 accept="application/vnd.github+json",
             )
             permit_bytes, bundle_bytes = extract_attested_permit(archive)
+            context_archive = client.get_bytes(
+                f"/repos/{args.repository}/actions/artifacts/{context_artifact_id}/zip",
+                accept="application/vnd.github+json",
+            )
+            context_bytes = extract_trusted_context(context_archive)
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.bundle.parent.mkdir(parents=True, exist_ok=True)
+            args.context.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_bytes(permit_bytes)
             args.bundle.write_bytes(bundle_bytes)
+            args.context.write_bytes(context_bytes)
             try:
                 permit = verify_candidate_permit(
                     args.output,
                     args.bundle,
+                    args.context,
                     run=run,
                     repository=args.repository,
                     pull_request=args.pull_request,
@@ -270,6 +318,7 @@ def wait_for_canary(args: argparse.Namespace, client: GitHubReadClient) -> dict[
             except PermitInputError:
                 args.output.unlink(missing_ok=True)
                 args.bundle.unlink(missing_ok=True)
+                args.context.unlink(missing_ok=True)
                 rejected_runs.add(run_id)
                 continue
             return {
@@ -299,6 +348,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--kernel-verifier", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--bundle", type=Path, required=True)
+    parser.add_argument("--context", type=Path, required=True)
     parser.add_argument("--receipt", type=Path, required=True)
     parser.add_argument("--timeout-seconds", type=int, default=1200)
     parser.add_argument("--poll-seconds", type=int, default=15)
@@ -310,8 +360,13 @@ def main(argv: list[str]) -> int:
         args = build_parser().parse_args(argv)
         if args.pull_request <= 0:
             raise PermitInputError("pull_request must be positive")
-        if args.output.resolve() == args.bundle.resolve():
-            raise PermitInputError("permit output and attestation bundle must differ")
+        output_paths = {
+            args.output.resolve(),
+            args.bundle.resolve(),
+            args.context.resolve(),
+        }
+        if len(output_paths) != 3:
+            raise PermitInputError("permit, attestation bundle, and context outputs must differ")
         if not 60 <= args.timeout_seconds <= 1800:
             raise PermitInputError("timeout_seconds must be between 60 and 1800")
         if not 5 <= args.poll_seconds <= 60:

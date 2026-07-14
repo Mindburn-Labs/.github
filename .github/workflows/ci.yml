@@ -122,7 +122,7 @@ jobs:
           WORKFLOW_SHA: ${{ github.workflow_sha }}
           ANTHROPIC_MODEL: claude-fable-5
           OPENAI_MODEL: gpt-5.6-sol
-          KERNEL_SHA: f267bf75266264a35e2ddd645171deb125a43efd
+          KERNEL_SHA: 83cc3eeb1cf512bed44b560254b11a342cee5b15
           MAX_PATCH_BYTES: "524288"
           MAX_CHANGED_BLOB_BYTES: "8388608"
         run: |
@@ -189,7 +189,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: Mindburn-Labs/helm-ai-kernel
-          ref: f267bf75266264a35e2ddd645171deb125a43efd
+          ref: 83cc3eeb1cf512bed44b560254b11a342cee5b15
           persist-credentials: false
           path: verifier-source
           sparse-checkout: |
@@ -348,7 +348,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: Mindburn-Labs/helm-ai-kernel
-          ref: f267bf75266264a35e2ddd645171deb125a43efd
+          ref: 83cc3eeb1cf512bed44b560254b11a342cee5b15
           persist-credentials: false
           path: kernel
 

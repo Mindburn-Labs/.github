@@ -126,11 +126,22 @@ def validate_authority_shape(authority: Any, *, label: str) -> dict[str, Any]:
     return authority
 
 
-def verify_permit_with_kernel(verifier: Path, permit: Path) -> None:
+def verify_permit_with_kernel(
+    verifier: Path,
+    permit: Path,
+    trusted_context: Path,
+) -> None:
     verifier = verifier.resolve()
     permit = permit.resolve()
+    trusted_context = trusted_context.resolve()
     process = subprocess.run(
-        [str(verifier), "--verify-permit", str(permit)],
+        [
+            str(verifier),
+            "--verify-permit",
+            str(permit),
+            "--context",
+            str(trusted_context),
+        ],
         check=False,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -202,7 +213,11 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         label="expected_parent_workflow_sha",
         length=40,
     )
-    verify_permit_with_kernel(args.permit_verifier, args.permit)
+    verify_permit_with_kernel(
+        args.permit_verifier,
+        args.permit,
+        args.trusted_context,
+    )
     permit = load_json_bytes(args.permit.read_bytes(), label=str(args.permit))
     permit_authority = validate_permit(permit)
 
@@ -278,6 +293,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--permit", type=Path, required=True)
     parser.add_argument("--permit-verifier", type=Path, required=True)
+    parser.add_argument("--trusted-context", type=Path, required=True)
     parser.add_argument("--candidate-repository", type=Path, required=True)
     parser.add_argument("--candidate-sha", required=True)
     parser.add_argument("--candidate-pr", type=int, required=True)

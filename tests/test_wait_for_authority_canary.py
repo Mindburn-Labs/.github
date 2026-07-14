@@ -63,6 +63,34 @@ class AuthorityCanaryTests(unittest.TestCase):
             with self.subTest(size=len(payload)), self.assertRaises(MODULE.PermitInputError):
                 MODULE.extract_attested_permit(payload)
 
+    def test_extract_trusted_context_accepts_exact_bounded_input(self) -> None:
+        context = b'{"schema":"mindburn.release-permit-context/v2"}\n'
+        self.assertEqual(
+            MODULE.extract_trusted_context(
+                archive(
+                    {
+                        "context.json": context,
+                        "review-prompt.txt": b"Review this exact context.\n",
+                    },
+                ),
+            ),
+            context,
+        )
+
+    def test_extract_trusted_context_rejects_substitution(self) -> None:
+        for payload in (
+            archive({"context.json": b"{}", "extra": b"x"}),
+            archive({"../context.json": b"{}", "review-prompt.txt": b"x"}),
+            archive(
+                {
+                    "context.json": b"x" * (MODULE.MAX_CONTEXT_BYTES + 1),
+                    "review-prompt.txt": b"x",
+                },
+            ),
+        ):
+            with self.subTest(size=len(payload)), self.assertRaises(MODULE.PermitInputError):
+                MODULE.extract_trusted_context(payload)
+
 
 if __name__ == "__main__":
     unittest.main()

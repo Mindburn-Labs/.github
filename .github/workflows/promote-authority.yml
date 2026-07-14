@@ -54,6 +54,14 @@ jobs:
           github-token: ${{ github.token }}
           run-id: ${{ github.event.workflow_run.id }}
 
+      - name: Download triggering trusted permit context
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-permit-input
+          path: promotion/ratification-input
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+
       - name: Bind trigger, permit, pull request, and current base
         id: metadata
         env:
@@ -159,6 +167,7 @@ jobs:
           python3 broker/scripts/verify_authority_promotion.py \
             --permit promotion/release-permit.json \
             --permit-verifier "$GITHUB_WORKSPACE/release-permit-verify" \
+            --trusted-context promotion/ratification-input/context.json \
             --candidate-repository candidate \
             --candidate-sha "$CANDIDATE_SHA" \
             --candidate-pr "$CANDIDATE_PR" \
@@ -297,6 +306,7 @@ jobs:
             --kernel-verifier "$GITHUB_WORKSPACE/parent-permit-verify" \
             --output promotion/canary-permit.json \
             --bundle promotion/canary-permit.attestation.json \
+            --context promotion/canary-context.json \
             --receipt promotion/canary-receipt.json
 
       - name: Merge exact ratified authority tree through normal branch policy
@@ -466,8 +476,10 @@ jobs:
             --candidate-authority promotion/candidate-authority.json \
             --ratification-permit promotion/release-permit.json \
             --ratification-bundle promotion/release-permit.attestation.json \
+            --ratification-context promotion/ratification-input/context.json \
             --canary-permit promotion/canary-permit.json \
             --canary-bundle promotion/canary-permit.attestation.json \
+            --canary-context promotion/canary-context.json \
             --canary-receipt promotion/canary-receipt.json \
             --parent-kernel-verifier "$GITHUB_WORKSPACE/parent-permit-verify" \
             --promotion-run-id "$GITHUB_RUN_ID" \
@@ -668,8 +680,10 @@ jobs:
             --candidate-authority promotion/candidate-authority.json \
             --ratification-permit promotion/release-permit.json \
             --ratification-bundle promotion/release-permit.attestation.json \
+            --ratification-context promotion/ratification-input/context.json \
             --canary-permit promotion/canary-permit.json \
             --canary-bundle promotion/canary-permit.attestation.json \
+            --canary-context promotion/canary-context.json \
             --canary-receipt promotion/canary-receipt.json \
             --parent-kernel-verifier "$GITHUB_WORKSPACE/parent-permit-verify" \
             --promotion-run-id "$GITHUB_RUN_ID" \

@@ -2,7 +2,7 @@
   "adversarial_corpus_sha256": "5488b02dd38d8a41cb329f0703538e75fe8917f85277edc111de6a87d77223f8",
   "gate_profiles_sha256": "7226f61aba6e1eddbf14a4fee5328d986a4a343ca459b6b2ef4cf6c7307305f8",
   "generation": 1,
-  "kernel_sha": "f267bf75266264a35e2ddd645171deb125a43efd",
+  "kernel_sha": "83cc3eeb1cf512bed44b560254b11a342cee5b15",
   "parent": null,
   "schema": "mindburn.release-authority/v1"
 }
