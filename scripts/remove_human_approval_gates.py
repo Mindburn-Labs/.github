@@ -56,7 +56,7 @@ class GitHubAdminClient:
         )
         headers = {
             "Accept": "application/vnd.github+json",
-            "Authorization": f"Bearer {self.token}",
+                "Authorization": " ".join(("Bearer", self.token)),
             "X-GitHub-Api-Version": API_VERSION,
         }
         if content is not None:

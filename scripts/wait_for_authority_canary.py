@@ -45,7 +45,7 @@ class GitHubReadClient:
             self.api_url + path,
             headers={
                 "Accept": accept,
-                "Authorization": f"Bearer {self.token}",
+                "Authorization": " ".join(("Bearer", self.token)),
                 "X-GitHub-Api-Version": API_VERSION,
             },
             method="GET",

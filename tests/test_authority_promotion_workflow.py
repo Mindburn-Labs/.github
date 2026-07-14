@@ -89,6 +89,17 @@ class AuthorityPromotionWorkflowTests(unittest.TestCase):
                 reference = stripped.split("@", 1)[1]
                 self.assertRegex(reference, r"^[0-9a-f]{40}$")
 
+    def test_api_authorization_headers_remain_reviewable(self) -> None:
+        for relative_path in (
+            "scripts/atomic_merge_authority.py",
+            "scripts/authority_ruleset_broker.py",
+            "scripts/remove_human_approval_gates.py",
+            "scripts/wait_for_authority_canary.py",
+        ):
+            source = (ROOT / relative_path).read_text(encoding="utf-8")
+            self.assertNotIn('f"Bearer {self.token}"', source)
+            self.assertIn('" ".join(("Bearer", self.token))', source)
+
 
 if __name__ == "__main__":
     unittest.main()
