@@ -21,7 +21,7 @@ class PermitInputError(ValueError):
     """Raised when untrusted workflow or model input is not admissible."""
 
 
-def load_json_strict(path: Path) -> Any:
+def parse_json_strict(text: str, *, label: str) -> Any:
     def reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
         result: dict[str, Any] = {}
         for key, value in pairs:
@@ -31,9 +31,17 @@ def load_json_strict(path: Path) -> Any:
         return result
 
     try:
-        return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=reject_duplicates)
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise PermitInputError(f"{path}: invalid UTF-8 JSON: {exc}") from exc
+        return json.loads(text, object_pairs_hook=reject_duplicates)
+    except json.JSONDecodeError as exc:
+        raise PermitInputError(f"{label}: invalid JSON: {exc}") from exc
+
+
+def load_json_strict(path: Path) -> Any:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise PermitInputError(f"{path}: invalid UTF-8: {exc}") from exc
+    return parse_json_strict(text, label=str(path))
 
 
 def run_git(target: Path, *arguments: str) -> bytes:
@@ -312,6 +320,37 @@ def validate_model_response(value: Any) -> dict[str, Any]:
     return value
 
 
+def normalize_model_output(args: argparse.Namespace) -> None:
+    raw_bytes = args.raw.read_bytes()
+    if len(raw_bytes) > args.max_response_bytes:
+        raise PermitInputError(
+            f"model response is {len(raw_bytes)} bytes; limit is {args.max_response_bytes}",
+        )
+    try:
+        text = raw_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise PermitInputError(f"{args.raw}: invalid UTF-8: {exc}") from exc
+
+    candidate = text.strip()
+    lines = candidate.splitlines()
+    if lines and lines[0].strip().lower() in {"```", "```json"}:
+        if len(lines) < 3 or lines[-1].strip() != "```":
+            raise PermitInputError("model response contains an unterminated JSON fence")
+        candidate = "\n".join(lines[1:-1]).strip()
+        if "```" in candidate:
+            raise PermitInputError("model response contains nested or additional fences")
+    elif "```" in candidate:
+        raise PermitInputError("model response contains prose or an unexpected fence")
+
+    response = validate_model_response(
+        parse_json_strict(candidate, label=str(args.raw)),
+    )
+    args.output.write_text(
+        json.dumps(response, separators=(",", ":"), sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
 def envelope(args: argparse.Namespace) -> None:
     context_bytes = args.context.read_bytes()
     context = load_json_strict(args.context)
@@ -385,6 +424,12 @@ def build_parser() -> argparse.ArgumentParser:
     envelope_parser.add_argument("--model", required=True)
     envelope_parser.add_argument("--output", type=Path, required=True)
     envelope_parser.add_argument("--max-response-bytes", type=int, default=1_048_576)
+
+    normalize_parser = subparsers.add_parser("normalize")
+    normalize_parser.set_defaults(handler=normalize_model_output)
+    normalize_parser.add_argument("--raw", type=Path, required=True)
+    normalize_parser.add_argument("--output", type=Path, required=True)
+    normalize_parser.add_argument("--max-response-bytes", type=int, default=1_048_576)
     return parser
 
 

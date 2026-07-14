@@ -171,7 +171,7 @@ jobs:
       contents: read
       copilot-requests: write
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -181,14 +181,6 @@ jobs:
           - provider: openai
             model: gpt-5.6-sol
     steps:
-      - name: Checkout exact GitHub merge commit for read-only context
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
-          persist-credentials: false
-          path: target
-
       - name: Checkout pinned policy helpers
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -228,45 +220,68 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Install integrity-checked Copilot CLI
+      - name: Install dependency-closed integrity-checked Copilot CLI
         env:
-          EXPECTED_INTEGRITY: sha512-onEwx5tod9t31Lc2rT5ns6s/fY6jtdwVWS3Fzs8hKUjCv7LFIMGf71MLcikl4GBXn6cq44+HVdNzCMWnLjYl3g==
+          EXPECTED_INTEGRITY: sha512-4pyNKunm7GEzQZ+09Dwr4BwixJVNcQGBeqiZPKWBGxcSipwj90t8tidLYdNjgmXJoLerANhXZcY52wJW/HubEA==
         run: |
           set -euo pipefail
-          npm pack @github/copilot@1.0.70 --json > copilot-pack.json
-          actual_integrity="$(jq -r '.[0].integrity' copilot-pack.json)"
+          npm pack @github/copilot-linux-x64@1.0.70 --json > copilot-pack.json
           package_file="$(jq -r '.[0].filename' copilot-pack.json)"
+          actual_integrity="sha512-$(openssl dgst -sha512 -binary "$package_file" | openssl base64 -A)"
           if [[ "$actual_integrity" != "$EXPECTED_INTEGRITY" ]]; then
             echo "::error::Copilot CLI package integrity mismatch"
             exit 1
           fi
-          npm install --global "./$package_file"
+          tar -xzf "$package_file" package/copilot
+          install -m 0755 package/copilot "$RUNNER_TEMP/copilot"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
 
       - name: Run isolated read-only model review
         env:
+          COPILOT_HOME: ${{ runner.temp }}/copilot-${{ matrix.provider }}
           GITHUB_TOKEN: ${{ github.token }}
           PROVIDER: ${{ matrix.provider }}
           MODEL: ${{ matrix.model }}
         run: |
           set -euo pipefail
           prompt="$(<permit-input/review-prompt.txt)"
+          review_workspace="$RUNNER_TEMP/review-$PROVIDER"
+          mkdir -p "$review_workspace" "$COPILOT_HOME"
+          set +e
           (
-            cd permit-input
+            cd "$review_workspace"
             copilot -p "$prompt" -s \
               --model "$MODEL" \
+              --no-auto-update \
+              --no-bash-env \
+              --no-color \
+              --no-custom-instructions \
+              --no-experimental \
+              --no-remote \
+              --no-remote-export \
+              --stream off \
+              --disable-builtin-mcps \
               --allow-tool=read \
-              --add-dir="$GITHUB_WORKSPACE/target" \
               --add-dir="$GITHUB_WORKSPACE/verifier-source" \
               --deny-tool='shell,write,url,memory' \
               --no-ask-user
-          ) > "raw-$PROVIDER.json"
-          if ! grep -q '[^[:space:]]' "raw-$PROVIDER.json"; then
+          ) > "raw-$PROVIDER.txt" 2> "stderr-$PROVIDER.txt"
+          copilot_status=$?
+          set -e
+          if [[ "$copilot_status" -ne 0 ]]; then
+            echo "::error::$PROVIDER/$MODEL exited with status $copilot_status"
+            exit "$copilot_status"
+          fi
+          if ! grep -q '[^[:space:]]' "raw-$PROVIDER.txt"; then
             echo "::error::$PROVIDER/$MODEL returned an empty response"
             exit 1
           fi
+          python3 policy/scripts/autonomous_release_permit.py normalize \
+            --raw "raw-$PROVIDER.txt" \
+            --output "normalized-$PROVIDER.json"
           python3 policy/scripts/autonomous_release_permit.py envelope \
             --context permit-input/context.json \
-            --raw "raw-$PROVIDER.json" \
+            --raw "normalized-$PROVIDER.json" \
             --provider "$PROVIDER" \
             --model "$MODEL" \
             --output "review-$PROVIDER.json"
@@ -284,7 +299,10 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: release-diagnostic-${{ matrix.provider }}
-          path: raw-${{ matrix.provider }}.json
+          path: |
+            raw-${{ matrix.provider }}.txt
+            stderr-${{ matrix.provider }}.txt
+            normalized-${{ matrix.provider }}.json
           if-no-files-found: ignore
           retention-days: 1
 

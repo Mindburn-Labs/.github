@@ -245,6 +245,48 @@ class AutonomousReleasePermitTests(unittest.TestCase):
                 with self.assertRaisesRegex(MODULE.PermitInputError, message):
                     MODULE.validate_model_response(MODULE.load_json_strict(path))
 
+    def test_normalize_accepts_exact_or_single_fenced_json(self) -> None:
+        for content in (
+            '{"verdict":"ALLOW","findings":[]}',
+            '```json\n{"findings":[],"verdict":"ALLOW"}\n```\n',
+        ):
+            with self.subTest(content=content), tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                raw = root / "raw.txt"
+                output = root / "normalized.json"
+                raw.write_text(content, encoding="utf-8")
+                MODULE.normalize_model_output(
+                    argparse.Namespace(
+                        raw=raw,
+                        output=output,
+                        max_response_bytes=1_048_576,
+                    ),
+                )
+                self.assertEqual(
+                    output.read_text(encoding="utf-8"),
+                    '{"findings":[],"verdict":"ALLOW"}\n',
+                )
+
+    def test_normalize_rejects_prose_extra_fences_and_duplicate_keys(self) -> None:
+        for content, message in (
+            ('Here is the result: {"verdict":"ALLOW","findings":[]}', "invalid JSON"),
+            ('```json\n{"verdict":"ALLOW","findings":[]}\n```\nextra', "fence"),
+            ('```json\n```\n{"verdict":"ALLOW","findings":[]}\n```', "nested or additional"),
+            ('{"verdict":"ALLOW","verdict":"DENY","findings":[]}', "duplicate JSON key"),
+        ):
+            with self.subTest(content=content), tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                raw = root / "raw.txt"
+                raw.write_text(content, encoding="utf-8")
+                with self.assertRaisesRegex(MODULE.PermitInputError, message):
+                    MODULE.normalize_model_output(
+                        argparse.Namespace(
+                            raw=raw,
+                            output=root / "normalized.json",
+                            max_response_bytes=1_048_576,
+                        ),
+                    )
+
     def test_workflow_keeps_model_jobs_read_only_and_pinned(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8",
@@ -255,11 +297,16 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertIn("--allow-tool=read", workflow)
         self.assertIn('--add-dir="$GITHUB_WORKSPACE/verifier-source"', workflow)
         self.assertIn("--deny-tool='shell,write,url,memory'", workflow)
-        self.assertIn("@github/copilot@1.0.70", workflow)
+        self.assertIn("--no-custom-instructions", workflow)
+        self.assertIn("--disable-builtin-mcps", workflow)
+        self.assertIn("--no-remote-export", workflow)
+        self.assertIn("@github/copilot-linux-x64@1.0.70", workflow)
         self.assertIn(
-            "sha512-onEwx5tod9t31Lc2rT5ns6s/fY6jtdwVWS3Fzs8hKUjCv7LFIMGf71MLcikl4GBXn6cq44+HVdNzCMWnLjYl3g==",
+            "sha512-4pyNKunm7GEzQZ+09Dwr4BwixJVNcQGBeqiZPKWBGxcSipwj90t8tidLYdNjgmXJoLerANhXZcY52wJW/HubEA==",
             workflow,
         )
+        self.assertNotIn("npm install --global", workflow)
+        self.assertNotIn('path: target\n', workflow[workflow.index("model-review:"):])
         self.assertIn("name: HELM Autonomous Release Permit", workflow)
         self.assertIn("name: local-validation", workflow)
         self.assertIn("push:\n    branches:\n      - main", workflow)
@@ -281,6 +328,7 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertIn("Exactly two review envelopes are required", workflow)
         self.assertIn("exact distinct-provider quorum", workflow)
         self.assertIn("returned an empty response", workflow)
+        self.assertIn("autonomous_release_permit.py normalize", workflow)
         self.assertIn("name: Upload non-authoritative provider diagnostic", workflow)
         self.assertIn("name: release-diagnostic-${{ matrix.provider }}", workflow)
         self.assertIn("if: ${{ always() }}", workflow)
