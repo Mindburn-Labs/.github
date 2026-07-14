@@ -405,6 +405,14 @@ jobs:
             exit 1
           fi
 
+      - name: Checkout pinned offline attestation signer
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: Mindburn-Labs/.github
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+          path: policy
+
       - name: Set up pinned attestation runtime
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
