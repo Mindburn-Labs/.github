@@ -20,6 +20,18 @@ class AuthorityPromotionWorkflowTests(unittest.TestCase):
         self.assertEqual(workflow.count("HELM_AUTHORITY_PROMOTER_PRIVATE_KEY"), 4)
         self.assertIn("HELM_AUTHORITY_OBSERVER_PRIVATE_KEY", workflow)
         self.assertEqual(workflow.count("HELM_AUTHORITY_OBSERVER_PRIVATE_KEY"), 2)
+        self.assertEqual(workflow.count("Bind exact promoter App identity"), 4)
+        self.assertEqual(workflow.count("Bind exact observer App identity"), 2)
+        self.assertEqual(
+            workflow.count("action.yml defines client-id and deprecates app-id"),
+            6,
+        )
+        self.assertEqual(workflow.count("client-id:"), 6)
+        self.assertNotIn("app-id:", workflow)
+        self.assertEqual(workflow.count('= "helm-authority-promoter"'), 4)
+        self.assertEqual(workflow.count('= "helm-authority-observer"'), 2)
+        self.assertEqual(workflow.count('= "146541790"'), 4)
+        self.assertEqual(workflow.count('= "146542079"'), 2)
         self.assertIn("permission-organization-administration: write", workflow)
         self.assertIn(
             "separate App token is consumed only by the observer's GET-only client",

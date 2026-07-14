@@ -150,6 +150,8 @@ class ConfigureMachineApprovalGatesTests(unittest.TestCase):
                     "head_sha": CANDIDATE_SHA,
                     "review_state": "APPROVED",
                     "approver_login": MODULE.APPROVER_LOGIN,
+                    "approver_app_id": MODULE.APPROVER_APP_ID,
+                    "approver_installation_id": MODULE.APPROVER_INSTALLATION_ID,
                     "review_id": 42,
                 },
             ),

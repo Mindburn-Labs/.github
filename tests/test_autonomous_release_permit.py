@@ -505,6 +505,14 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertIn("needs.model-review.result == 'success'", workflow)
         self.assertIn("HELM_AUTHORITY_APPROVER_TOKEN", workflow)
         self.assertIn("permission-pull-requests: write", workflow)
+        self.assertIn(
+            "action.yml defines client-id and deprecates app-id",
+            workflow,
+        )
+        self.assertIn("--approver-app-slug", workflow)
+        self.assertIn("--approver-installation-id", workflow)
+        self.assertIn("steps.approver-token.outputs.app-slug", workflow)
+        self.assertIn("steps.approver-token.outputs.installation-id", workflow)
         self.assertIn("No target checkout or network context is available", helper)
         self.assertIn("name: HELM Autonomous Release Permit", workflow)
         self.assertIn("name: local-validation", workflow)

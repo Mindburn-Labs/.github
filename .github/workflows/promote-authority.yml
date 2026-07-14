@@ -270,6 +270,7 @@ jobs:
 
       - name: Mint least-privilege short-lived promoter token
         id: app-token
+        # At this exact action SHA, action.yml defines client-id and deprecates app-id.
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           client-id: ${{ vars.HELM_AUTHORITY_PROMOTER_CLIENT_ID }}
@@ -282,6 +283,15 @@ jobs:
           permission-attestations: read
           permission-organization-administration: write
           permission-pull-requests: write
+
+      - name: Bind exact promoter App identity
+        env:
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          INSTALLATION_ID: ${{ steps.app-token.outputs.installation-id }}
+        run: |
+          set -euo pipefail
+          test "$APP_SLUG" = "helm-authority-promoter"
+          test "$INSTALLATION_ID" = "146541790"
 
       - name: Advance evaluation-only candidate authority
         id: advance
@@ -460,6 +470,7 @@ jobs:
 
       - name: Mint short-lived ruleset-only promoter token
         id: app-token
+        # At this exact action SHA, action.yml defines client-id and deprecates app-id.
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           client-id: ${{ vars.HELM_AUTHORITY_PROMOTER_CLIENT_ID }}
@@ -473,6 +484,15 @@ jobs:
           permission-contents: read
           permission-organization-administration: write
           permission-pull-requests: write
+
+      - name: Bind exact promoter App identity
+        env:
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          INSTALLATION_ID: ${{ steps.app-token.outputs.installation-id }}
+        run: |
+          set -euo pipefail
+          test "$APP_SLUG" = "helm-authority-promoter"
+          test "$INSTALLATION_ID" = "146541790"
 
       - name: Rebind evaluation-only candidate to merged main
         env:
@@ -574,6 +594,7 @@ jobs:
       # separate App token is consumed only by the observer's GET-only client.
       - name: Mint independent GET-only observer token
         id: observer-token
+        # At this exact action SHA, action.yml defines client-id and deprecates app-id.
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           client-id: ${{ vars.HELM_AUTHORITY_OBSERVER_CLIENT_ID }}
@@ -587,6 +608,15 @@ jobs:
           permission-contents: read
           permission-organization-administration: write
           permission-pull-requests: read
+
+      - name: Bind exact observer App identity
+        env:
+          APP_SLUG: ${{ steps.observer-token.outputs.app-slug }}
+          INSTALLATION_ID: ${{ steps.observer-token.outputs.installation-id }}
+        run: |
+          set -euo pipefail
+          test "$APP_SLUG" = "helm-authority-observer"
+          test "$INSTALLATION_ID" = "146542079"
 
       - name: Checkout exact parent Kernel for ratification verification
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -743,6 +773,7 @@ jobs:
 
       - name: Mint least-privilege short-lived promoter token
         id: app-token
+        # At this exact action SHA, action.yml defines client-id and deprecates app-id.
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           client-id: ${{ vars.HELM_AUTHORITY_PROMOTER_CLIENT_ID }}
@@ -755,6 +786,15 @@ jobs:
           permission-attestations: read
           permission-organization-administration: write
           permission-pull-requests: write
+
+      - name: Bind exact promoter App identity
+        env:
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          INSTALLATION_ID: ${{ steps.app-token.outputs.installation-id }}
+        run: |
+          set -euo pipefail
+          test "$APP_SLUG" = "helm-authority-promoter"
+          test "$INSTALLATION_ID" = "146541790"
 
       - name: Activate merged authority only after observer ALLOW
         env:
@@ -819,6 +859,7 @@ jobs:
       # separate App token is consumed only by the observer's GET-only client.
       - name: Mint independent GET-only observer token
         id: observer-token
+        # At this exact action SHA, action.yml defines client-id and deprecates app-id.
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           client-id: ${{ vars.HELM_AUTHORITY_OBSERVER_CLIENT_ID }}
@@ -832,6 +873,15 @@ jobs:
           permission-contents: read
           permission-organization-administration: write
           permission-pull-requests: read
+
+      - name: Bind exact observer App identity
+        env:
+          APP_SLUG: ${{ steps.observer-token.outputs.app-slug }}
+          INSTALLATION_ID: ${{ steps.observer-token.outputs.installation-id }}
+        run: |
+          set -euo pipefail
+          test "$APP_SLUG" = "helm-authority-observer"
+          test "$INSTALLATION_ID" = "146542079"
 
       - name: Checkout exact parent Kernel for ratification verification
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -942,6 +992,7 @@ jobs:
 
       - name: Mint least-privilege short-lived promoter token
         id: app-token
+        # At this exact action SHA, action.yml defines client-id and deprecates app-id.
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           client-id: ${{ vars.HELM_AUTHORITY_PROMOTER_CLIENT_ID }}
@@ -954,6 +1005,15 @@ jobs:
           permission-attestations: read
           permission-organization-administration: write
           permission-pull-requests: write
+
+      - name: Bind exact promoter App identity
+        env:
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          INSTALLATION_ID: ${{ steps.app-token.outputs.installation-id }}
+        run: |
+          set -euo pipefail
+          test "$APP_SLUG" = "helm-authority-promoter"
+          test "$INSTALLATION_ID" = "146541790"
 
       - name: Restore parent authority after incomplete promotion
         env:

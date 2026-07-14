@@ -182,6 +182,16 @@ inspect the complete candidate and pinned reducer, while bootstrap and
 promotion independently verify Apps, environments, rulesets, ETags, receipts,
 and rollback state before any authority changes.
 
+Steady-state GitHub App tokens are minted only by
+`actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1`.
+That immutable action's `action.yml` defines `client-id` and deprecates the
+legacy `app-id` input. Every credentialed job checks the action's live
+`app-slug` and `installation-id` outputs against its source-owned App identity
+before using the token. The approval broker additionally requires the exact
+single-target token scope (the App itself is installed on only the three public
+autonomous repositories) and confirms the persisted review author before
+emitting a receipt.
+
 The steady-state promotion transaction is deliberately split across isolated
 jobs and three GitHub Apps. The approval-only App turns a signed ALLOW into an
 exact-head review but cannot read or write contents. The promoter can advance

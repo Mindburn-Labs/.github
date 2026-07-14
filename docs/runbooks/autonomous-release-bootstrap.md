@@ -17,7 +17,10 @@ The local credential may execute those inputs but cannot make a DENY acceptable.
   observer reads and attestation checks never use the executor token.
 - `HELM_AUTHORITY_APPROVER_TOKEN` is a third, distinct installation token for
   `helm-authority-approver`. That App has only Pull requests (write) and is
-  installed only on the three public autonomous repositories.
+  installed only on the three public autonomous repositories. The broker
+  rejects a token scoped to anything other than the single target repository
+  and emits a receipt only after GitHub reads back the exact-head review from
+  `helm-authority-approver[bot]`.
 - The candidate pull request is open, non-draft, based on the current `.github`
   `main`, and its generation-1 permit has a signed `ALLOW` from both configured
   providers.

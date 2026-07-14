@@ -40,7 +40,12 @@ from configure_machine_approval_gates import (
     GitHubAdminClient,
     configure_machine_approval_gates,
 )
-from submit_machine_approval import GitHubApprovalClient, submit_machine_approval
+from submit_machine_approval import (
+    APPROVER_INSTALLATION_ID,
+    APPROVER_SLUG,
+    GitHubApprovalClient,
+    submit_machine_approval,
+)
 from verify_authority_promotion import verify as verify_promotion
 from verify_control_plane import (
     load_json,
@@ -400,6 +405,8 @@ def prepare(
                 pull_request=args.candidate_pr,
                 head_sha=args.candidate_sha,
                 workflow_sha=args.candidate_sha,
+                approver_app_slug=APPROVER_SLUG,
+                approver_installation_id=APPROVER_INSTALLATION_ID,
             ),
             approval_client,
             attestation_token=observer_token,
@@ -656,6 +663,8 @@ def finalize(
             pull_request=args.candidate_pr,
             head_sha=args.candidate_sha,
             workflow_sha=args.candidate_sha,
+            approver_app_slug=APPROVER_SLUG,
+            approver_installation_id=APPROVER_INSTALLATION_ID,
         ),
         approval_client,
         attestation_token=observer_token,

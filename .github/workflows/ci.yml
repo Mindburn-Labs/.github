@@ -600,6 +600,7 @@ jobs:
 
       - name: Mint isolated approval-only App token
         id: approver-token
+        # At this exact action SHA, action.yml defines client-id and deprecates app-id.
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           client-id: ${{ vars.HELM_AUTHORITY_APPROVER_CLIENT_ID }}
@@ -607,6 +608,15 @@ jobs:
           owner: Mindburn-Labs
           repositories: ${{ github.event.repository.name }}
           permission-pull-requests: write
+
+      - name: Bind exact approval App identity
+        env:
+          APP_SLUG: ${{ steps.approver-token.outputs.app-slug }}
+          INSTALLATION_ID: ${{ steps.approver-token.outputs.installation-id }}
+        run: |
+          set -euo pipefail
+          test "$APP_SLUG" = "helm-authority-approver"
+          test "$INSTALLATION_ID" = "146576964"
 
       - name: Approve only the exact signed head
         env:
@@ -623,6 +633,8 @@ jobs:
             --pull-request "${{ github.event.pull_request.number }}" \
             --head-sha "${{ github.event.pull_request.head.sha }}" \
             --workflow-sha "${{ github.workflow_sha }}" \
+            --approver-app-slug "${{ steps.approver-token.outputs.app-slug }}" \
+            --approver-installation-id "${{ steps.approver-token.outputs.installation-id }}" \
             --output approval/machine-approval.json
 
       - name: Retain approval receipt

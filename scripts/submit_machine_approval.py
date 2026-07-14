@@ -102,7 +102,11 @@ def verify_installation(
     client: GitHubApprovalClient,
     *,
     repository: str,
+    app_slug: str,
+    installation_id: int,
 ) -> dict[str, Any]:
+    if app_slug != APPROVER_SLUG or installation_id != APPROVER_INSTALLATION_ID:
+        raise PermitInputError("token action returned the wrong approver App identity")
     encoded = urllib.parse.quote(repository, safe="")
     repositories = require_object(
         client.request("GET", f"/installation/repositories?per_page=100&repository={encoded}"),
@@ -113,12 +117,12 @@ def verify_installation(
         for item in require_list(repositories.get("repositories"), label="installation repositories")
         if isinstance(item, dict)
     }
-    if repository not in names:
-        raise PermitInputError("approver installation is not scoped to the target repository")
+    if names != {repository}:
+        raise PermitInputError("approver token repository scope is not exact")
     return {
         "app_id": APPROVER_APP_ID,
-        "app_slug": APPROVER_SLUG,
-        "id": APPROVER_INSTALLATION_ID,
+        "app_slug": app_slug,
+        "id": installation_id,
     }
 
 
@@ -199,7 +203,12 @@ def submit_machine_approval(
         raise PermitInputError("machine approval target is invalid")
 
     permit = verify_permit(args, attestation_token=attestation_token)
-    installation = verify_installation(client, repository=args.repository)
+    installation = verify_installation(
+        client,
+        repository=args.repository,
+        app_slug=args.approver_app_slug,
+        installation_id=args.approver_installation_id,
+    )
     validate_pull_request(
         client,
         repository=args.repository,
@@ -267,6 +276,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--pull-request", type=int, required=True)
     parser.add_argument("--head-sha", required=True)
     parser.add_argument("--workflow-sha", required=True)
+    parser.add_argument("--approver-app-slug", required=True)
+    parser.add_argument("--approver-installation-id", type=int, required=True)
     parser.add_argument("--output", type=Path, required=True)
     return parser
 

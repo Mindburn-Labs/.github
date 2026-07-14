@@ -51,6 +51,9 @@ authority. The merge token and ruleset-admin App key never coexist in one job.
 Every adversarial proof run carries an offline GitHub-Sigstore marker bound to
 the exact candidate workflow SHA and run, so a concurrent parent-workflow
 failure cannot satisfy candidate evidence.
+Credentialed jobs also bind the pinned token action's live App slug and
+installation ID before use; the approval broker independently checks exact
+repository scope and the persisted GitHub review actor.
 
 The enforcing rule is intentionally public-only while GitHub's paid
 private/internal required-workflow entitlement returns an upgrade error.

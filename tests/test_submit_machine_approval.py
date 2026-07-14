@@ -67,6 +67,8 @@ def arguments() -> argparse.Namespace:
         pull_request=36,
         head_sha=HEAD_SHA,
         workflow_sha=WORKFLOW_SHA,
+        approver_app_slug=MODULE.APPROVER_SLUG,
+        approver_installation_id=MODULE.APPROVER_INSTALLATION_ID,
     )
 
 
@@ -134,9 +136,20 @@ class SubmitMachineApprovalTests(unittest.TestCase):
         client.request = request  # type: ignore[method-assign]
         with (
             mock.patch.object(MODULE, "verify_permit", return_value=self.permit()),
-            self.assertRaisesRegex(MODULE.PermitInputError, "not scoped"),
+            self.assertRaisesRegex(MODULE.PermitInputError, "scope is not exact"),
         ):
             MODULE.submit_machine_approval(arguments(), client, attestation_token="observer")
+        self.assertEqual(client.posts, 0)
+
+    def test_wrong_action_identity_fails_closed_before_review(self) -> None:
+        client = FakeClient()
+        args = arguments()
+        args.approver_installation_id += 1
+        with (
+            mock.patch.object(MODULE, "verify_permit", return_value=self.permit()),
+            self.assertRaisesRegex(MODULE.PermitInputError, "wrong approver App identity"),
+        ):
+            MODULE.submit_machine_approval(args, client, attestation_token="observer")
         self.assertEqual(client.posts, 0)
 
 

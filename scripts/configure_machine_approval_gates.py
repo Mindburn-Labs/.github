@@ -317,6 +317,8 @@ def validate_approval(
         or approval.get("head_sha") != candidate_sha
         or approval.get("review_state") != "APPROVED"
         or approval.get("approver_login") != APPROVER_LOGIN
+        or approval.get("approver_app_id") != APPROVER_APP_ID
+        or approval.get("approver_installation_id") != APPROVER_INSTALLATION_ID
         or not isinstance(approval.get("review_id"), int)
     ):
         raise PermitInputError("machine approval receipt is not exact")
