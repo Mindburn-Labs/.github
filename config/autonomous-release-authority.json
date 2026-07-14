@@ -1,11 +1,11 @@
 {
   "adversarial_corpus_sha256": "a5572c4fcd50bc331043d90e6e97f7cd383baeb278c9d653b173019eeee41d5f",
-  "gate_profiles_sha256": "23ae753ada6106fdc216f177a0090ed96f4846d4e643b301bdaa042721ca7aa2",
+  "gate_profiles_sha256": "4291d4e89e20c5aee079879be01c86a3537fe4fbdd87d9d5937d2265de28f5f9",
   "generation": 2,
   "kernel_sha": "83cc3eeb1cf512bed44b560254b11a342cee5b15",
   "parent": {
     "generation": 1,
-    "workflow_sha": "a202531b4e4fd8a5468ac985abcdb2a407a7f381"
+    "workflow_sha": "52a1ef42118e618e811bce48204f4a49a41b8bca"
   },
   "schema": "mindburn.release-authority/v1"
 }
