@@ -150,6 +150,30 @@ non-authority pull request before it can become enforcing authority. Failed-job
 retries, a branch update, or an administrator editing the pin cannot substitute
 for either generation's evidence.
 
+The promotion transaction is deliberately split across isolated jobs and two
+GitHub Apps. The promoter can advance and restore exact ruleset bindings, run a
+permanent synthetic canary, merge the already-ratified tree through normal
+branch policy, and rebind only the evaluation ruleset. A separate observer
+re-downloads both permits from their originating runs, verifies their GitHub
+attestations with the exact previous-generation Kernel, compares the merged
+tree and pull request with GitHub state, and reads back both rulesets. The
+candidate Kernel executes only inside its isolated evaluation workflow; no
+candidate binary is ever run in a job holding promoter or observer credentials.
+Only an attested observer `ALLOW` lets a later promoter job activate the stable
+ruleset. A second observer produces the final success receipt; any missing or
+failed observation schedules restoration to version N. The executor therefore
+cannot mint its own success receipt.
+
+GitHub's organization-ruleset API has two provider constraints that the broker
+must not conceal. Organization-ruleset `GET` requires the same organization
+Administration (write) permission as `PUT`, so the observer uses a separate App
+identity and an immutable GET-only code path even though GitHub over-grants its
+installation token. GitHub also does not document conditional requests for the
+ruleset `PUT` endpoint. The broker therefore performs an exact re-read before
+each mutation and an exact read-back afterward; the independent observer and
+automatic restoration close the remaining non-atomic drift window. No ETag is
+treated as an atomic compare-and-swap guarantee.
+
 ## Rollout
 
 1. Publish the Kernel reducer and public organization workflow; retain the
