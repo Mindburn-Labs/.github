@@ -294,7 +294,10 @@ class AutonomousReleasePermitTests(unittest.TestCase):
             {
                 "type": "assistant.message",
                 "data": {
-                    "content": '{"verdict":"DENY","findings":[{"severity":"P1","code":"BOUNDARY","summary":"wrapped words remain valid"}]}',
+                    "content": (
+                        "I reviewed the bound patch. The terminal verdict follows.\n\n"
+                        '{"verdict":"DENY","findings":[{"severity":"P1","code":"BOUNDARY","summary":"wrapped words remain valid"}]}'
+                    ),
                     "toolRequests": [],
                 },
             },
@@ -320,6 +323,39 @@ class AutonomousReleasePermitTests(unittest.TestCase):
             response = json.loads(output.read_text(encoding="utf-8"))
         self.assertEqual(response["verdict"], "DENY")
         self.assertEqual(response["findings"][0]["code"], "BOUNDARY")
+
+    def test_normalize_rejects_ambiguous_terminal_json_suffix(self) -> None:
+        events = [
+            {
+                "type": "assistant.message",
+                "data": {
+                    "content": (
+                        "Review complete.\n"
+                        '{"verdict":"ALLOW","findings":[]}\n'
+                        '{"verdict":"DENY","findings":[]}'
+                    ),
+                    "toolRequests": [],
+                },
+            },
+            {"type": "result", "exitCode": 0},
+        ]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            raw = root / "raw.jsonl"
+            raw.write_text(
+                "\n".join(json.dumps(event) for event in events) + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(MODULE.PermitInputError, "invalid JSON"):
+                MODULE.normalize_model_output(
+                    argparse.Namespace(
+                        raw=raw,
+                        output=root / "normalized.json",
+                        transport_format="copilot-jsonl",
+                        max_transport_bytes=16_777_216,
+                        max_response_bytes=1_048_576,
+                    ),
+                )
 
     def test_normalize_rejects_ambiguous_copilot_jsonl(self) -> None:
         message = {

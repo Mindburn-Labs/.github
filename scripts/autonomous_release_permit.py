@@ -465,6 +465,16 @@ def normalize_model_output(args: argparse.Namespace) -> None:
     elif "```" in candidate:
         raise PermitInputError("model response contains prose or an unexpected fence")
 
+    if transport_format == "copilot-jsonl" and not candidate.startswith("{"):
+        # Copilot's JSONL transport can preserve a model's explanatory preamble
+        # inside the one terminal assistant message even when the requested
+        # response is JSON-only. Ignore only a prefix: the remaining suffix must
+        # be exactly one strict JSON value, so trailing prose, a second verdict,
+        # duplicate keys, and ambiguous brace-delimited content still fail closed.
+        object_start = candidate.find("{")
+        if object_start >= 0:
+            candidate = candidate[object_start:].strip()
+
     response = validate_model_response(
         parse_json_strict(candidate, label=str(args.raw)),
     )
