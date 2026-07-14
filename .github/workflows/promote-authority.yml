@@ -216,19 +216,15 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  promote:
-    name: Canary, merge, and rebind authority
+  stage:
+    name: Stage and canary candidate authority
     needs: verify-candidate
     environment: authority-promotion
     permissions:
       actions: read
-      contents: write
-      pull-requests: write
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    outputs:
-      merge_sha: ${{ steps.merge.outputs.merge_sha }}
-      merge_tree_sha: ${{ steps.merge.outputs.merge_tree_sha }}
     steps:
       - name: Checkout immutable parent authority broker
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -353,6 +349,55 @@ jobs:
             --output-dir promotion/suite \
             --receipt promotion/authority-suite.json
 
+      - name: Upload staged authority evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: helm-authority-promotion-stage
+          path: promotion
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Restore parent rulesets after failed staging
+        if: ${{ failure() && steps.advance.outcome == 'success' }}
+        env:
+          CANDIDATE_REF: ${{ needs.verify-candidate.outputs.candidate_ref }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/authority_ruleset_broker.py restore \
+            --parent-sha "${{ needs.verify-candidate.outputs.parent_sha }}" \
+            --candidate-sha "${{ needs.verify-candidate.outputs.candidate_sha }}" \
+            --candidate-ref "$CANDIDATE_REF" \
+            --output promotion/ruleset-restore.json
+
+  merge:
+    name: Atomically merge ratified authority
+    needs:
+      - verify-candidate
+      - stage
+    permissions:
+      actions: read
+      contents: write
+      pull-requests: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      merge_sha: ${{ steps.merge.outputs.merge_sha }}
+      merge_tree_sha: ${{ steps.merge.outputs.merge_tree_sha }}
+    steps:
+      - name: Checkout immutable parent merge broker
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ needs.verify-candidate.outputs.parent_sha }}
+          persist-credentials: false
+          path: broker
+
+      - name: Download staged authority evidence
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-authority-promotion-stage
+          path: promotion
+
       - name: Atomically advance main to the exact ratified merge commit
         id: merge
         env:
@@ -371,8 +416,63 @@ jobs:
           echo "merge_sha=$merge_sha" >> "$GITHUB_OUTPUT"
           echo "merge_tree_sha=$merge_tree_sha" >> "$GITHUB_OUTPUT"
 
+      - name: Retain exact merge receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: helm-authority-merge
+          path: promotion/merge-response.json
+          if-no-files-found: error
+          retention-days: 90
+
+  rebind:
+    name: Rebind candidate authority after isolated merge
+    needs:
+      - verify-candidate
+      - stage
+      - merge
+    environment: authority-promotion
+    permissions:
+      actions: read
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout immutable parent authority broker
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ needs.verify-candidate.outputs.parent_sha }}
+          persist-credentials: false
+          path: broker
+
+      - name: Download staged authority evidence
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-authority-promotion-stage
+          path: promotion
+
+      - name: Download exact merge receipt
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-authority-merge
+          path: promotion
+
+      - name: Mint short-lived ruleset-only promoter token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.HELM_AUTHORITY_PROMOTER_CLIENT_ID }}
+          private-key: ${{ secrets.HELM_AUTHORITY_PROMOTER_PRIVATE_KEY }}
+          owner: Mindburn-Labs
+          repositories: |
+            .github
+            contracts-autonomous-release-lab
+          permission-actions: read
+          permission-attestations: read
+          permission-contents: read
+          permission-organization-administration: write
+          permission-pull-requests: write
+
       - name: Rebind evaluation-only candidate to merged main
-        id: rebind
         env:
           CANDIDATE_REF: ${{ needs.verify-candidate.outputs.candidate_ref }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -382,7 +482,7 @@ jobs:
             --parent-sha "${{ needs.verify-candidate.outputs.parent_sha }}" \
             --candidate-sha "${{ needs.verify-candidate.outputs.candidate_sha }}" \
             --candidate-ref "$CANDIDATE_REF" \
-            --merge-sha "${{ steps.merge.outputs.merge_sha }}" \
+            --merge-sha "${{ needs.merge.outputs.merge_sha }}" \
             --output promotion/ruleset-rebind.json
 
       - name: Build non-authoritative execution bundle
@@ -395,8 +495,8 @@ jobs:
             --arg candidate_ref "$CANDIDATE_REF" \
             --arg candidate_tree_sha "${{ needs.verify-candidate.outputs.candidate_tree_sha }}" \
             --argjson candidate_pr "${{ needs.verify-candidate.outputs.candidate_pr }}" \
-            --arg merge_sha "${{ steps.merge.outputs.merge_sha }}" \
-            --arg merge_tree_sha "${{ steps.merge.outputs.merge_tree_sha }}" \
+            --arg merge_sha "${{ needs.merge.outputs.merge_sha }}" \
+            --arg merge_tree_sha "${{ needs.merge.outputs.merge_tree_sha }}" \
             --arg parent_sha "${{ needs.verify-candidate.outputs.parent_sha }}" \
             --slurpfile promotion promotion/authority-promotion.json \
             --arg authority_suite_sha256 "$(sha256sum promotion/authority-suite.json | awk '{print $1}')" \
@@ -431,30 +531,11 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Restore last-known-good rulesets after any incomplete transition
-        if: ${{ failure() && steps.advance.outcome == 'success' }}
-        env:
-          CANDIDATE_REF: ${{ needs.verify-candidate.outputs.candidate_ref }}
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          MERGE_SHA: ${{ steps.merge.outputs.merge_sha }}
-        run: |
-          set -euo pipefail
-          merge_args=()
-          if [[ -n "${MERGE_SHA:-}" ]]; then
-            merge_args+=(--merge-sha "$MERGE_SHA")
-          fi
-          python3 broker/scripts/authority_ruleset_broker.py restore \
-            --parent-sha "${{ needs.verify-candidate.outputs.parent_sha }}" \
-            --candidate-sha "${{ needs.verify-candidate.outputs.candidate_sha }}" \
-            --candidate-ref "$CANDIDATE_REF" \
-            "${merge_args[@]}" \
-            --output promotion/ruleset-restore.json
-
   observe_pre_activation:
     name: Independently observe staged authority
     needs:
       - verify-candidate
-      - promote
+      - rebind
     environment: authority-observer
     permissions:
       actions: read
@@ -596,7 +677,8 @@ jobs:
     name: Activate independently observed authority
     needs:
       - verify-candidate
-      - promote
+      - merge
+      - rebind
       - observe_pre_activation
     environment: authority-promotion
     permissions:
@@ -645,7 +727,7 @@ jobs:
             --deny-self-hosted-runners
           jq -e \
             --arg candidate "${{ needs.verify-candidate.outputs.candidate_sha }}" \
-            --arg merge "${{ needs.promote.outputs.merge_sha }}" \
+            --arg merge "${{ needs.merge.outputs.merge_sha }}" \
             --arg parent "$PARENT_SHA" \
             --argjson attempt "$GITHUB_RUN_ATTEMPT" \
             --argjson run "$GITHUB_RUN_ID" \
@@ -682,7 +764,7 @@ jobs:
             --parent-sha "${{ needs.verify-candidate.outputs.parent_sha }}" \
             --candidate-sha "${{ needs.verify-candidate.outputs.candidate_sha }}" \
             --candidate-ref "$CANDIDATE_REF" \
-            --merge-sha "${{ needs.promote.outputs.merge_sha }}" \
+            --merge-sha "${{ needs.merge.outputs.merge_sha }}" \
             --output observation/ruleset-activate.json
 
       - name: Upload activation transition for final observation
@@ -697,7 +779,7 @@ jobs:
     name: Independently observe enforcing authority
     needs:
       - verify-candidate
-      - promote
+      - merge
       - activate
     environment: authority-observer
     permissions:
@@ -818,20 +900,27 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-  rollback:
-    name: Restore last-known-good authority after observation failure
+  recover:
+    name: Converge rulesets after an incomplete promotion
     if: >-
       always() &&
-      needs.promote.result == 'success' &&
-      needs.observe_final.result != 'success'
+      needs.stage.result == 'success' &&
+      (needs.merge.result != 'success' ||
+       needs.rebind.result != 'success' ||
+       needs.observe_pre_activation.result != 'success' ||
+       needs.activate.result != 'success' ||
+       needs.observe_final.result != 'success')
     needs:
       - verify-candidate
-      - promote
+      - stage
+      - merge
+      - rebind
       - observe_pre_activation
       - activate
       - observe_final
     environment: authority-promotion
     permissions:
+      actions: read
       contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -842,6 +931,12 @@ jobs:
           ref: ${{ needs.verify-candidate.outputs.parent_sha }}
           persist-credentials: false
           path: broker
+
+      - name: Download signed promotion evidence
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-authority-promotion-stage
+          path: promotion
 
       - name: Mint least-privilege short-lived promoter token
         id: app-token
@@ -858,17 +953,26 @@ jobs:
           permission-organization-administration: write
           permission-pull-requests: write
 
-      - name: Restore both rulesets to the parent generation
+      - name: Converge on merged main or restore the unmerged parent
         env:
           CANDIDATE_REF: ${{ needs.verify-candidate.outputs.candidate_ref }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
+          expected_merge_sha="$(jq -er '.merge_sha' promotion/release-permit.json)"
+          current_main="$(gh api repos/Mindburn-Labs/.github/git/ref/heads/main --jq '.object.sha')"
+          merge_args=()
+          if [[ "$current_main" = "$expected_merge_sha" ]]; then
+            merge_args+=(--merge-sha "$expected_merge_sha")
+          elif [[ "$current_main" != "${{ needs.verify-candidate.outputs.parent_sha }}" ]]; then
+            echo "::error::Main is outside the exact parent/merge recovery states"
+            exit 1
+          fi
           python3 broker/scripts/authority_ruleset_broker.py restore \
             --parent-sha "${{ needs.verify-candidate.outputs.parent_sha }}" \
             --candidate-sha "${{ needs.verify-candidate.outputs.candidate_sha }}" \
             --candidate-ref "$CANDIDATE_REF" \
-            --merge-sha "${{ needs.promote.outputs.merge_sha }}" \
+            "${merge_args[@]}" \
             --output ruleset-rollback.json
 
       - name: Retain rollback evidence

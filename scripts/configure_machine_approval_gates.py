@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Remove human approval gates only after the public machine gate is active."""
+"""Install the machine-approval interlock before retiring public CODEOWNER gates."""
 
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
@@ -26,13 +27,27 @@ from authority_ruleset_broker import (
     validate_ref,
     validate_ruleset,
 )
+from submit_machine_approval import (
+    APPROVER_APP_ID,
+    APPROVER_INSTALLATION_ID,
+    APPROVER_LOGIN,
+    SCHEMA as APPROVAL_SCHEMA,
+)
 
 
-BOOTSTRAP_SCHEMA = "mindburn.release-authority-bootstrap/v1"
+BOOTSTRAP_SCHEMA = "mindburn.release-authority-bootstrap/v2"
+CONFIGURATION_SCHEMA = "mindburn.release-authority-machine-gates/v1"
 HUMAN_RULESET_ID = 17911735
 HUMAN_RULESET_NAME = "Mindburn default branch approval gate"
+MACHINE_RULESET_NAME = "HELM Machine Approval Interlock"
 AUTHORITY_REPOSITORY_ID = 1159255601
 KERNEL_REPOSITORY_ID = 1158479649
+
+
+@dataclass(frozen=True)
+class AdminResponse:
+    body: Any
+    etag: str | None
 
 
 class GitHubAdminClient:
@@ -48,7 +63,8 @@ class GitHubAdminClient:
         path: str,
         *,
         payload: dict[str, Any] | None = None,
-    ) -> dict[str, Any] | None:
+        if_match: str | None = None,
+    ) -> AdminResponse:
         content = (
             json.dumps(payload, separators=(",", ":")).encode("utf-8")
             if payload is not None
@@ -56,11 +72,13 @@ class GitHubAdminClient:
         )
         headers = {
             "Accept": "application/vnd.github+json",
-                "Authorization": " ".join(("Bearer", self.token)),
+            "Authorization": " ".join(("Bearer", self.token)),
             "X-GitHub-Api-Version": API_VERSION,
         }
         if content is not None:
             headers["Content-Type"] = "application/json"
+        if if_match is not None:
+            headers["If-Match"] = if_match
         request = urllib.request.Request(
             self.api_url + path,
             data=content,
@@ -69,45 +87,74 @@ class GitHubAdminClient:
         )
         try:
             with urllib.request.urlopen(request, timeout=30) as response:  # nosec B310
-                body = response.read()
+                raw = response.read()
+                etag = response.headers.get("ETag")
         except urllib.error.HTTPError as exc:
             detail = exc.read(4096).decode("utf-8", errors="replace").strip()
+            if exc.code == 412:
+                raise PermitInputError(f"GitHub rejected stale state for {path}") from exc
             raise PermitInputError(
                 f"GitHub {method} {path} failed with HTTP {exc.code}: {detail}",
             ) from exc
         except (urllib.error.URLError, TimeoutError) as exc:
             raise PermitInputError(f"GitHub {method} {path} failed: {exc}") from exc
-        if not body:
-            return None
+        if not raw:
+            return AdminResponse(None, etag)
         try:
-            value = json.loads(body.decode("utf-8"))
+            value = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise PermitInputError(f"GitHub {method} {path} returned invalid JSON") from exc
-        if not isinstance(value, dict):
-            raise PermitInputError(f"GitHub {method} {path} returned a non-object")
-        return value
+        return AdminResponse(value, etag)
 
 
-def require_object(value: dict[str, Any] | None, *, label: str) -> dict[str, Any]:
-    if not isinstance(value, dict):
+def require_object(response: AdminResponse, *, label: str) -> dict[str, Any]:
+    if not isinstance(response.body, dict):
         raise PermitInputError(f"{label} returned no object")
+    return response.body
+
+
+def load_json(path: Path, *, label: str) -> dict[str, Any]:
+    try:
+        value = parse_json_strict(path.read_text(encoding="utf-8"), label=label)
+    except UnicodeDecodeError as exc:
+        raise PermitInputError(f"{label} is not UTF-8") from exc
+    if not isinstance(value, dict):
+        raise PermitInputError(f"{label} must be an object")
     return value
 
 
 def load_contract(path: Path) -> dict[str, Any]:
-    try:
-        value = parse_json_strict(path.read_text(encoding="utf-8"), label=str(path))
-    except UnicodeDecodeError as exc:
-        raise PermitInputError("bootstrap contract is not UTF-8") from exc
-    if not isinstance(value, dict):
-        raise PermitInputError("bootstrap contract must be an object")
+    value = load_json(path, label="bootstrap contract")
     require_exact_keys(
         value,
-        required={"schema", "human_approval_ruleset", "classic_branch_protection"},
+        required={
+            "schema",
+            "approver",
+            "machine_approval_ruleset",
+            "human_approval_ruleset",
+            "classic_branch_protection",
+        },
         label="bootstrap contract",
     )
     if value["schema"] != BOOTSTRAP_SCHEMA:
         raise PermitInputError("unsupported bootstrap contract schema")
+
+    approver = value["approver"]
+    if approver != {
+        "app_id": APPROVER_APP_ID,
+        "installation_id": APPROVER_INSTALLATION_ID,
+        "login": APPROVER_LOGIN,
+        "slug": "helm-authority-approver",
+        "organization": ORGANIZATION,
+        "permission": {"pull_requests": "write"},
+    }:
+        raise PermitInputError("bootstrap contract names the wrong approver")
+
+    machine = value["machine_approval_ruleset"]
+    if not isinstance(machine, dict):
+        raise PermitInputError("machine approval ruleset contract must be an object")
+    if machine != machine_ruleset_payload():
+        raise PermitInputError("machine approval ruleset contract is not exact")
 
     human = value["human_approval_ruleset"]
     if not isinstance(human, dict):
@@ -137,11 +184,11 @@ def load_contract(path: Path) -> dict[str, Any]:
     if human["id"] != HUMAN_RULESET_ID or human["name"] != HUMAN_RULESET_NAME:
         raise PermitInputError("bootstrap contract names the wrong human ruleset")
     if set(remove) != {AUTHORITY_REPOSITORY_ID, KERNEL_REPOSITORY_ID}:
-        raise PermitInputError("bootstrap removes the wrong human-gated repositories")
+        raise PermitInputError("bootstrap retires the wrong CODEOWNER-gated repositories")
     if set(remove) - set(PUBLIC_AUTONOMOUS_REPOSITORY_IDS):
-        raise PermitInputError("bootstrap removal is outside public machine coverage")
+        raise PermitInputError("bootstrap retirement is outside public machine coverage")
     if after != [repository_id for repository_id in before if repository_id not in remove]:
-        raise PermitInputError("bootstrap post-removal repository IDs are not exact")
+        raise PermitInputError("bootstrap post-retirement repository IDs are not exact")
     if not isinstance(human["rules"], list) or not human["rules"]:
         raise PermitInputError("bootstrap human rules must be a non-empty list")
 
@@ -150,23 +197,50 @@ def load_contract(path: Path) -> dict[str, Any]:
         raise PermitInputError("classic branch protection contract must be an object")
     require_exact_keys(
         classic,
-        required={"repository", "branch", "before", "after"},
+        required={"repository", "branch", "expected"},
         label="classic branch protection contract",
     )
     if classic["repository"] != "Mindburn-Labs/.github" or classic["branch"] != "main":
         raise PermitInputError("bootstrap contract names the wrong protected branch")
-    if not isinstance(classic["before"], dict) or not isinstance(classic["after"], dict):
-        raise PermitInputError("classic protection states must be objects")
-    expected_after = json.loads(json.dumps(classic["before"]))
-    expected_after["required_pull_request_reviews"] = None
-    if classic["after"] != expected_after:
-        raise PermitInputError("classic protection contract changes more than human approval")
+    reviews = classic["expected"].get("required_pull_request_reviews")
+    if not isinstance(reviews, dict) or reviews.get("required_approving_review_count") != 1:
+        raise PermitInputError("classic protection must retain one required approval")
     return value
+
+
+def machine_ruleset_payload() -> dict[str, Any]:
+    return {
+        "name": MACHINE_RULESET_NAME,
+        "target": "branch",
+        "enforcement": "active",
+        "bypass_actors": [],
+        "conditions": {
+            "ref_name": {"exclude": [], "include": ["~DEFAULT_BRANCH"]},
+            "repository_id": {
+                "repository_ids": list(PUBLIC_AUTONOMOUS_REPOSITORY_IDS),
+            },
+        },
+        "rules": [
+            {"type": "deletion"},
+            {"type": "non_fast_forward"},
+            {
+                "type": "pull_request",
+                "parameters": {
+                    "allowed_merge_methods": ["merge", "squash", "rebase"],
+                    "dismiss_stale_reviews_on_push": True,
+                    "require_code_owner_review": False,
+                    "require_last_push_approval": True,
+                    "required_approving_review_count": 1,
+                    "required_review_thread_resolution": True,
+                    "required_reviewers": [],
+                },
+            },
+        ],
+    }
 
 
 def human_ruleset_state(contract: dict[str, Any], state: str) -> dict[str, Any]:
     human = contract["human_approval_ruleset"]
-    repository_ids = human[f"{state}_repository_ids"]
     return {
         "name": human["name"],
         "target": "branch",
@@ -174,7 +248,7 @@ def human_ruleset_state(contract: dict[str, Any], state: str) -> dict[str, Any]:
         "bypass_actors": [],
         "conditions": {
             "ref_name": {"exclude": [], "include": ["~DEFAULT_BRANCH"]},
-            "repository_id": {"repository_ids": repository_ids},
+            "repository_id": {"repository_ids": human[f"{state}_repository_ids"]},
         },
         "rules": human["rules"],
     }
@@ -229,17 +303,81 @@ def normalize_classic_protection(protection: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def remove_human_approval_gates(
+def validate_approval(
+    path: Path,
+    *,
+    candidate_sha: str,
+    pull_request: int,
+) -> dict[str, Any]:
+    approval = load_json(path, label="machine approval receipt")
+    if (
+        approval.get("schema") != APPROVAL_SCHEMA
+        or approval.get("repository") != "Mindburn-Labs/.github"
+        or approval.get("pull_request") != pull_request
+        or approval.get("head_sha") != candidate_sha
+        or approval.get("review_state") != "APPROVED"
+        or approval.get("approver_login") != APPROVER_LOGIN
+        or not isinstance(approval.get("review_id"), int)
+    ):
+        raise PermitInputError("machine approval receipt is not exact")
+    return approval
+
+
+def ensure_machine_ruleset(client: GitHubAdminClient) -> dict[str, Any]:
+    response = client.request("GET", f"/orgs/{ORGANIZATION}/rulesets?per_page=100")
+    if not isinstance(response.body, list):
+        raise PermitInputError("GitHub ruleset list is malformed")
+    matches = [
+        item
+        for item in response.body
+        if isinstance(item, dict) and item.get("name") == MACHINE_RULESET_NAME
+    ]
+    if len(matches) > 1:
+        raise PermitInputError("multiple machine approval rulesets exist")
+    if not matches:
+        created = require_object(
+            client.request(
+                "POST",
+                f"/orgs/{ORGANIZATION}/rulesets",
+                payload=machine_ruleset_payload(),
+            ),
+            label="created machine approval ruleset",
+        )
+        ruleset_id = created.get("id")
+    else:
+        ruleset_id = matches[0].get("id")
+    if not isinstance(ruleset_id, int) or ruleset_id <= 0:
+        raise PermitInputError("machine approval ruleset ID is invalid")
+    current = require_object(
+        client.request("GET", f"/orgs/{ORGANIZATION}/rulesets/{ruleset_id}"),
+        label="machine approval ruleset",
+    )
+    if controlled_ruleset(current) != machine_ruleset_payload():
+        raise PermitInputError("machine approval ruleset is not exact and active")
+    return current
+
+
+def configure_machine_approval_gates(
     args: argparse.Namespace,
     client: GitHubAdminClient,
 ) -> dict[str, Any]:
     candidate_sha = require_sha(args.candidate_sha, label="candidate_sha", length=40)
     candidate_ref = validate_ref(args.candidate_ref, label="candidate_ref")
+    approved_head_sha = require_sha(
+        getattr(args, "approved_head_sha", None) or candidate_sha,
+        label="approved_head_sha",
+        length=40,
+    )
     contract = load_contract(args.contract)
+    approval = validate_approval(
+        args.approval_receipt,
+        candidate_sha=approved_head_sha,
+        pull_request=args.pull_request,
+    )
 
     stable = require_object(
         client.request("GET", f"/orgs/{ORGANIZATION}/rulesets/{STABLE_RULESET_ID}"),
-        label="stable machine ruleset",
+        label="stable machine workflow ruleset",
     )
     validate_ruleset(
         stable,
@@ -248,60 +386,62 @@ def remove_human_approval_gates(
         expected_ref=candidate_ref,
     )
 
+    machine = ensure_machine_ruleset(client)
+    machine_id = machine["id"]
+
+    classic = contract["classic_branch_protection"]
+    branch_path = f"/repos/{classic['repository']}/branches/{classic['branch']}/protection"
+    protection = require_object(
+        client.request("GET", branch_path),
+        label="classic branch protection",
+    )
+    if normalize_classic_protection(protection) != classic["expected"]:
+        raise PermitInputError("classic branch protection did not retain its approval interlock")
+
     human_path = f"/orgs/{ORGANIZATION}/rulesets/{HUMAN_RULESET_ID}"
-    human = require_object(client.request("GET", human_path), label="human ruleset")
+    human_response = client.request("GET", human_path)
+    human = require_object(human_response, label="human CODEOWNER ruleset")
     if human.get("id") != HUMAN_RULESET_ID:
         raise PermitInputError("GitHub returned the wrong human ruleset")
     before_human = human_ruleset_state(contract, "before")
     after_human = human_ruleset_state(contract, "after")
     human_state = controlled_ruleset(human)
     if human_state == before_human:
-        if require_object(client.request("GET", human_path), label="human ruleset") != human:
-            raise PermitInputError("human ruleset changed during removal")
-        client.request("PUT", human_path, payload=after_human)
+        if not human_response.etag:
+            raise PermitInputError("human ruleset GET did not return an ETag")
+        refetched = client.request("GET", human_path)
+        if refetched.body != human or refetched.etag != human_response.etag:
+            raise PermitInputError("human ruleset changed before machine-gate cutover")
+        client.request(
+            "PUT",
+            human_path,
+            payload=after_human,
+            if_match=human_response.etag,
+        )
         human = require_object(client.request("GET", human_path), label="human ruleset")
         human_state = controlled_ruleset(human)
     if human_state != after_human:
-        raise PermitInputError("human ruleset is neither exact legacy nor exact post-removal state")
-
-    classic = contract["classic_branch_protection"]
-    branch_path = (
-        f"/repos/{classic['repository']}/branches/{classic['branch']}/protection"
-    )
-    protection = require_object(
-        client.request("GET", branch_path),
-        label="classic branch protection",
-    )
-    normalized = normalize_classic_protection(protection)
-    if normalized == classic["before"]:
-        refetched = require_object(
-            client.request("GET", branch_path),
-            label="classic branch protection",
-        )
-        if refetched != protection:
-            raise PermitInputError("classic branch protection changed during removal")
-        client.request("DELETE", f"{branch_path}/required_pull_request_reviews")
-        protection = require_object(
-            client.request("GET", branch_path),
-            label="classic branch protection",
-        )
-        normalized = normalize_classic_protection(protection)
-    if normalized != classic["after"]:
-        raise PermitInputError(
-            "classic branch protection is neither exact legacy nor exact post-removal state",
-        )
+        raise PermitInputError("human ruleset is outside the exact before/after states")
 
     return {
-        "schema": "mindburn.release-authority-human-gate-removal/v1",
-        "machine_ruleset_id": STABLE_RULESET_ID,
+        "schema": CONFIGURATION_SCHEMA,
+        "machine_workflow_ruleset_id": STABLE_RULESET_ID,
         "machine_workflow_sha": candidate_sha,
         "machine_workflow_ref": candidate_ref,
-        "human_ruleset_id": HUMAN_RULESET_ID,
-        "human_repository_ids": after_human["conditions"]["repository_id"]["repository_ids"],
-        "removed_repository_ids": contract["human_approval_ruleset"]["remove_repository_ids"],
+        "machine_approval_ruleset_id": machine_id,
+        "machine_approval_review_id": approval["review_id"],
+        "machine_approval_head_sha": approved_head_sha,
+        "approver_login": APPROVER_LOGIN,
+        "human_codeowner_ruleset_id": HUMAN_RULESET_ID,
+        "human_codeowner_repository_ids": after_human["conditions"]["repository_id"][
+            "repository_ids"
+        ],
+        "retired_codeowner_repository_ids": contract["human_approval_ruleset"][
+            "remove_repository_ids"
+        ],
         "classic_repository": classic["repository"],
         "classic_branch": classic["branch"],
-        "classic_required_pull_request_reviews": None,
+        "classic_required_approving_review_count": 1,
     }
 
 
@@ -309,6 +449,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--candidate-sha", required=True)
     parser.add_argument("--candidate-ref", required=True)
+    parser.add_argument("--approved-head-sha")
+    parser.add_argument("--pull-request", type=int, required=True)
+    parser.add_argument("--approval-receipt", type=Path, required=True)
     parser.add_argument("--contract", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     return parser
@@ -317,7 +460,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str]) -> int:
     try:
         args = build_parser().parse_args(argv)
-        receipt = remove_human_approval_gates(
+        receipt = configure_machine_approval_gates(
             args,
             GitHubAdminClient(
                 os.environ.get("GH_TOKEN", ""),
@@ -327,8 +470,8 @@ def main(argv: list[str]) -> int:
         encoded = json.dumps(receipt, indent=2, sort_keys=True) + "\n"
         args.output.write_text(encoded, encoding="utf-8")
         sys.stdout.write(encoded)
-    except (KeyError, OSError, PermitInputError) as exc:
-        print(f"remove-human-approval-gates: {exc}", file=sys.stderr)
+    except (KeyError, OSError, PermitInputError, TypeError, ValueError) as exc:
+        print(f"configure-machine-approval-gates: {exc}", file=sys.stderr)
         return 1
     return 0
 

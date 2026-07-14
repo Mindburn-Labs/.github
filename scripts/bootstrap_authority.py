@@ -36,10 +36,11 @@ from autonomous_release_permit import (
     require_exact_keys,
     require_sha,
 )
-from remove_human_approval_gates import (
+from configure_machine_approval_gates import (
     GitHubAdminClient,
-    remove_human_approval_gates,
+    configure_machine_approval_gates,
 )
+from submit_machine_approval import GitHubApprovalClient, submit_machine_approval
 from verify_authority_promotion import verify as verify_promotion
 from verify_control_plane import (
     load_json,
@@ -231,7 +232,12 @@ def verify_control(args: argparse.Namespace, client: GitHubReadClient) -> dict[s
     }
 
 
-def prepare(args: argparse.Namespace, token: str, observer_token: str) -> dict[str, Any]:
+def prepare(
+    args: argparse.Namespace,
+    token: str,
+    observer_token: str,
+    approver_token: str,
+) -> dict[str, Any]:
     args.candidate_sha = require_sha(args.candidate_sha, label="candidate_sha", length=40)
     args.candidate_ref = validate_ref(args.candidate_ref, label="candidate_ref")
     if args.candidate_pr <= 0:
@@ -245,6 +251,7 @@ def prepare(args: argparse.Namespace, token: str, observer_token: str) -> dict[s
     merge_client = GitHubMergeClient(token)
     ruleset_client = GitHubRulesetClient(token)
     admin_client = GitHubAdminClient(token)
+    approval_client = GitHubApprovalClient(approver_token)
     staged = False
     enforced = False
     enforcement_started = False
@@ -382,15 +389,36 @@ def prepare(args: argparse.Namespace, token: str, observer_token: str) -> dict[s
         liveness = wait_for_canary(liveness_args, observer_client)
         write_json(liveness_dir / "receipt.json", liveness)
 
-        human_receipt = remove_human_approval_gates(
+        approval_path = args.output_dir / "machine-approval.json"
+        approval_receipt = submit_machine_approval(
+            argparse.Namespace(
+                permit=liveness_args.output,
+                permit_bundle=liveness_args.bundle,
+                trusted_context=liveness_args.context,
+                kernel_verifier=args.permit_verifier,
+                repository=REPOSITORY,
+                pull_request=args.candidate_pr,
+                head_sha=args.candidate_sha,
+                workflow_sha=args.candidate_sha,
+            ),
+            approval_client,
+            attestation_token=observer_token,
+        )
+        write_json(approval_path, approval_receipt)
+
+        gate_receipt = configure_machine_approval_gates(
             argparse.Namespace(
                 candidate_sha=args.candidate_sha,
                 candidate_ref=args.candidate_ref,
+                approved_head_sha=args.candidate_sha,
+                pull_request=args.candidate_pr,
+                approval_receipt=approval_path,
                 contract=args.bootstrap_contract,
             ),
             admin_client,
         )
-        write_json(args.output_dir / "human-gate-removal.json", human_receipt)
+        gate_path = args.output_dir / "machine-gates.json"
+        write_json(gate_path, gate_receipt)
 
         ready = {
             "schema": READY_SCHEMA,
@@ -413,7 +441,8 @@ def prepare(args: argparse.Namespace, token: str, observer_token: str) -> dict[s
                 "control_plane_observer": sha256_file(
                     args.output_dir / "control-plane-observer.json",
                 ),
-                "human_gate_removal": sha256_file(args.output_dir / "human-gate-removal.json"),
+                "machine_approval": sha256_file(approval_path),
+                "machine_gates": sha256_file(gate_path),
                 "liveness_bundle": sha256_file(liveness_args.bundle),
                 "liveness_context": sha256_file(liveness_args.context),
                 "liveness_permit": sha256_file(liveness_args.output),
@@ -525,7 +554,12 @@ def confirmed_or_atomic_merge(
     }
 
 
-def finalize(args: argparse.Namespace, token: str, observer_token: str) -> dict[str, Any]:
+def finalize(
+    args: argparse.Namespace,
+    token: str,
+    observer_token: str,
+    approver_token: str,
+) -> dict[str, Any]:
     args.candidate_sha = require_sha(args.candidate_sha, label="candidate_sha", length=40)
     args.candidate_ref = validate_ref(args.candidate_ref, label="candidate_ref")
     ready = validate_ready(args)
@@ -536,6 +570,7 @@ def finalize(args: argparse.Namespace, token: str, observer_token: str) -> dict[
     merge_client = GitHubMergeClient(token)
     ruleset_client = GitHubRulesetClient(token)
     admin_client = GitHubAdminClient(token)
+    approval_client = GitHubApprovalClient(approver_token)
     ratification, promotion = verify_ratification(
         args,
         attestation_token=observer_token,
@@ -552,7 +587,8 @@ def finalize(args: argparse.Namespace, token: str, observer_token: str) -> dict[
         "authority_suite": args.ready.parent / "authority-suite.json",
         "control_plane": args.ready.parent / "control-plane-before.json",
         "control_plane_observer": args.ready.parent / "control-plane-observer.json",
-        "human_gate_removal": args.ready.parent / "human-gate-removal.json",
+        "machine_approval": args.ready.parent / "machine-approval.json",
+        "machine_gates": args.ready.parent / "machine-gates.json",
         "liveness_bundle": liveness_bundle_path,
         "liveness_context": liveness_context_path,
         "liveness_permit": liveness_permit_path,
@@ -606,14 +642,39 @@ def finalize(args: argparse.Namespace, token: str, observer_token: str) -> dict[
         )
         machine_sha = ready["merge_sha"]
         machine_ref = RULESET_MAIN_REF
-    human_receipt = remove_human_approval_gates(
+    recorded_approval = load_json_file(
+        paths["machine_approval"],
+        label="recorded machine approval",
+    )
+    current_approval = submit_machine_approval(
+        argparse.Namespace(
+            permit=liveness_permit_path,
+            permit_bundle=liveness_bundle_path,
+            trusted_context=liveness_context_path,
+            kernel_verifier=args.permit_verifier,
+            repository=REPOSITORY,
+            pull_request=args.candidate_pr,
+            head_sha=args.candidate_sha,
+            workflow_sha=args.candidate_sha,
+        ),
+        approval_client,
+        attestation_token=observer_token,
+    )
+    if current_approval != recorded_approval:
+        raise PermitInputError("machine approval changed after bootstrap prepare")
+    gate_receipt = configure_machine_approval_gates(
         argparse.Namespace(
             candidate_sha=machine_sha,
             candidate_ref=machine_ref,
+            approved_head_sha=args.candidate_sha,
+            pull_request=args.candidate_pr,
+            approval_receipt=paths["machine_approval"],
             contract=args.bootstrap_contract,
         ),
         admin_client,
     )
+    if canonical_json(gate_receipt) != paths["machine_gates"].read_bytes():
+        raise PermitInputError("machine approval gate state changed after bootstrap prepare")
     merge_receipt = confirmed_or_atomic_merge(ready, merge_client)
     ruleset_receipt = transition(
         transition_args(
@@ -647,7 +708,8 @@ def finalize(args: argparse.Namespace, token: str, observer_token: str) -> dict[
         "ratification_permit_id": ready["ratification_permit_id"],
         "liveness_permit_id": ready["liveness_permit_id"],
         "machine_rulesets": [STABLE_RULESET_ID, CANDIDATE_RULESET_ID],
-        "public_human_gate_removal": human_receipt,
+        "machine_approval": current_approval,
+        "machine_approval_gates": gate_receipt,
         "atomic_merge": merge_receipt,
         "ruleset_finalization": ruleset_receipt,
     }
@@ -688,20 +750,23 @@ def main(argv: list[str]) -> int:
         args = build_parser().parse_args(argv)
         token = os.environ.get("GH_TOKEN", "")
         observer_token = os.environ.get("HELM_AUTHORITY_BOOTSTRAP_OBSERVER_TOKEN", "")
+        approver_token = os.environ.get("HELM_AUTHORITY_APPROVER_TOKEN", "")
         if not token:
             raise PermitInputError("GH_TOKEN is required")
         if not observer_token:
             raise PermitInputError("HELM_AUTHORITY_BOOTSTRAP_OBSERVER_TOKEN is required")
-        if token == observer_token:
-            raise PermitInputError("bootstrap executor and observer tokens must be distinct")
+        if not approver_token:
+            raise PermitInputError("HELM_AUTHORITY_APPROVER_TOKEN is required")
+        if len({token, observer_token, approver_token}) != 3:
+            raise PermitInputError("bootstrap executor, observer, and approver tokens must be distinct")
         if args.command == "prepare":
             if not 60 <= args.timeout_seconds <= 3600:
                 raise PermitInputError("timeout_seconds must be between 60 and 3600")
             if not 5 <= args.poll_seconds <= 60:
                 raise PermitInputError("poll_seconds must be between 5 and 60")
-            result = prepare(args, token, observer_token)
+            result = prepare(args, token, observer_token, approver_token)
         else:
-            result = finalize(args, token, observer_token)
+            result = finalize(args, token, observer_token, approver_token)
             write_json(args.output, result)
         sys.stdout.buffer.write(canonical_json(result))
     except (KeyError, OSError, PermitInputError, TypeError, ValueError) as exc:

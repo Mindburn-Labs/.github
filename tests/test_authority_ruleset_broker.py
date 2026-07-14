@@ -73,6 +73,11 @@ class FakeClient:
         }
         self.puts: list[int] = []
         self.fail_put = fail_put
+        self.fail_cas = False
+        self.etags = {
+            MODULE.STABLE_RULESET_ID: 'W/"stable-1"',
+            MODULE.CANDIDATE_RULESET_ID: 'W/"candidate-1"',
+        }
 
     def request(
         self,
@@ -80,20 +85,30 @@ class FakeClient:
         path: str,
         *,
         payload: dict[str, object] | None = None,
+        if_match: str | None = None,
     ) -> object:
         ruleset_id = int(path.rsplit("/", 1)[1])
         if method == "GET":
-            return MODULE.APIResponse(json.loads(json.dumps(self.current[ruleset_id])))
+            return MODULE.APIResponse(
+                json.loads(json.dumps(self.current[ruleset_id])),
+                self.etags[ruleset_id],
+            )
         if method != "PUT" or payload is None:
             raise AssertionError(f"unexpected request {method} {path}")
         if self.fail_put == ruleset_id:
             self.fail_put = None
             raise MODULE.PermitInputError("simulated ruleset update failure")
+        if self.fail_cas:
+            self.fail_cas = False
+            raise MODULE.PermitInputError("ruleset changed before PUT")
+        if if_match != self.etags[ruleset_id]:
+            raise MODULE.PermitInputError("simulated stale ETag")
         updated = json.loads(json.dumps(payload))
         updated["id"] = ruleset_id
         self.current[ruleset_id] = updated
         self.puts.append(ruleset_id)
-        return MODULE.APIResponse(updated)
+        self.etags[ruleset_id] = f'W/"{ruleset_id}-{len(self.puts) + 1}"'
+        return MODULE.APIResponse(updated, self.etags[ruleset_id])
 
 
 def args(operation: str, *, merge_sha: str | None = None) -> argparse.Namespace:
@@ -153,6 +168,7 @@ class AuthorityRulesetBrokerTests(unittest.TestCase):
         )
         current = MODULE.APIResponse(
             json.loads(json.dumps(client.current[MODULE.CANDIDATE_RULESET_ID])),
+            client.etags[MODULE.CANDIDATE_RULESET_ID],
         )
         client.current[MODULE.CANDIDATE_RULESET_ID]["name"] = "concurrent drift"
         with self.assertRaisesRegex(MODULE.PermitInputError, "changed"):
@@ -173,20 +189,52 @@ class AuthorityRulesetBrokerTests(unittest.TestCase):
         binding = MODULE.workflow_binding(client.current[MODULE.CANDIDATE_RULESET_ID])
         self.assertEqual(binding["sha"], PARENT_SHA)
 
-    def test_restore_reverses_a_partial_finalize_in_safe_order(self) -> None:
+    def test_restore_after_merge_converges_on_merged_main(self) -> None:
         client = FakeClient(
-            ruleset("stable", MERGE_SHA, MODULE.MAIN_REF),
-            ruleset("candidate", MERGE_SHA, MODULE.MAIN_REF),
+            ruleset("stable", PARENT_SHA, MODULE.MAIN_REF),
+            ruleset("candidate", CANDIDATE_SHA, CANDIDATE_REF),
         )
         MODULE.transition(args("restore", merge_sha=MERGE_SHA), client)
         self.assertEqual(
             client.puts,
-            [MODULE.STABLE_RULESET_ID, MODULE.CANDIDATE_RULESET_ID],
+            [MODULE.CANDIDATE_RULESET_ID, MODULE.STABLE_RULESET_ID],
         )
         for ruleset_id in (MODULE.STABLE_RULESET_ID, MODULE.CANDIDATE_RULESET_ID):
             self.assertEqual(
                 MODULE.workflow_binding(client.current[ruleset_id])["sha"],
-                PARENT_SHA,
+                MERGE_SHA,
+            )
+
+    def test_missing_etag_fails_closed(self) -> None:
+        client = FakeClient(
+            ruleset("stable", PARENT_SHA, MODULE.MAIN_REF),
+            ruleset("candidate", PARENT_SHA, MODULE.MAIN_REF),
+        )
+        current = MODULE.APIResponse(
+            json.loads(json.dumps(client.current[MODULE.CANDIDATE_RULESET_ID])),
+            None,
+        )
+        with self.assertRaisesRegex(MODULE.PermitInputError, "ETag"):
+            MODULE.put_ruleset(
+                client,
+                current,
+                workflow_sha=CANDIDATE_SHA,
+                workflow_ref=CANDIDATE_REF,
+            )
+
+    def test_server_side_compare_and_swap_race_fails_closed(self) -> None:
+        client = FakeClient(
+            ruleset("stable", PARENT_SHA, MODULE.MAIN_REF),
+            ruleset("candidate", PARENT_SHA, MODULE.MAIN_REF),
+        )
+        current = MODULE.get_ruleset(client, MODULE.CANDIDATE_RULESET_ID)
+        client.fail_cas = True
+        with self.assertRaisesRegex(MODULE.PermitInputError, "changed before PUT"):
+            MODULE.put_ruleset(
+                client,
+                current,
+                workflow_sha=CANDIDATE_SHA,
+                workflow_ref=CANDIDATE_REF,
             )
 
     def test_unexpected_bypass_or_coverage_fails_closed(self) -> None:

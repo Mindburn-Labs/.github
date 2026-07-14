@@ -191,7 +191,6 @@ jobs:
     name: ${{ matrix.provider }} / ${{ matrix.model }}
     needs: prepare
     permissions:
-      actions: read
       copilot-requests: write
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -324,7 +323,12 @@ jobs:
 
   permit:
     name: HELM Autonomous Release Permit
-    if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.draft == false }}
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.draft == false &&
+      needs.repository-gates.result == 'success' &&
+      needs.prepare.result == 'success' &&
+      needs.model-review.result == 'success'
     needs:
       - repository-gates
       - prepare
@@ -454,5 +458,87 @@ jobs:
           path: |
             release-permit.json
             release-permit.attestation.json
+          if-no-files-found: error
+          retention-days: 30
+
+  machine-approval:
+    name: Exact-head machine approval
+    needs: permit
+    permissions:
+      actions: read
+      attestations: read
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download signed ALLOW permit
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-autonomous-release-permit
+          path: approval
+
+      - name: Download permit context
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-permit-input
+          path: approval/permit-input
+
+      - name: Checkout immutable approval broker
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: Mindburn-Labs/.github
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+          path: policy
+
+      - name: Checkout pinned Kernel verifier
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: Mindburn-Labs/helm-ai-kernel
+          ref: 83cc3eeb1cf512bed44b560254b11a342cee5b15
+          persist-credentials: false
+          path: kernel
+
+      - name: Set up pinned Kernel toolchain
+        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00
+        with:
+          go-version-file: kernel/core/go.mod
+
+      - name: Build source-owned permit verifier
+        working-directory: kernel/core
+        run: go build -trimpath -o "$GITHUB_WORKSPACE/release-permit-verify" ./cmd/release-permit-verify
+
+      - name: Mint isolated approval-only App token
+        id: approver-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.HELM_AUTHORITY_APPROVER_CLIENT_ID }}
+          private-key: ${{ secrets.HELM_AUTHORITY_APPROVER_PRIVATE_KEY }}
+          owner: Mindburn-Labs
+          repositories: ${{ github.event.repository.name }}
+          permission-pull-requests: write
+
+      - name: Approve only the exact signed head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HELM_AUTHORITY_APPROVER_TOKEN: ${{ steps.approver-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          python3 policy/scripts/submit_machine_approval.py \
+            --permit approval/release-permit.json \
+            --permit-bundle approval/release-permit.attestation.json \
+            --trusted-context approval/permit-input/context.json \
+            --kernel-verifier "$GITHUB_WORKSPACE/release-permit-verify" \
+            --repository "$GITHUB_REPOSITORY" \
+            --pull-request "${{ github.event.pull_request.number }}" \
+            --head-sha "${{ github.event.pull_request.head.sha }}" \
+            --workflow-sha "${{ github.workflow_sha }}" \
+            --output approval/machine-approval.json
+
+      - name: Retain approval receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: helm-machine-approval
+          path: approval/machine-approval.json
           if-no-files-found: error
           retention-days: 30

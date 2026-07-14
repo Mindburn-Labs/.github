@@ -45,7 +45,9 @@ Every repository has an explicit digest-locked gate profile; no target-owned
 fallback can weaken the required commands. Promotion requires previous-
 generation ratification, all seven permanent attacks plus one inert ALLOW
 canary, independent evidence replay, an exact compare-and-swap merge, and final
-ruleset readback.
+ruleset readback. A separate approval-only GitHub App converts the signed ALLOW
+into an exact-head review; it has no contents, Actions, ruleset, or deployment
+authority. The merge token and ruleset-admin App key never coexist in one job.
 
 The enforcing rule is intentionally public-only while GitHub's paid
 private/internal required-workflow entitlement returns an upgrade error.

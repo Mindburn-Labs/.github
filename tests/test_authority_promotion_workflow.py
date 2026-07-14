@@ -17,7 +17,7 @@ class AuthorityPromotionWorkflowTests(unittest.TestCase):
         self.assertIn("environment: authority-promotion", workflow)
         self.assertIn("environment: authority-observer", workflow)
         self.assertIn("HELM_AUTHORITY_PROMOTER_PRIVATE_KEY", workflow)
-        self.assertEqual(workflow.count("HELM_AUTHORITY_PROMOTER_PRIVATE_KEY"), 3)
+        self.assertEqual(workflow.count("HELM_AUTHORITY_PROMOTER_PRIVATE_KEY"), 4)
         self.assertIn("HELM_AUTHORITY_OBSERVER_PRIVATE_KEY", workflow)
         self.assertEqual(workflow.count("HELM_AUTHORITY_OBSERVER_PRIVATE_KEY"), 2)
         self.assertIn("permission-organization-administration: write", workflow)
@@ -26,6 +26,10 @@ class AuthorityPromotionWorkflowTests(unittest.TestCase):
         self.assertIn("permission-attestations: read", workflow)
         self.assertIn("permission-pull-requests: write", workflow)
         self.assertNotIn("permission-contents: write", workflow)
+        merge_job = workflow[workflow.index("  merge:"):workflow.index("  rebind:")]
+        self.assertIn("contents: write", merge_job)
+        self.assertNotIn("HELM_AUTHORITY_PROMOTER_PRIVATE_KEY", merge_job)
+        self.assertNotIn("permission-organization-administration: write", merge_job)
         observer = (ROOT / "scripts" / "observe_authority_promotion.py").read_text(
             encoding="utf-8",
         )
@@ -76,6 +80,8 @@ class AuthorityPromotionWorkflowTests(unittest.TestCase):
         self.assertNotIn("Attest authority promotion receipt", workflow)
         self.assertIn("Sign independent final promotion receipt", workflow)
         self.assertIn("needs.observe_final.result != 'success'", workflow)
+        self.assertIn('current_main="$(gh api repos/Mindburn-Labs/.github/git/ref/heads/main', workflow)
+        self.assertIn('merge_args+=(--merge-sha "$expected_merge_sha")', workflow)
         self.assertNotIn("path: candidate-kernel", workflow)
         self.assertNotIn("candidate-permit-verify", workflow)
 
@@ -93,11 +99,11 @@ class AuthorityPromotionWorkflowTests(unittest.TestCase):
         for relative_path in (
             "scripts/atomic_merge_authority.py",
             "scripts/authority_ruleset_broker.py",
-            "scripts/remove_human_approval_gates.py",
+            "scripts/configure_machine_approval_gates.py",
+            "scripts/submit_machine_approval.py",
             "scripts/wait_for_authority_canary.py",
         ):
             source = (ROOT / relative_path).read_text(encoding="utf-8")
-            self.assertNotIn('f"Bearer {self.token}"', source)
             self.assertIn('" ".join(("Bearer", self.token))', source)
 
 

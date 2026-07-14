@@ -1,20 +1,17 @@
 {
-  "classic_branch_protection": {
-    "after": {
-      "allow_deletions": false,
-      "allow_force_pushes": false,
-      "allow_fork_syncing": false,
-      "block_creations": false,
-      "enforce_admins": false,
-      "lock_branch": false,
-      "required_conversation_resolution": true,
-      "required_linear_history": false,
-      "required_pull_request_reviews": null,
-      "required_signatures": false,
-      "required_status_checks": null,
-      "restrictions": null
+  "approver": {
+    "app_id": 4298283,
+    "installation_id": 146576964,
+    "login": "helm-authority-approver[bot]",
+    "organization": "Mindburn-Labs",
+    "permission": {
+      "pull_requests": "write"
     },
-    "before": {
+    "slug": "helm-authority-approver"
+  },
+  "classic_branch_protection": {
+    "branch": "main",
+    "expected": {
       "allow_deletions": false,
       "allow_force_pushes": false,
       "allow_fork_syncing": false,
@@ -33,7 +30,6 @@
       "required_status_checks": null,
       "restrictions": null
     },
-    "branch": "main",
     "repository": "Mindburn-Labs/.github"
   },
   "human_approval_ruleset": {
@@ -156,5 +152,50 @@
       }
     ]
   },
-  "schema": "mindburn.release-authority-bootstrap/v1"
+  "machine_approval_ruleset": {
+    "bypass_actors": [],
+    "conditions": {
+      "ref_name": {
+        "exclude": [],
+        "include": [
+          "~DEFAULT_BRANCH"
+        ]
+      },
+      "repository_id": {
+        "repository_ids": [
+          1158479649,
+          1159255601,
+          1300498536
+        ]
+      }
+    },
+    "enforcement": "active",
+    "name": "HELM Machine Approval Interlock",
+    "rules": [
+      {
+        "type": "deletion"
+      },
+      {
+        "type": "non_fast_forward"
+      },
+      {
+        "parameters": {
+          "allowed_merge_methods": [
+            "merge",
+            "squash",
+            "rebase"
+          ],
+          "dismiss_stale_reviews_on_push": true,
+          "require_code_owner_review": false,
+          "require_last_push_approval": true,
+          "required_approving_review_count": 1,
+          "required_review_thread_resolution": true,
+          "required_reviewers": []
+        },
+        "type": "pull_request"
+      }
+    ],
+    "target": "branch"
+  },
+  "schema": "mindburn.release-authority-bootstrap/v2"
 }

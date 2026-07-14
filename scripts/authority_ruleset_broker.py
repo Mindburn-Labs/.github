@@ -47,6 +47,7 @@ LEGACY_WORKFLOW_REF = "refs/heads/codex/autonomous-release-permit"
 @dataclass(frozen=True)
 class APIResponse:
     body: dict[str, Any]
+    etag: str | None
 
 
 class GitHubRulesetClient:
@@ -62,17 +63,20 @@ class GitHubRulesetClient:
         path: str,
         *,
         payload: dict[str, Any] | None = None,
+        if_match: str | None = None,
     ) -> APIResponse:
         content = None
         if payload is not None:
             content = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         headers = {
             "Accept": "application/vnd.github+json",
-                "Authorization": " ".join(("Bearer", self.token)),
+            "Authorization": " ".join(("Bearer", self.token)),
             "X-GitHub-Api-Version": API_VERSION,
         }
         if content is not None:
             headers["Content-Type"] = "application/json"
+        if if_match is not None:
+            headers["If-Match"] = if_match
         request = urllib.request.Request(
             self.api_url + path,
             data=content,
@@ -84,9 +88,11 @@ class GitHubRulesetClient:
                 body = json.loads(response.read().decode("utf-8"))
                 if not isinstance(body, dict):
                     raise PermitInputError("GitHub returned a non-object ruleset response")
-                return APIResponse(body=body)
+                return APIResponse(body=body, etag=response.headers.get("ETag"))
         except urllib.error.HTTPError as exc:
             detail = exc.read(4096).decode("utf-8", errors="replace").strip()
+            if exc.code == 412:
+                raise PermitInputError(f"ruleset changed before {method} {path}") from exc
             raise PermitInputError(
                 f"GitHub {method} {path} failed with HTTP {exc.code}: {detail}",
             ) from exc
@@ -240,7 +246,9 @@ def put_ruleset(
 ) -> APIResponse:
     ruleset_id = current.body["id"]
     refetched = get_ruleset(client, ruleset_id)
-    if refetched.body != current.body:
+    if not current.etag or not refetched.etag:
+        raise PermitInputError("ruleset GET did not return an ETag")
+    if refetched.body != current.body or refetched.etag != current.etag:
         raise PermitInputError("ruleset changed during the transition")
     payload = update_payload(
         current.body,
@@ -253,6 +261,7 @@ def put_ruleset(
         "PUT",
         f"/orgs/{ORGANIZATION}/rulesets/{ruleset_id}",
         payload=payload,
+        if_match=refetched.etag,
     )
     confirmed = get_ruleset(client, ruleset_id)
     confirmed_payload = {
@@ -499,22 +508,64 @@ def transition(args: argparse.Namespace, client: GitHubRulesetClient) -> dict[st
             raise PermitInputError("stable ruleset is outside the restorable generations")
         if (candidate_binding["sha"], candidate_binding["ref"]) not in allowed_candidate:
             raise PermitInputError("candidate ruleset is outside the restorable generations")
-        if (stable_binding["sha"], stable_binding["ref"]) != (parent_sha, MAIN_REF):
-            stable = put_ruleset(
-                client,
-                stable,
-                workflow_sha=parent_sha,
-                workflow_ref=MAIN_REF,
-            )
-            validate_ruleset(stable.body, kind="stable", expected_sha=parent_sha, expected_ref=MAIN_REF)
-        if (candidate_binding["sha"], candidate_binding["ref"]) != (parent_sha, MAIN_REF):
-            candidate = put_ruleset(
-                client,
-                candidate,
-                workflow_sha=parent_sha,
-                workflow_ref=MAIN_REF,
-            )
-            validate_ruleset(candidate.body, kind="candidate", expected_sha=parent_sha, expected_ref=MAIN_REF)
+        target_sha = merge_sha or parent_sha
+        if merge_sha:
+            # Once main has advanced, rollback means convergence on the merged
+            # generation. Binding rulesets back to the parent would wedge the
+            # next promotion because main can no longer equal that parent SHA.
+            if (candidate_binding["sha"], candidate_binding["ref"]) != (target_sha, MAIN_REF):
+                candidate = put_ruleset(
+                    client,
+                    candidate,
+                    workflow_sha=target_sha,
+                    workflow_ref=MAIN_REF,
+                )
+                validate_ruleset(
+                    candidate.body,
+                    kind="candidate",
+                    expected_sha=target_sha,
+                    expected_ref=MAIN_REF,
+                )
+            if (stable_binding["sha"], stable_binding["ref"]) != (target_sha, MAIN_REF):
+                stable = put_ruleset(
+                    client,
+                    stable,
+                    workflow_sha=target_sha,
+                    workflow_ref=MAIN_REF,
+                )
+                validate_ruleset(
+                    stable.body,
+                    kind="stable",
+                    expected_sha=target_sha,
+                    expected_ref=MAIN_REF,
+                )
+        else:
+            if (stable_binding["sha"], stable_binding["ref"]) != (target_sha, MAIN_REF):
+                stable = put_ruleset(
+                    client,
+                    stable,
+                    workflow_sha=target_sha,
+                    workflow_ref=MAIN_REF,
+                )
+                validate_ruleset(
+                    stable.body,
+                    kind="stable",
+                    expected_sha=target_sha,
+                    expected_ref=MAIN_REF,
+                )
+            if (candidate_binding["sha"], candidate_binding["ref"]) != (target_sha, MAIN_REF):
+                candidate = put_ruleset(
+                    client,
+                    candidate,
+                    workflow_sha=target_sha,
+                    workflow_ref=MAIN_REF,
+                )
+                validate_ruleset(
+                    candidate.body,
+                    kind="candidate",
+                    expected_sha=target_sha,
+                    expected_ref=MAIN_REF,
+                )
         return receipt(args.operation, parent_sha, candidate_sha, candidate_ref, merge_sha)
 
     merge_sha = require_sha(args.merge_sha, label="merge_sha", length=40)

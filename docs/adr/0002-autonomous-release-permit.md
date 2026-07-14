@@ -166,30 +166,32 @@ non-authority pull request before it can become enforcing authority. Failed-job
 retries, a branch update, or an administrator editing the pin cannot substitute
 for either generation's evidence.
 
-The steady-state promotion transaction is deliberately split across isolated jobs and two
-GitHub Apps. The promoter can advance and restore exact ruleset bindings, run a
-permanent seven-attack plus one-ALLOW suite, advance `main` only with an exact
-`beforeOid`/`afterOid` compare-and-swap to GitHub's reviewed two-parent merge
-commit, and rebind only the evaluation ruleset. A separate observer
+The steady-state promotion transaction is deliberately split across isolated
+jobs and three GitHub Apps. The approval-only App turns a signed ALLOW into an
+exact-head review but cannot read or write contents. The promoter can advance
+and restore exact ruleset bindings and run a permanent seven-attack plus
+one-ALLOW suite, but cannot write repository contents. A separate job with no
+App secret advances `main` only with an exact `beforeOid`/`afterOid`
+compare-and-swap to GitHub's reviewed two-parent merge commit. A later promoter
+job rebinds only the evaluation ruleset. A separate observer
 re-downloads both permits from their originating runs, verifies their GitHub
 attestations with the exact previous-generation Kernel, compares the merged
 tree and pull request with GitHub state, and reads back both rulesets. The
 candidate Kernel executes only inside its isolated evaluation workflow; no
 candidate binary is ever run in a job holding promoter or observer credentials.
 Only an attested observer `ALLOW` lets a later promoter job activate the stable
-ruleset. A second observer produces the final success receipt; any missing or
-failed observation schedules restoration to version N. The executor therefore
-cannot mint its own success receipt.
+ruleset. A second observer produces the final success receipt. Before a merge,
+failure restores version N; after `main` advances, failure converges both
+rulesets on that exact merged SHA so a later generation is not wedged. The
+executor therefore cannot mint its own success receipt.
 
 GitHub's organization-ruleset API has two provider constraints that the broker
 must not conceal. Organization-ruleset `GET` requires the same organization
 Administration (write) permission as `PUT`, so the observer uses a separate App
 identity and an immutable GET-only code path even though GitHub over-grants its
-installation token. GitHub also does not document conditional requests for the
-ruleset `PUT` endpoint. The broker therefore performs an exact re-read before
-each mutation and an exact read-back afterward; the independent observer and
-automatic restoration close the remaining non-atomic drift window. No ETag is
-treated as an atomic compare-and-swap guarantee.
+installation token. The mutation broker requires an ETag on every ruleset GET,
+re-reads the exact body and ETag, sends that value in `If-Match`, rejects HTTP
+412, and performs an exact read-back. A missing ETag is a fail-closed error.
 
 Generation 1 is a one-time source-owned bootstrap because the promotion
 workflow cannot trigger from a file that is not yet on the default branch.
@@ -202,9 +204,11 @@ workflow cannot trigger from a file that is not yet on the default branch.
 3. independently reverify the same signed case artifacts byte-for-byte;
 4. activate the machine rule for only the three proven public repositories;
 5. trigger and verify a fresh generation-2 ALLOW on the authority pull request;
-6. only while that machine rule is active, remove the two covered repositories
-   from the organization human-review rule and remove the `.github` classic
-   one-review setting; and
+6. use the signed liveness permit to submit an exact-head review from the
+   isolated approval-only App, activate a one-review machine interlock for the
+   three public repositories, and only then retire `.github` and Kernel from
+   the CODEOWNER-specific organization rule; the `.github` classic one-review
+   setting remains active; and
 7. reverify the ready receipt, atomically advance `main` to the exact liveness
    merge commit, then bind both machine rulesets to that merged `main` SHA.
 

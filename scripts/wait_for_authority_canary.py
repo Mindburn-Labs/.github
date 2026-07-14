@@ -154,13 +154,12 @@ def verify_attestation(
     repository: str,
     workflow_sha: str,
     source_sha: str,
-    github_token: str | None = None,
+    github_token: str,
 ) -> None:
     environment = os.environ.copy()
-    if github_token is not None:
-        if not github_token:
-            raise PermitInputError("attestation verification token is empty")
-        environment["GH_TOKEN"] = github_token
+    if not github_token:
+        raise PermitInputError("attestation verification requires an explicit token")
+    environment["GH_TOKEN"] = github_token
     process = subprocess.run(
         [
             "gh",
@@ -201,7 +200,7 @@ def verify_candidate_permit(
     expected_workflow_sha: str,
     expected_authority: dict[str, Any],
     kernel_verifier: Path,
-    attestation_token: str | None = None,
+    attestation_token: str,
 ) -> dict[str, Any]:
     permit = load_json_file(permit_path, label="canary permit")
     authority = validate_permit(permit)

@@ -441,8 +441,12 @@ class AutonomousReleasePermitTests(unittest.TestCase):
             workflow.index("  model-review:"):workflow.index("  permit:")
         ]
         self.assertNotIn("contents: read", model_job)
-        self.assertIn("actions: read", model_job)
+        self.assertNotIn("actions: read", model_job)
+        self.assertIn("copilot-requests: write", model_job)
         self.assertNotIn('prompt="$(<permit-input/review-prompt.txt)"', workflow)
+        self.assertIn("needs.model-review.result == 'success'", workflow)
+        self.assertIn("HELM_AUTHORITY_APPROVER_TOKEN", workflow)
+        self.assertIn("permission-pull-requests: write", workflow)
         self.assertIn("No target checkout or network context is available", helper)
         self.assertIn("name: HELM Autonomous Release Permit", workflow)
         self.assertIn("name: local-validation", workflow)
@@ -457,7 +461,7 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertEqual(workflow.count("= \"$GITHUB_RUN_ATTEMPT\""), 2)
         self.assertEqual(
             workflow.count("ref: 83cc3eeb1cf512bed44b560254b11a342cee5b15"),
-            2,
+            3,
         )
         self.assertIn("attestations: write", workflow)
         self.assertIn("id-token: write", workflow)

@@ -15,6 +15,9 @@ The local credential may execute those inputs but cannot make a DENY acceptable.
 - `HELM_AUTHORITY_BOOTSTRAP_OBSERVER_TOKEN` is a distinct short-lived token for
   the installed HELM authority observer App. The script rejects token reuse;
   observer reads and attestation checks never use the executor token.
+- `HELM_AUTHORITY_APPROVER_TOKEN` is a third, distinct installation token for
+  `helm-authority-approver`. That App has only Pull requests (write) and is
+  installed only on the three public autonomous repositories.
 - The candidate pull request is open, non-draft, based on the current `.github`
   `main`, and its generation-1 permit has a signed `ALLOW` from both configured
   providers.
@@ -46,8 +49,12 @@ python3 scripts/bootstrap_authority.py prepare \
 `prepare` verifies the generation-1 ratification, stages generation 2, runs and
 replays all eight permanent proof cases, activates public machine enforcement,
 obtains a fresh generation-2 liveness permit on the authority pull request, and
-then removes only the already-covered public human approval gates. Its terminal
-artifact is `bootstrap-ready.json`.
+uses that permit to submit an exact-head approval from the isolated approver
+App. It then installs the one-review machine interlock before retiring the two
+already-covered repositories from the CODEOWNER-specific organization rule.
+The `.github/main` classic one-review setting remains active and is satisfied
+by the same distinct machine identity. The terminal artifact is
+`bootstrap-ready.json`.
 
 Before machine enforcement, failure restores the staged candidate pin. After
 machine enforcement begins, failure leaves the machine rule active; rerun
@@ -75,8 +82,9 @@ python3 scripts/bootstrap_authority.py finalize \
   --output "$EVIDENCE/bootstrap/bootstrap-final.json"
 ```
 
-`finalize` re-verifies every bound digest and signed permit, confirms the human
-gate removal is still protected by active machine enforcement, atomically moves
+`finalize` re-verifies every bound digest, signed permit, and exact-head App
+approval; confirms the public approval cutover remains protected by both the
+workflow and machine-review interlocks; atomically moves
 `main` from the exact base SHA to the exact reviewed two-parent merge commit,
 and binds both rulesets to the merged `main` SHA. It is safe to rerun after an
 exact merge or partial ruleset finalization.
@@ -90,6 +98,10 @@ Completion requires all of the following live readbacks:
   workflow on `main`;
 - the organization human rule no longer includes `.github` or
   `helm-ai-kernel`, while every private/internal repository remains present;
-- `.github/main` has no classic required-review count;
+- `HELM Machine Approval Interlock` is active for the three public autonomous
+  repository IDs, requires one non-CODEOWNER approval after the latest push,
+  has no bypass actors, and resolves conversations;
+- `.github/main` retains its classic one-review count and the exact candidate
+  head has an approval from `helm-authority-approver[bot]`;
 - private/internal rule failures remain a GitHub entitlement blocker, not a
   reason to remove their human gates.

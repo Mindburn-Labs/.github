@@ -41,6 +41,17 @@ class AuthorityCanaryTests(unittest.TestCase):
             )
         self.assertEqual(run.call_args.kwargs["env"]["GH_TOKEN"], "observer-token")
 
+    def test_attestation_verification_rejects_ambient_token_fallback(self) -> None:
+        with self.assertRaisesRegex(MODULE.PermitInputError, "explicit token"):
+            MODULE.verify_attestation(
+                Path("permit.json"),
+                Path("bundle.json"),
+                repository="Mindburn-Labs/example",
+                workflow_sha="a" * 40,
+                source_sha="b" * 40,
+                github_token="",
+            )
+
     def test_extract_attested_permit_accepts_bounded_exact_entries(self) -> None:
         permit = b'{"decision":"ALLOW"}\n'
         attestation = b'{"mediaType":"application/vnd.dev.sigstore.bundle.v0.3+json"}\n'
