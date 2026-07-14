@@ -28,6 +28,7 @@ MAX_PERMIT_BYTES = 2 << 20
 MAX_BUNDLE_BYTES = 4 << 20
 MAX_CONTEXT_BYTES = 2 << 20
 MAX_PROMPT_BYTES = 2 << 20
+MAX_PATCH_BYTES = 4 << 20
 WORKFLOW_NAME = "HELM Autonomous Release Permit"
 WORKFLOW_PATH = ".github/workflows/ci.yml"
 SIGNER_WORKFLOW = "Mindburn-Labs/.github/.github/workflows/ci.yml"
@@ -40,7 +41,9 @@ class GitHubReadClient:
         self.token = token
         self.api_url = api_url.rstrip("/")
 
-    def get_bytes(self, path: str, *, accept: str = "application/vnd.github+json") -> bytes:
+    def get_bytes(
+        self, path: str, *, accept: str = "application/vnd.github+json"
+    ) -> bytes:
         request = urllib.request.Request(
             self.api_url + path,
             headers={
@@ -55,7 +58,9 @@ class GitHubReadClient:
                 content = response.read(MAX_API_BYTES + 1)
         except urllib.error.HTTPError as exc:
             detail = exc.read(4096).decode("utf-8", errors="replace").strip()
-            raise PermitInputError(f"GitHub GET {path} failed with HTTP {exc.code}: {detail}") from exc
+            raise PermitInputError(
+                f"GitHub GET {path} failed with HTTP {exc.code}: {detail}"
+            ) from exc
         except (urllib.error.URLError, TimeoutError) as exc:
             raise PermitInputError(f"GitHub GET {path} failed: {exc}") from exc
         if len(content) > MAX_API_BYTES:
@@ -66,7 +71,9 @@ class GitHubReadClient:
         try:
             value = json.loads(self.get_bytes(path).decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise PermitInputError(f"GitHub GET {path} returned invalid JSON: {exc}") from exc
+            raise PermitInputError(
+                f"GitHub GET {path} returned invalid JSON: {exc}"
+            ) from exc
         if not isinstance(value, dict):
             raise PermitInputError(f"GitHub GET {path} returned a non-object")
         return value
@@ -90,13 +97,17 @@ def extract_attested_permit(archive: bytes) -> tuple[bytes, bytes]:
                 "release-permit.json": MAX_PERMIT_BYTES,
                 "release-permit.attestation.json": MAX_BUNDLE_BYTES,
             }
-            if len(entries) != len(expected) or {entry.filename for entry in entries} != set(expected):
+            if len(entries) != len(expected) or {
+                entry.filename for entry in entries
+            } != set(expected):
                 raise PermitInputError(
                     "canary artifact must contain exactly the permit and attestation bundle",
                 )
             by_name = {entry.filename: entry for entry in entries}
             if any(
-                entry.is_dir() or entry.file_size <= 0 or entry.file_size > expected[name]
+                entry.is_dir()
+                or entry.file_size <= 0
+                or entry.file_size > expected[name]
                 for name, entry in by_name.items()
             ):
                 raise PermitInputError("canary permit exceeds the size limit")
@@ -118,20 +129,27 @@ def extract_trusted_context(archive: bytes) -> bytes:
             expected = {
                 "context.json": MAX_CONTEXT_BYTES,
                 "review-prompt.txt": MAX_PROMPT_BYTES,
+                "patch.diff": MAX_PATCH_BYTES,
             }
-            if len(entries) != len(expected) or {entry.filename for entry in entries} != set(expected):
+            if len(entries) != len(expected) or {
+                entry.filename for entry in entries
+            } != set(expected):
                 raise PermitInputError(
-                    "permit-input artifact must contain exactly the context and review prompt",
+                    "permit-input artifact must contain exactly the context, prompt, and patch",
                 )
             by_name = {entry.filename: entry for entry in entries}
             if any(
-                entry.is_dir() or entry.file_size <= 0 or entry.file_size > expected[name]
+                entry.is_dir()
+                or entry.file_size <= 0
+                or entry.file_size > expected[name]
                 for name, entry in by_name.items()
             ):
                 raise PermitInputError("permit-input artifact exceeds the size limit")
             context = bundle.read(by_name["context.json"])
     except zipfile.BadZipFile as exc:
-        raise PermitInputError("permit-input artifact is not a valid ZIP archive") from exc
+        raise PermitInputError(
+            "permit-input artifact is not a valid ZIP archive"
+        ) from exc
     if not context or len(context) > MAX_CONTEXT_BYTES:
         raise PermitInputError("permit context exceeds the size limit")
     return context
@@ -214,9 +232,13 @@ def verify_candidate_permit(
     }
     for field, value in expected.items():
         if permit.get(field) != value:
-            raise PermitInputError(f"canary permit {field} does not match the candidate run")
+            raise PermitInputError(
+                f"canary permit {field} does not match the candidate run"
+            )
     if authority != expected_authority:
-        raise PermitInputError("canary permit authority does not match the candidate manifest")
+        raise PermitInputError(
+            "canary permit authority does not match the candidate manifest"
+        )
     verify_attestation(
         permit_path,
         bundle_path,
@@ -253,8 +275,12 @@ def artifact_for_run(
     return matches[0]["id"]
 
 
-def wait_for_canary(args: argparse.Namespace, client: GitHubReadClient) -> dict[str, Any]:
-    workflow_sha = require_sha(args.expected_workflow_sha, label="expected_workflow_sha", length=40)
+def wait_for_canary(
+    args: argparse.Namespace, client: GitHubReadClient
+) -> dict[str, Any]:
+    workflow_sha = require_sha(
+        args.expected_workflow_sha, label="expected_workflow_sha", length=40
+    )
     head_sha = require_sha(args.head_sha, label="head_sha", length=40)
     started_at = parse_time(args.started_at, label="started_at")
     authority = load_json_file(args.expected_authority, label="expected authority")
@@ -278,7 +304,8 @@ def wait_for_canary(args: argparse.Namespace, client: GitHubReadClient) -> dict[
                 run.get("name") != WORKFLOW_NAME
                 or run.get("path") != WORKFLOW_PATH
                 or run.get("head_sha") != head_sha
-                or parse_time(run.get("created_at"), label="run created_at") < started_at
+                or parse_time(run.get("created_at"), label="run created_at")
+                < started_at
                 or run.get("status") != "completed"
                 or run.get("conclusion") != "success"
             ):
@@ -342,7 +369,9 @@ def wait_for_canary(args: argparse.Namespace, client: GitHubReadClient) -> dict[
                 "merge_tree_sha": permit["merge_tree_sha"],
             }
         time.sleep(args.poll_seconds)
-    raise PermitInputError("timed out waiting for an attested candidate-authority ALLOW canary")
+    raise PermitInputError(
+        "timed out waiting for an attested candidate-authority ALLOW canary"
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -374,7 +403,9 @@ def main(argv: list[str]) -> int:
             args.context.resolve(),
         }
         if len(output_paths) != 3:
-            raise PermitInputError("permit, attestation bundle, and context outputs must differ")
+            raise PermitInputError(
+                "permit, attestation bundle, and context outputs must differ"
+            )
         if not 60 <= args.timeout_seconds <= 1800:
             raise PermitInputError("timeout_seconds must be between 60 and 1800")
         if not 5 <= args.poll_seconds <= 60:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 from pathlib import Path
 import sys
 import unittest
@@ -8,7 +9,9 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = ROOT / "scripts" / "observe_authority_promotion.py"
-SPEC = importlib.util.spec_from_file_location("observe_authority_promotion", MODULE_PATH)
+SPEC = importlib.util.spec_from_file_location(
+    "observe_authority_promotion", MODULE_PATH
+)
 if SPEC is None or SPEC.loader is None:
     raise RuntimeError(f"unable to load {MODULE_PATH}")
 MODULE = importlib.util.module_from_spec(SPEC)
@@ -40,8 +43,17 @@ def execution() -> dict[str, object]:
 
 
 class ObserveAuthorityPromotionTests(unittest.TestCase):
+    def test_observer_explicitly_threads_attestation_token_to_both_permits(
+        self,
+    ) -> None:
+        self.assertIn("attestation_token", inspect.signature(MODULE.observe).parameters)
+        source = inspect.getsource(MODULE.observe)
+        self.assertEqual(source.count("attestation_token=attestation_token"), 2)
+
     def test_execution_requires_immediate_lineage_and_exact_tree(self) -> None:
-        self.assertEqual(MODULE.validate_execution(execution())["candidate_generation"], 2)
+        self.assertEqual(
+            MODULE.validate_execution(execution())["candidate_generation"], 2
+        )
         for field, value in (
             ("candidate_generation", 3),
             ("merged_tree_sha", "7" * 40),

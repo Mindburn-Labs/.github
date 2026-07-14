@@ -93,7 +93,11 @@ def validate_authority_shape(authority: Any, *, label: str) -> dict[str, Any]:
     if authority["schema"] != AUTHORITY_SCHEMA:
         raise PermitInputError(f"{label} has an unsupported schema")
     generation = authority["generation"]
-    if not isinstance(generation, int) or isinstance(generation, bool) or generation <= 0:
+    if (
+        not isinstance(generation, int)
+        or isinstance(generation, bool)
+        or generation <= 0
+    ):
         raise PermitInputError(f"{label} generation must be a positive integer")
     require_sha(authority["kernel_sha"], label=f"{label} kernel_sha", length=40)
     require_sha(
@@ -183,7 +187,9 @@ def validate_permit(permit: Any) -> dict[str, Any]:
         )
         reviewer = review["reviewer"]
         if not isinstance(reviewer, dict):
-            raise PermitInputError(f"permit reviews[{index}] reviewer must be an object")
+            raise PermitInputError(
+                f"permit reviews[{index}] reviewer must be an object"
+            )
         require_exact_keys(
             reviewer,
             required={"provider", "model"},
@@ -201,7 +207,9 @@ def validate_permit(permit: Any) -> dict[str, Any]:
             raise PermitInputError("review provider must be non-empty")
         providers.add(provider)
     if providers != {"anthropic", "openai"}:
-        raise PermitInputError("promotion requires the exact Anthropic and OpenAI provider quorum")
+        raise PermitInputError(
+            "promotion requires the exact Anthropic and OpenAI provider quorum"
+        )
     return authority
 
 
@@ -222,23 +230,35 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
     permit_authority = validate_permit(permit)
 
     if permit["repository"] != "Mindburn-Labs/.github":
-        raise PermitInputError("permit does not ratify the workflow authority repository")
+        raise PermitInputError(
+            "permit does not ratify the workflow authority repository"
+        )
     if permit["pull_request"] != args.candidate_pr:
         raise PermitInputError("permit pull request does not match the candidate")
     if permit["run_id"] != args.expected_run_id:
-        raise PermitInputError("permit run_id does not match the triggering workflow run")
+        raise PermitInputError(
+            "permit run_id does not match the triggering workflow run"
+        )
     if permit["run_attempt"] != args.expected_run_attempt:
-        raise PermitInputError("permit run_attempt does not match the triggering workflow run")
+        raise PermitInputError(
+            "permit run_attempt does not match the triggering workflow run"
+        )
     if permit["head_sha"] != candidate_sha:
         raise PermitInputError("permit head_sha does not match the candidate commit")
     if permit["workflow_sha"] != parent_sha:
         raise PermitInputError("permit was not issued by the expected parent workflow")
     if permit_authority["generation"] != args.expected_parent_generation:
-        raise PermitInputError("permit authority generation does not match the expected parent")
+        raise PermitInputError(
+            "permit authority generation does not match the expected parent"
+        )
 
-    candidate_tree = git_text(candidate_repository, "rev-parse", f"{candidate_sha}^{{tree}}")
+    candidate_tree = git_text(
+        candidate_repository, "rev-parse", f"{candidate_sha}^{{tree}}"
+    )
     if permit["merge_tree_sha"] != candidate_tree:
-        raise PermitInputError("permit merge tree does not match the candidate commit tree")
+        raise PermitInputError(
+            "permit merge tree does not match the candidate commit tree"
+        )
 
     authority_path = "config/autonomous-release-authority.json"
     candidate_authority = validate_authority_shape(
@@ -249,19 +269,28 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         label="candidate authority",
     )
     if candidate_authority["generation"] != args.expected_parent_generation + 1:
-        raise PermitInputError("candidate authority generation is not the next generation")
+        raise PermitInputError(
+            "candidate authority generation is not the next generation"
+        )
     parent = candidate_authority["parent"]
     if parent != {
         "generation": args.expected_parent_generation,
         "workflow_sha": parent_sha,
     }:
-        raise PermitInputError("candidate authority does not name the exact parent generation")
+        raise PermitInputError(
+            "candidate authority does not name the exact parent generation"
+        )
 
     for field, path in (
         ("gate_profiles_sha256", "config/autonomous-release-gates.json"),
-        ("adversarial_corpus_sha256", "tests/fixtures/autonomous-release-adversarial.json"),
+        (
+            "adversarial_corpus_sha256",
+            "tests/fixtures/autonomous-release-adversarial.json",
+        ),
     ):
-        observed = hashlib.sha256(git_blob(candidate_repository, candidate_sha, path)).hexdigest()
+        observed = hashlib.sha256(
+            git_blob(candidate_repository, candidate_sha, path)
+        ).hexdigest()
         if candidate_authority[field] != observed:
             raise PermitInputError(f"candidate {field} does not match {path}")
 
@@ -271,10 +300,17 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         ".github/workflows/ci.yml",
     ).decode("utf-8")
     kernel_ref = f"ref: {candidate_authority['kernel_sha']}"
-    if workflow.count(kernel_ref) != 2:
-        raise PermitInputError("candidate workflow does not pin the declared Kernel exactly twice")
-    if "--authority-manifest policy/config/autonomous-release-authority.json" not in workflow:
-        raise PermitInputError("candidate workflow does not bind the authority manifest")
+    if workflow.count(kernel_ref) != 3:
+        raise PermitInputError(
+            "candidate workflow does not pin the declared Kernel exactly three times"
+        )
+    if (
+        "--authority-manifest policy/config/autonomous-release-authority.json"
+        not in workflow
+    ):
+        raise PermitInputError(
+            "candidate workflow does not bind the authority manifest"
+        )
 
     return {
         "schema": "mindburn.release-authority-promotion/v1",

@@ -426,18 +426,22 @@ jobs:
           verifier_status=$?
           set -e
 
-          if [[ -f release-permit.json ]]; then
-            {
-              jq -r '"Decision: **" + .decision + "**  \nPermit: `" + .permit_id + "`  \nMerge tree: `" + .merge_tree_sha + "`"' release-permit.json
-              echo
-              echo "Reason codes:"
-              jq -r '.reasons[]? | "- " + .code + " [" + (.reviewer // "quorum") + "]"' release-permit.json
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
-          if [[ "$verifier_status" -ne 0 ]]; then
-            echo "::error::HELM autonomous release permit denied or could not be verified"
+          if [[ ! -f release-permit.json ]]; then
+            echo "::error::Kernel verifier did not emit a release permit"
             exit 1
           fi
+          decision="$(jq -er '.decision' release-permit.json)"
+          if [[ "$verifier_status" -eq 0 && "$decision" != "ALLOW" ]] \
+            || [[ "$verifier_status" -ne 0 && "$decision" != "DENY" ]]; then
+            echo "::error::Kernel verifier status and permit decision disagree"
+            exit 1
+          fi
+          {
+            jq -r '"Decision: **" + .decision + "**  \nPermit: `" + .permit_id + "`  \nMerge tree: `" + .merge_tree_sha + "`"' release-permit.json
+            echo
+            echo "Reason codes:"
+            jq -r '.reasons[]? | "- " + .code + " [" + (.reviewer // "quorum") + "]"' release-permit.json
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Checkout pinned offline attestation signer
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -476,6 +480,14 @@ jobs:
             release-permit.attestation.json
           if-no-files-found: error
           retention-days: 30
+
+      - name: Enforce ALLOW after retaining signed evidence
+        run: |
+          set -euo pipefail
+          if [[ "$(jq -er '.decision' release-permit.json)" != "ALLOW" ]]; then
+            echo "::error::HELM autonomous release permit denied"
+            exit 1
+          fi
 
   machine-approval:
     name: Exact-head machine approval

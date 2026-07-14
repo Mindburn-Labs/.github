@@ -43,7 +43,9 @@ def build_candidate(root: Path) -> tuple[Path, str, str]:
     gates = b'{"profiles":{}}\n'
     corpus = b'{"schema":"mindburn.release-permit-adversarial/v1","cases":[]}\n'
     (repository / "config" / "autonomous-release-gates.json").write_bytes(gates)
-    (repository / "tests" / "fixtures" / "autonomous-release-adversarial.json").write_bytes(corpus)
+    (
+        repository / "tests" / "fixtures" / "autonomous-release-adversarial.json"
+    ).write_bytes(corpus)
     authority = {
         "schema": "mindburn.release-authority/v1",
         "generation": 2,
@@ -61,15 +63,23 @@ def build_candidate(root: Path) -> tuple[Path, str, str]:
 steps:
   - ref: {CANDIDATE_KERNEL_SHA}
   - ref: {CANDIDATE_KERNEL_SHA}
+  - ref: {CANDIDATE_KERNEL_SHA}
   - run: python script.py --authority-manifest policy/config/autonomous-release-authority.json
 """,
         encoding="utf-8",
     )
     subprocess.run(["git", "-C", str(repository), "init", "-b", "main"], check=True)
-    subprocess.run(["git", "-C", str(repository), "config", "user.name", "Permit Test"], check=True)
-    subprocess.run(["git", "-C", str(repository), "config", "user.email", "permit@example.test"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repository), "config", "user.name", "Permit Test"], check=True
+    )
+    subprocess.run(
+        ["git", "-C", str(repository), "config", "user.email", "permit@example.test"],
+        check=True,
+    )
     subprocess.run(["git", "-C", str(repository), "add", "-A"], check=True)
-    subprocess.run(["git", "-C", str(repository), "commit", "-m", "candidate"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repository), "commit", "-m", "candidate"], check=True
+    )
     candidate_sha = git(repository, "rev-parse", "HEAD")
     return repository, candidate_sha, git(repository, "rev-parse", "HEAD^{tree}")
 
@@ -164,11 +174,14 @@ class AuthorityPromotionTests(unittest.TestCase):
             repository, candidate_sha, candidate_tree = build_candidate(root)
             permit_path = root / "permit.json"
             permit_path.write_text(
-                json.dumps(build_permit(candidate_sha, candidate_tree), indent=2) + "\n",
+                json.dumps(build_permit(candidate_sha, candidate_tree), indent=2)
+                + "\n",
                 encoding="utf-8",
             )
             result = MODULE.verify(
-                verify_args(repository, candidate_sha, permit_path, build_fake_verifier(root)),
+                verify_args(
+                    repository, candidate_sha, permit_path, build_fake_verifier(root)
+                ),
             )
         self.assertEqual(result["candidate_generation"], 2)
         self.assertEqual(result["parent_workflow_sha"], PARENT_SHA)
@@ -178,7 +191,10 @@ class AuthorityPromotionTests(unittest.TestCase):
             ("tree", "merge tree"),
             ("permit", "permit_id"),
         ):
-            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as tmpdir:
+            with (
+                self.subTest(mutation=mutation),
+                tempfile.TemporaryDirectory() as tmpdir,
+            ):
                 root = Path(tmpdir)
                 repository, candidate_sha, candidate_tree = build_candidate(root)
                 permit = build_permit(candidate_sha, candidate_tree)
@@ -207,7 +223,9 @@ class AuthorityPromotionTests(unittest.TestCase):
                 json.dumps(build_permit(candidate_sha, candidate_tree)) + "\n",
                 encoding="utf-8",
             )
-            with self.assertRaisesRegex(MODULE.PermitInputError, "pinned Kernel rejected"):
+            with self.assertRaisesRegex(
+                MODULE.PermitInputError, "pinned Kernel rejected"
+            ):
                 MODULE.verify(
                     verify_args(
                         repository,

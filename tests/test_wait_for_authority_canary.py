@@ -85,7 +85,10 @@ class AuthorityCanaryTests(unittest.TestCase):
                 },
             ),
         ):
-            with self.subTest(size=len(payload)), self.assertRaises(MODULE.PermitInputError):
+            with (
+                self.subTest(size=len(payload)),
+                self.assertRaises(MODULE.PermitInputError),
+            ):
                 MODULE.extract_attested_permit(payload)
 
     def test_extract_trusted_context_accepts_exact_bounded_input(self) -> None:
@@ -96,6 +99,7 @@ class AuthorityCanaryTests(unittest.TestCase):
                     {
                         "context.json": context,
                         "review-prompt.txt": b"Review this exact context.\n",
+                        "patch.diff": b"diff --git a/a b/a\n",
                     },
                 ),
             ),
@@ -104,16 +108,33 @@ class AuthorityCanaryTests(unittest.TestCase):
 
     def test_extract_trusted_context_rejects_substitution(self) -> None:
         for payload in (
-            archive({"context.json": b"{}", "extra": b"x"}),
-            archive({"../context.json": b"{}", "review-prompt.txt": b"x"}),
+            archive({"context.json": b"{}", "review-prompt.txt": b"x"}),
+            archive(
+                {
+                    "../context.json": b"{}",
+                    "review-prompt.txt": b"x",
+                    "patch.diff": b"x",
+                },
+            ),
             archive(
                 {
                     "context.json": b"x" * (MODULE.MAX_CONTEXT_BYTES + 1),
                     "review-prompt.txt": b"x",
+                    "patch.diff": b"x",
+                },
+            ),
+            archive(
+                {
+                    "context.json": b"{}",
+                    "review-prompt.txt": b"x",
+                    "patch.diff": b"x" * (MODULE.MAX_PATCH_BYTES + 1),
                 },
             ),
         ):
-            with self.subTest(size=len(payload)), self.assertRaises(MODULE.PermitInputError):
+            with (
+                self.subTest(size=len(payload)),
+                self.assertRaises(MODULE.PermitInputError),
+            ):
                 MODULE.extract_trusted_context(payload)
 
 

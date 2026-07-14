@@ -114,7 +114,9 @@ def validate_execution(value: dict[str, Any]) -> dict[str, Any]:
         label="candidate_generation",
     )
     if candidate_generation != parent_generation + 1:
-        raise PermitInputError("candidate generation must immediately follow the parent")
+        raise PermitInputError(
+            "candidate generation must immediately follow the parent"
+        )
     for field in (
         "parent_base_sha",
         "parent_workflow_sha",
@@ -125,11 +127,15 @@ def validate_execution(value: dict[str, Any]) -> dict[str, Any]:
     ):
         require_sha(value[field], label=field, length=40)
     if value["parent_base_sha"] != value["parent_workflow_sha"]:
-        raise PermitInputError("ratification base must equal the immutable parent workflow")
+        raise PermitInputError(
+            "ratification base must equal the immutable parent workflow"
+        )
     if value["candidate_tree_sha"] != value["merged_tree_sha"]:
         raise PermitInputError("merged tree does not equal the ratified candidate tree")
     validate_ref(value["candidate_workflow_ref"], label="candidate_workflow_ref")
-    require_positive_int(value["candidate_pull_request"], label="candidate_pull_request")
+    require_positive_int(
+        value["candidate_pull_request"], label="candidate_pull_request"
+    )
     require_positive_int(value["ratification_run_id"], label="ratification_run_id")
     require_positive_int(
         value["ratification_run_attempt"],
@@ -162,12 +168,19 @@ def observe(
     args: argparse.Namespace,
     read_client: GitHubReadClient,
     ruleset_client: GitHubRulesetClient,
+    *,
+    attestation_token: str,
 ) -> dict[str, Any]:
-    execution = validate_execution(load_json(args.execution, label="promotion execution"))
-    if hashlib.sha256(args.authority_suite.read_bytes()).hexdigest() != execution[
-        "authority_suite_sha256"
-    ]:
-        raise PermitInputError("authority suite receipt does not match promotion execution")
+    execution = validate_execution(
+        load_json(args.execution, label="promotion execution")
+    )
+    if (
+        hashlib.sha256(args.authority_suite.read_bytes()).hexdigest()
+        != execution["authority_suite_sha256"]
+    ):
+        raise PermitInputError(
+            "authority suite receipt does not match promotion execution"
+        )
     parent_authority = validate_authority_shape(
         load_json(args.parent_authority, label="parent authority"),
         label="parent authority",
@@ -177,7 +190,9 @@ def observe(
         label="candidate authority",
     )
     if authority["generation"] != execution["candidate_generation"]:
-        raise PermitInputError("candidate authority generation does not match execution")
+        raise PermitInputError(
+            "candidate authority generation does not match execution"
+        )
     if parent_authority["generation"] != execution["parent_generation"]:
         raise PermitInputError("parent authority generation does not match execution")
     if authority["parent"] != {
@@ -189,13 +204,17 @@ def observe(
     main = read_client.get_json(f"/repos/{AUTHORITY_REPOSITORY}/git/ref/heads/main")
     main_sha = nested_string(main, "object", "sha", label="main SHA")
     if main_sha != execution["merged_workflow_sha"]:
-        raise PermitInputError("authority main does not equal the observed merge commit")
+        raise PermitInputError(
+            "authority main does not equal the observed merge commit"
+        )
     commit = read_client.get_json(
         f"/repos/{AUTHORITY_REPOSITORY}/git/commits/{main_sha}",
     )
     main_tree_sha = nested_string(commit, "tree", "sha", label="main tree SHA")
     if main_tree_sha != execution["merged_tree_sha"]:
-        raise PermitInputError("authority main tree does not equal the ratified candidate tree")
+        raise PermitInputError(
+            "authority main tree does not equal the ratified candidate tree"
+        )
 
     pull_request = read_client.get_json(
         f"/repos/{AUTHORITY_REPOSITORY}/pulls/{execution['candidate_pull_request']}",
@@ -204,7 +223,8 @@ def observe(
         pull_request.get("state") != "closed"
         or pull_request.get("merged") is not True
         or pull_request.get("merge_commit_sha") != main_sha
-        or nested_string(pull_request, "base", "ref", label="pull request base") != "main"
+        or nested_string(pull_request, "base", "ref", label="pull request base")
+        != "main"
         or nested_string(pull_request, "head", "sha", label="pull request head SHA")
         != execution["candidate_workflow_sha"]
         or "refs/heads/"
@@ -219,7 +239,9 @@ def observe(
         )
         != AUTHORITY_REPOSITORY
     ):
-        raise PermitInputError("authority pull request does not describe the exact observed merge")
+        raise PermitInputError(
+            "authority pull request does not describe the exact observed merge"
+        )
 
     ratification_run = read_client.get_json(
         f"/repos/{AUTHORITY_REPOSITORY}/actions/runs/{execution['ratification_run_id']}",
@@ -233,7 +255,9 @@ def observe(
         or ratification_run.get("status") != "completed"
         or ratification_run.get("conclusion") != "success"
     ):
-        raise PermitInputError("ratification workflow run is not an exact successful parent run")
+        raise PermitInputError(
+            "ratification workflow run is not an exact successful parent run"
+        )
     ratification_artifact_id = artifact_for_run(
         read_client,
         AUTHORITY_REPOSITORY,
@@ -248,7 +272,9 @@ def observe(
         "release-permit-input",
     )
     if ratification_context_artifact_id is None:
-        raise PermitInputError("ratification workflow run has no permit context artifact")
+        raise PermitInputError(
+            "ratification workflow run has no permit context artifact"
+        )
     ratification_artifact = read_client.get_bytes(
         f"/repos/{AUTHORITY_REPOSITORY}/actions/artifacts/{ratification_artifact_id}/zip",
     )
@@ -258,7 +284,9 @@ def observe(
     ratification_context_artifact = read_client.get_bytes(
         f"/repos/{AUTHORITY_REPOSITORY}/actions/artifacts/{ratification_context_artifact_id}/zip",
     )
-    artifact_ratification_context = extract_trusted_context(ratification_context_artifact)
+    artifact_ratification_context = extract_trusted_context(
+        ratification_context_artifact
+    )
     supplied_ratification = args.ratification_permit.read_bytes()
     supplied_ratification_bundle = args.ratification_bundle.read_bytes()
     if (
@@ -280,16 +308,21 @@ def observe(
         expected_workflow_sha=execution["parent_workflow_sha"],
         expected_authority=parent_authority,
         kernel_verifier=args.parent_kernel_verifier,
+        attestation_token=attestation_token,
     )
     if (
         ratification_permit["permit_id"] != execution["ratification_permit_id"]
         or ratification_permit["base_sha"] != execution["parent_base_sha"]
         or ratification_permit["merge_tree_sha"] != execution["candidate_tree_sha"]
     ):
-        raise PermitInputError("ratification permit does not bind the observed candidate tree")
+        raise PermitInputError(
+            "ratification permit does not bind the observed candidate tree"
+        )
 
     canary_receipt = load_json(args.canary_receipt, label="canary receipt")
-    require_exact_keys(canary_receipt, required=CANARY_RECEIPT_KEYS, label="canary receipt")
+    require_exact_keys(
+        canary_receipt, required=CANARY_RECEIPT_KEYS, label="canary receipt"
+    )
     expected_canary = {
         "schema": "mindburn.release-authority-canary/v1",
         "repository": CANARY_REPOSITORY,
@@ -319,8 +352,12 @@ def observe(
         or run.get("status") != "completed"
         or run.get("conclusion") != "success"
     ):
-        raise PermitInputError("canary workflow run is not an exact successful candidate run")
-    artifact_id = artifact_for_run(read_client, CANARY_REPOSITORY, execution["canary_run_id"])
+        raise PermitInputError(
+            "canary workflow run is not an exact successful candidate run"
+        )
+    artifact_id = artifact_for_run(
+        read_client, CANARY_REPOSITORY, execution["canary_run_id"]
+    )
     if artifact_id is None:
         raise PermitInputError("canary workflow run has no permit artifact")
     context_artifact_id = artifact_for_run(
@@ -346,7 +383,9 @@ def observe(
         or artifact_bundle != supplied_bundle
         or artifact_context != args.canary_context.read_bytes()
     ):
-        raise PermitInputError("supplied canary permit, bundle, or context is not the run artifact")
+        raise PermitInputError(
+            "supplied canary permit, bundle, or context is not the run artifact"
+        )
     permit = verify_candidate_permit(
         args.canary_permit,
         args.canary_bundle,
@@ -358,6 +397,7 @@ def observe(
         expected_workflow_sha=execution["candidate_workflow_sha"],
         expected_authority=authority,
         kernel_verifier=args.parent_kernel_verifier,
+        attestation_token=attestation_token,
     )
     for field in ("permit_id", "merge_sha", "merge_tree_sha"):
         if permit[field] != canary_receipt[field]:
@@ -370,7 +410,9 @@ def observe(
     )
     stable = get_ruleset(ruleset_client, STABLE_RULESET_ID)
     candidate = get_ruleset(ruleset_client, CANDIDATE_RULESET_ID)
-    validate_ruleset(stable.body, kind="stable", expected_sha=stable_sha, expected_ref=MAIN_REF)
+    validate_ruleset(
+        stable.body, kind="stable", expected_sha=stable_sha, expected_ref=MAIN_REF
+    )
     validate_ruleset(
         candidate.body,
         kind="candidate",
@@ -435,6 +477,7 @@ def main(argv: list[str]) -> int:
             args,
             GitHubReadClient(token, api_url=api_url),
             GitHubRulesetClient(token, api_url=api_url),
+            attestation_token=token,
         )
         encoded = json.dumps(receipt, indent=2, sort_keys=True) + "\n"
         args.output.write_text(encoded, encoding="utf-8")
