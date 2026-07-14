@@ -253,7 +253,7 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertEqual(workflow.count("= \"$EXPECTED_WORKFLOW_SHA\""), 2)
         self.assertEqual(workflow.count("= \"$GITHUB_RUN_ATTEMPT\""), 2)
         self.assertIn(
-            "ref: f967a4aec9fd41d01af5a2dedaf24e66669d95f6",
+            "ref: 87cd43d717dc8df177fccf42274a23e265b1157d",
             workflow,
         )
 
