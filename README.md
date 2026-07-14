@@ -48,6 +48,9 @@ canary, independent evidence replay, an exact compare-and-swap merge, and final
 ruleset readback. A separate approval-only GitHub App converts the signed ALLOW
 into an exact-head review; it has no contents, Actions, ruleset, or deployment
 authority. The merge token and ruleset-admin App key never coexist in one job.
+Every adversarial proof run carries an offline GitHub-Sigstore marker bound to
+the exact candidate workflow SHA and run, so a concurrent parent-workflow
+failure cannot satisfy candidate evidence.
 
 The enforcing rule is intentionally public-only while GitHub's paid
 private/internal required-workflow entitlement returns an upgrade error.

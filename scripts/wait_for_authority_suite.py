@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -12,6 +13,7 @@ import sys
 import time
 from typing import Any
 import urllib.parse
+import zipfile
 
 from autonomous_release_permit import (
     PermitInputError,
@@ -46,9 +48,15 @@ REVIEWERS = {
     ("openai", "gpt-5.6-sol"),
 }
 PRE_MODEL_GATES = {"Deterministic repository gates", "Bind immutable review input"}
+PROVENANCE_ARTIFACT = "release-workflow-provenance"
+PROVENANCE_SCHEMA = "mindburn.release-workflow-provenance/v1"
+MAX_PROVENANCE_BYTES = 64 << 10
+MAX_PROVENANCE_BUNDLE_BYTES = 4 << 20
 
 
-def validate_trigger(trigger: dict[str, Any], contract: dict[str, Any]) -> dict[str, Any]:
+def validate_trigger(
+    trigger: dict[str, Any], contract: dict[str, Any]
+) -> dict[str, Any]:
     require_exact_keys(
         trigger,
         required={"schema", "repository", "workflow_sha", "started_at", "cases"},
@@ -110,7 +118,10 @@ def validate_deny_permit(
     for field, value in expected.items():
         if permit.get(field) != value:
             raise PermitInputError(f"DENY permit {field} does not match the proof run")
-    if validate_authority_shape(permit.get("authority"), label="DENY authority") != authority:
+    if (
+        validate_authority_shape(permit.get("authority"), label="DENY authority")
+        != authority
+    ):
         raise PermitInputError("DENY permit authority does not match the candidate")
     reasons = permit.get("reasons")
     if not isinstance(reasons, list) or not reasons:
@@ -158,11 +169,7 @@ def validate_deny_permit(
             raise PermitInputError(f"DENY review {index} verdict is invalid")
         for finding_type in ("blocking_findings", "advisory_findings"):
             count = review[finding_type]
-            if (
-                not isinstance(count, int)
-                or isinstance(count, bool)
-                or count < 0
-            ):
+            if not isinstance(count, int) or isinstance(count, bool) or count < 0:
                 raise PermitInputError(
                     f"DENY review {index} {finding_type} must be non-negative",
                 )
@@ -197,6 +204,11 @@ def validate_pre_model_reject(
     client: GitHubReadClient,
     repository: str,
     run: dict[str, Any],
+    *,
+    head_sha: str,
+    workflow_sha: str,
+    attestation_token: str,
+    directory: Path,
 ) -> dict[str, Any]:
     run_id = run["id"]
     names = artifact_names(client, repository, run_id)
@@ -211,7 +223,9 @@ def validate_pre_model_reject(
         raise PermitInputError(
             f"pre-model rejection emitted forbidden review evidence: {sorted(forbidden)}",
         )
-    payload = client.get_json(f"/repos/{repository}/actions/runs/{run_id}/jobs?per_page=100")
+    payload = client.get_json(
+        f"/repos/{repository}/actions/runs/{run_id}/jobs?per_page=100"
+    )
     jobs = payload.get("jobs")
     if not isinstance(jobs, list):
         raise PermitInputError("GitHub jobs response is malformed")
@@ -232,7 +246,113 @@ def validate_pre_model_reject(
     ]
     if any(job.get("conclusion") != "skipped" for job in model_jobs):
         raise PermitInputError("pre-model rejection executed a model reviewer")
-    return {"failed_gates": sorted(failed_gates)}
+
+    artifact_id = artifact_for_run(client, repository, run_id, PROVENANCE_ARTIFACT)
+    if artifact_id is None:
+        raise PermitInputError(
+            "pre-model rejection lacks candidate workflow provenance"
+        )
+    provenance_bytes, bundle_bytes = extract_workflow_provenance(
+        client.get_bytes(
+            f"/repos/{repository}/actions/artifacts/{artifact_id}/zip",
+            accept="application/vnd.github+json",
+        ),
+    )
+    directory.mkdir(parents=True, exist_ok=False)
+    provenance_path = directory / "release-workflow-provenance.json"
+    bundle_path = directory / "release-workflow-provenance.attestation.json"
+    provenance_path.write_bytes(provenance_bytes)
+    bundle_path.write_bytes(bundle_bytes)
+    try:
+        provenance = parse_json_strict(
+            provenance_bytes.decode("utf-8"),
+            label="candidate workflow provenance",
+        )
+    except UnicodeDecodeError as exc:
+        raise PermitInputError("candidate workflow provenance is not UTF-8") from exc
+    if not isinstance(provenance, dict):
+        raise PermitInputError("candidate workflow provenance must be an object")
+    require_exact_keys(
+        provenance,
+        required={
+            "schema",
+            "repository",
+            "workflow_path",
+            "workflow_sha",
+            "head_sha",
+            "merge_sha",
+            "run_id",
+            "run_attempt",
+        },
+        label="candidate workflow provenance",
+    )
+    expected = {
+        "schema": PROVENANCE_SCHEMA,
+        "repository": repository,
+        "workflow_path": WORKFLOW_PATH,
+        "workflow_sha": workflow_sha,
+        "head_sha": head_sha,
+        "run_id": run_id,
+        "run_attempt": run.get("run_attempt"),
+    }
+    for field, value in expected.items():
+        if provenance.get(field) != value:
+            raise PermitInputError(
+                f"candidate workflow provenance {field} does not match the proof run",
+            )
+    merge_sha = require_sha(
+        provenance.get("merge_sha"),
+        label="candidate workflow provenance merge_sha",
+        length=40,
+    )
+    verify_attestation(
+        provenance_path,
+        bundle_path,
+        repository=repository,
+        workflow_sha=workflow_sha,
+        source_sha=merge_sha,
+        github_token=attestation_token,
+    )
+    return {
+        "failed_gates": sorted(failed_gates),
+        "merge_sha": merge_sha,
+        "workflow_provenance_sha256": hashlib.sha256(provenance_bytes).hexdigest(),
+    }
+
+
+def extract_workflow_provenance(archive: bytes) -> tuple[bytes, bytes]:
+    expected = {
+        "release-workflow-provenance.json": MAX_PROVENANCE_BYTES,
+        "release-workflow-provenance.attestation.json": MAX_PROVENANCE_BUNDLE_BYTES,
+    }
+    try:
+        with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
+            entries = bundle.infolist()
+            if len(entries) != len(expected) or {
+                entry.filename for entry in entries
+            } != set(expected):
+                raise PermitInputError(
+                    "workflow provenance artifact must contain exactly the marker and attestation",
+                )
+            by_name = {entry.filename: entry for entry in entries}
+            if any(
+                entry.is_dir()
+                or entry.file_size <= 0
+                or entry.file_size > expected[name]
+                for name, entry in by_name.items()
+            ):
+                raise PermitInputError(
+                    "workflow provenance artifact exceeds the size limit"
+                )
+            provenance = bundle.read(by_name["release-workflow-provenance.json"])
+            attestation = bundle.read(
+                by_name["release-workflow-provenance.attestation.json"],
+            )
+    except zipfile.BadZipFile as exc:
+        raise PermitInputError(
+            "workflow provenance artifact is not a valid ZIP archive",
+        ) from exc
+    return provenance, attestation
 
 
 def write_attested_case(
@@ -309,7 +429,15 @@ def verify_case(
     if expected == "PRE_MODEL_REJECT":
         if run.get("conclusion") != "failure":
             raise PermitInputError("pre-model proof run did not fail closed")
-        detail = validate_pre_model_reject(client, repository, run)
+        detail = validate_pre_model_reject(
+            client,
+            repository,
+            run,
+            head_sha=case["head_sha"],
+            workflow_sha=workflow_sha,
+            attestation_token=client.token,
+            directory=args.output_dir / "cases" / case["id"],
+        )
         return {
             "id": case["id"],
             "expected": expected,
@@ -371,7 +499,9 @@ def verify_case(
     }
 
 
-def wait_for_suite(args: argparse.Namespace, client: GitHubReadClient) -> dict[str, Any]:
+def wait_for_suite(
+    args: argparse.Namespace, client: GitHubReadClient
+) -> dict[str, Any]:
     contract = validate_contract(
         load_json(args.contract, label="control contract"),
         load_json(args.adversarial_corpus, label="adversarial corpus"),
@@ -383,7 +513,9 @@ def wait_for_suite(args: argparse.Namespace, client: GitHubReadClient) -> dict[s
         length=40,
     )
     if trigger["workflow_sha"] != workflow_sha:
-        raise PermitInputError("suite trigger workflow SHA does not match the candidate")
+        raise PermitInputError(
+            "suite trigger workflow SHA does not match the candidate"
+        )
     authority = load_json_file(args.expected_authority, label="expected authority")
     started_at = parse_time(trigger["started_at"], label="suite trigger started_at")
     repository = trigger["repository"]
@@ -439,9 +571,7 @@ def wait_for_suite(args: argparse.Namespace, client: GitHubReadClient) -> dict[s
             if case["expected"] == "ALLOW"
         ),
         "head_sha": next(
-            case["head_sha"]
-            for case in trigger["cases"]
-            if case["expected"] == "ALLOW"
+            case["head_sha"] for case in trigger["cases"] if case["expected"] == "ALLOW"
         ),
         "workflow_sha": workflow_sha,
         "run_id": allow["run_id"],

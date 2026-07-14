@@ -56,6 +56,12 @@ The `.github/main` classic one-review setting remains active and is satisfied
 by the same distinct machine identity. The terminal artifact is
 `bootstrap-ready.json`.
 
+Each proof run must also contain `release-workflow-provenance`, an offline
+GitHub-Sigstore marker bound to the exact candidate workflow SHA, proof head,
+merge commit, run ID, and attempt. `prepare` rejects a pre-model failure without
+that candidate-signed marker, including a same-head failure emitted by the
+still-enforcing parent workflow.
+
 Before machine enforcement, failure restores the staged candidate pin. After
 machine enforcement begins, failure leaves the machine rule active; rerun
 `prepare` into a new evidence directory. Never disable that rule to recover.

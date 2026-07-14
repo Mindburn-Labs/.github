@@ -108,18 +108,28 @@ def load_authority(args: argparse.Namespace) -> dict[str, Any]:
     if authority["schema"] != AUTHORITY_SCHEMA:
         raise PermitInputError("unsupported authority manifest schema")
     generation = authority["generation"]
-    if not isinstance(generation, int) or isinstance(generation, bool) or generation <= 0:
+    if (
+        not isinstance(generation, int)
+        or isinstance(generation, bool)
+        or generation <= 0
+    ):
         raise PermitInputError("authority generation must be a positive integer")
-    kernel_sha = require_sha(authority["kernel_sha"], label="authority kernel_sha", length=40)
+    kernel_sha = require_sha(
+        authority["kernel_sha"], label="authority kernel_sha", length=40
+    )
     if kernel_sha != args.kernel_sha:
-        raise PermitInputError("authority kernel_sha does not match the pinned verifier")
+        raise PermitInputError(
+            "authority kernel_sha does not match the pinned verifier"
+        )
     for field, path in (
         ("gate_profiles_sha256", args.gate_profiles),
         ("adversarial_corpus_sha256", args.adversarial_corpus),
     ):
         expected = require_sha(authority[field], label=f"authority {field}", length=64)
         if file_sha256(path) != expected:
-            raise PermitInputError(f"authority {field} does not match source-owned content")
+            raise PermitInputError(
+                f"authority {field} does not match source-owned content"
+            )
 
     parent = authority["parent"]
     if generation == 1:
@@ -148,7 +158,9 @@ def load_authority(args: argparse.Namespace) -> dict[str, Any]:
             length=40,
         )
         if parent_sha == args.workflow_sha:
-            raise PermitInputError("authority cannot name its own workflow SHA as its parent")
+            raise PermitInputError(
+                "authority cannot name its own workflow SHA as its parent"
+            )
     return authority
 
 
@@ -170,7 +182,9 @@ def prepare(args: argparse.Namespace) -> None:
         (args.merge_sha, "merge"),
         (args.workflow_sha, "workflow"),
     ):
-        if len(sha) != 40 or any(character not in "0123456789abcdef" for character in sha):
+        if len(sha) != 40 or any(
+            character not in "0123456789abcdef" for character in sha
+        ):
             raise PermitInputError(f"{label} SHA must be lowercase hexadecimal")
         if label != "workflow":
             run_git(target, "cat-file", "-e", f"{sha}^{{commit}}")
@@ -183,22 +197,31 @@ def prepare(args: argparse.Namespace) -> None:
             "authority workflow cannot review its own head or merge commit",
         )
 
-    merge_parents = run_git(
-        target,
-        "show",
-        "-s",
-        "--format=%P",
-        args.merge_sha,
-    ).decode("ascii").strip().split()
+    merge_parents = (
+        run_git(
+            target,
+            "show",
+            "-s",
+            "--format=%P",
+            args.merge_sha,
+        )
+        .decode("ascii")
+        .strip()
+        .split()
+    )
     if merge_parents != [args.base_sha, args.head_sha]:
         raise PermitInputError(
             "merge commit parents do not exactly match the event base and head",
         )
-    merge_tree_sha = run_git(
-        target,
-        "rev-parse",
-        f"{args.merge_sha}^{{tree}}",
-    ).decode("ascii").strip()
+    merge_tree_sha = (
+        run_git(
+            target,
+            "rev-parse",
+            f"{args.merge_sha}^{{tree}}",
+        )
+        .decode("ascii")
+        .strip()
+    )
 
     diff_range = f"{args.base_sha}..{args.merge_sha}"
     changed_paths = run_git(target, "diff", "--name-only", "-z", diff_range, "--")
@@ -217,7 +240,9 @@ def prepare(args: argparse.Namespace) -> None:
 
     numstat = run_git(target, "diff", "--numstat", diff_range, "--")
     if any(line.startswith(b"-\t-\t") for line in numstat.splitlines()):
-        raise PermitInputError("binary changes require a dedicated, source-aware review lane")
+        raise PermitInputError(
+            "binary changes require a dedicated, source-aware review lane"
+        )
 
     raw_changes = run_git(
         target,
@@ -245,12 +270,16 @@ def prepare(args: argparse.Namespace) -> None:
             )
         if new_mode != b"000000":
             display_path = path.decode("utf-8")
-            blob_size_text = run_git(
-                target,
-                "cat-file",
-                "-s",
-                f"{args.merge_sha}:{display_path}",
-            ).decode("ascii").strip()
+            blob_size_text = (
+                run_git(
+                    target,
+                    "cat-file",
+                    "-s",
+                    f"{args.merge_sha}:{display_path}",
+                )
+                .decode("ascii")
+                .strip()
+            )
             try:
                 blob_size = int(blob_size_text)
             except ValueError as exc:
@@ -327,6 +356,12 @@ AUTHORITY AND INPUT SAFETY
 - This is authority generation {authority["generation"]}, using Kernel {authority["kernel_sha"]}; its manifest and source-owned gate/corpus digests are bound into the context digest.
 - The exact pinned reducer source and tests are available in the read-only verifier-source directory. Inspect them when the change affects release authority or reducer behavior; do not treat an external commit hash as sufficient evidence by itself.
 
+AUTHORIZED POLICY AND TRUST BOUNDARY
+- The authorized development policy for the selected public repositories is machine-only code-merge authorization: no human approval is required, and DCO, trailers, labels, authorship, or prior human reviews carry zero authorization weight. Do not report that policy decision itself as a defect. Report implementation defects that make the machine controls unsafe or expand authority beyond code merges in that selected scope.
+- Immutable authority generation N reviews and ratifies candidate generation N+1. Candidate code never receives promotion, observer, merge, or approval-App credentials before activation. Report any concrete path that lets candidate-controlled input redirect those credentials, broaden the fixed broker operations, forge evidence, or review itself.
+- The signed permit authorizes candidate bytes; it is not a claim that live GitHub rulesets or Apps are already activated. Activation separately rechecks live App identities, environments, exact ruleset bodies, ETags, signed proof receipts, and rollback state. Do not require unavailable live state in this patch-only lane; report code or documentation that bypasses or falsely claims those checks.
+- Treat the immutable parent workflow and GitHub-hosted runner as the promotion trusted computing base. Still report any path by which target or candidate content can enter a credentialed job, select arbitrary endpoints or ruleset IDs, escape exact compare-and-swap inputs, or suppress independent readback.
+
 REVIEW OBJECTIVE
 Review pull request #{args.pull_request} in {args.repository}, exactly at head {args.head_sha}
 merged with base {args.base_sha} as {args.merge_sha}, tree {merge_tree_sha}. Look for behavior regressions, security or authorization bypass,
@@ -362,7 +397,9 @@ def validate_model_response(value: Any) -> dict[str, Any]:
         raise PermitInputError("model verdict must be ALLOW or DENY")
     findings = value["findings"]
     if not isinstance(findings, list) or len(findings) > MAX_FINDINGS:
-        raise PermitInputError(f"model findings must be a list of at most {MAX_FINDINGS}")
+        raise PermitInputError(
+            f"model findings must be a list of at most {MAX_FINDINGS}"
+        )
     for index, finding in enumerate(findings):
         if not isinstance(finding, dict):
             raise PermitInputError(f"finding {index} must be an object")
@@ -393,7 +430,9 @@ def validate_model_response(value: Any) -> dict[str, Any]:
         ):
             raise PermitInputError(f"finding {index} has invalid path")
         if "line" in finding and (
-            not isinstance(finding["line"], int) or isinstance(finding["line"], bool) or finding["line"] <= 0
+            not isinstance(finding["line"], int)
+            or isinstance(finding["line"], bool)
+            or finding["line"] <= 0
         ):
             raise PermitInputError(f"finding {index} has invalid line")
     return value
@@ -424,7 +463,9 @@ def normalize_model_output(args: argparse.Namespace) -> None:
                 label=f"{args.raw}:{line_number}",
             )
             if not isinstance(event, dict):
-                raise PermitInputError(f"{args.raw}:{line_number}: event must be an object")
+                raise PermitInputError(
+                    f"{args.raw}:{line_number}: event must be an object"
+                )
             if event.get("type") == "assistant.message":
                 data = event.get("data")
                 if not isinstance(data, dict):
@@ -438,7 +479,9 @@ def normalize_model_output(args: argparse.Namespace) -> None:
             elif event.get("type") == "result":
                 results.append(event)
         if len(results) != 1 or results[0].get("exitCode") != 0:
-            raise PermitInputError("Copilot JSONL must contain exactly one successful result event")
+            raise PermitInputError(
+                "Copilot JSONL must contain exactly one successful result event"
+            )
         if len(messages) != 1:
             raise PermitInputError(
                 f"Copilot JSONL must contain exactly one terminal assistant message; found {len(messages)}",
@@ -458,7 +501,9 @@ def normalize_model_output(args: argparse.Namespace) -> None:
             raise PermitInputError("model response contains an unterminated JSON fence")
         candidate = "\n".join(lines[1:-1]).strip()
         if "```" in candidate:
-            raise PermitInputError("model response contains nested or additional fences")
+            raise PermitInputError(
+                "model response contains nested or additional fences"
+            )
     elif "```" in candidate:
         raise PermitInputError("model response contains prose or an unexpected fence")
 

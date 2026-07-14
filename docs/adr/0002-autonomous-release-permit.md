@@ -166,6 +166,22 @@ non-authority pull request before it can become enforcing authority. Failed-job
 retries, a branch update, or an administrator editing the pin cannot substitute
 for either generation's evidence.
 
+Every candidate proof run independently emits a GitHub-OIDC-signed workflow
+provenance marker binding the target repository, candidate workflow SHA, head,
+synthetic merge commit, run ID, and run attempt. A `PRE_MODEL_REJECT` case is
+accepted only when that marker verifies against N+1's exact signer digest. This
+prevents a concurrent failure from the still-enforcing N workflow from being
+misclassified as candidate evidence.
+
+The model protocol treats the public-development decision to remove human
+code-review authorization as an authorized policy input, not as an automatic
+finding. Reviewers must instead find concrete failures in the replacement
+machine controls or expansion beyond code-merge scope. The protocol also
+distinguishes code ratification from live activation: patch-only reviewers
+inspect the complete candidate and pinned reducer, while bootstrap and
+promotion independently verify Apps, environments, rulesets, ETags, receipts,
+and rollback state before any authority changes.
+
 The steady-state promotion transaction is deliberately split across isolated
 jobs and three GitHub Apps. The approval-only App turns a signed ALLOW into an
 exact-head review but cannot read or write contents. The promoter can advance
