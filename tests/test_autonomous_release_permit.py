@@ -92,6 +92,10 @@ def prepare_args(
         issued_at="2026-07-14T10:00:00Z",
         anthropic_model="claude-fable-5",
         openai_model="gpt-5.6-sol",
+        authority_manifest=ROOT / "config" / "autonomous-release-authority.json",
+        kernel_sha="c84977eb6339d46240d06646ae9054af58d02f16",
+        gate_profiles=ROOT / "config" / "autonomous-release-gates.json",
+        adversarial_corpus=ROOT / "tests" / "fixtures" / "autonomous-release-adversarial.json",
         target_dir=repo,
         output_dir=output,
         max_patch_bytes=524_288,
@@ -113,6 +117,12 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertEqual(context["head_sha"], head)
         self.assertEqual(context["merge_sha"], merge)
         self.assertEqual(len(context["merge_tree_sha"]), 40)
+        self.assertEqual(context["schema"], "mindburn.release-permit-context/v2")
+        self.assertEqual(context["authority"]["generation"], 2)
+        self.assertEqual(
+            context["authority"]["parent"]["workflow_sha"],
+            "80844253c1d896cb701b6ecc218358a05fa8f836",
+        )
         self.assertEqual(
             context["required_reviewers"],
             [
@@ -170,6 +180,20 @@ class AutonomousReleasePermitTests(unittest.TestCase):
             args = prepare_args(repo, base, head, merge, root / "permit-input")
             args.max_changed_blob_bytes = 4
             with self.assertRaisesRegex(MODULE.PermitInputError, "changed blob example.txt"):
+                MODULE.prepare(args)
+
+    def test_prepare_rejects_authority_content_substitution(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo, base, head, merge = build_repo(root)
+            args = prepare_args(repo, base, head, merge, root / "permit-input")
+            forged = root / "gates.json"
+            forged.write_text("{}\n", encoding="utf-8")
+            args.gate_profiles = forged
+            with self.assertRaisesRegex(
+                MODULE.PermitInputError,
+                "gate_profiles_sha256 does not match",
+            ):
                 MODULE.prepare(args)
 
     def test_envelope_binds_response_to_context(self) -> None:
@@ -267,6 +291,62 @@ class AutonomousReleasePermitTests(unittest.TestCase):
                     '{"findings":[],"verdict":"ALLOW"}\n',
                 )
 
+    def test_normalize_extracts_unwrapped_response_from_copilot_jsonl(self) -> None:
+        events = [
+            {"type": "assistant.message", "data": {"content": "reading", "toolRequests": [{"name": "view"}]}},
+            {
+                "type": "assistant.message",
+                "data": {
+                    "content": '{"verdict":"DENY","findings":[{"severity":"P1","code":"BOUNDARY","summary":"wrapped words remain valid"}]}',
+                    "toolRequests": [],
+                },
+            },
+            {"type": "result", "exitCode": 0},
+        ]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            raw = root / "raw.jsonl"
+            output = root / "normalized.json"
+            raw.write_text(
+                "\n".join(json.dumps(event) for event in events) + "\n",
+                encoding="utf-8",
+            )
+            MODULE.normalize_model_output(
+                argparse.Namespace(
+                    raw=raw,
+                    output=output,
+                    transport_format="copilot-jsonl",
+                    max_transport_bytes=16_777_216,
+                    max_response_bytes=1_048_576,
+                ),
+            )
+            response = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(response["verdict"], "DENY")
+        self.assertEqual(response["findings"][0]["code"], "BOUNDARY")
+
+    def test_normalize_rejects_ambiguous_copilot_jsonl(self) -> None:
+        message = {
+            "type": "assistant.message",
+            "data": {"content": '{"verdict":"ALLOW","findings":[]}', "toolRequests": []},
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            raw = root / "raw.jsonl"
+            raw.write_text(
+                "\n".join(json.dumps(event) for event in (message, message, {"type": "result", "exitCode": 0})) + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(MODULE.PermitInputError, "exactly one terminal"):
+                MODULE.normalize_model_output(
+                    argparse.Namespace(
+                        raw=raw,
+                        output=root / "normalized.json",
+                        transport_format="copilot-jsonl",
+                        max_transport_bytes=16_777_216,
+                        max_response_bytes=1_048_576,
+                    ),
+                )
+
     def test_normalize_rejects_prose_extra_fences_and_duplicate_keys(self) -> None:
         for content, message in (
             ('Here is the result: {"verdict":"ALLOW","findings":[]}', "invalid JSON"),
@@ -328,9 +408,11 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertEqual(workflow.count("= \"$EXPECTED_WORKFLOW_SHA\""), 2)
         self.assertEqual(workflow.count("= \"$GITHUB_RUN_ATTEMPT\""), 2)
         self.assertEqual(
-            workflow.count("ref: 05eda40bd28087eb6d67d676bd1ae736d4294818"),
+            workflow.count("ref: c84977eb6339d46240d06646ae9054af58d02f16"),
             2,
         )
+        self.assertIn("config/autonomous-release-authority.json", workflow)
+        self.assertIn("tests/fixtures/autonomous-release-adversarial.json", workflow)
         self.assertIn("path: verifier-source", workflow)
         self.assertIn("core/pkg/releasepermit", workflow)
         self.assertIn("core/cmd/release-permit-verify", workflow)
@@ -338,6 +420,8 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertIn("exact distinct-provider quorum", workflow)
         self.assertIn("returned an empty response", workflow)
         self.assertIn("autonomous_release_permit.py normalize", workflow)
+        self.assertIn("--output-format=json", workflow)
+        self.assertIn("--transport-format copilot-jsonl", workflow)
         self.assertIn("name: Upload non-authoritative provider diagnostic", workflow)
         self.assertIn("name: release-diagnostic-${{ matrix.provider }}", workflow)
         self.assertIn("if: ${{ always() }}", workflow)

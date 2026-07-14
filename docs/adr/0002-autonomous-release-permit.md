@@ -58,6 +58,13 @@ repository without a Makefile, lint target, or test target fails closed during
 evaluation and must receive an explicit source-owned gate profile before
 activation.
 
+Every context also binds `config/autonomous-release-authority.json`. The
+manifest names a monotonically increasing generation, the exact Kernel SHA,
+the SHA-256 digests of the central gate profiles and adversarial corpus, and
+the immediately preceding workflow generation. Generation 1 is the explicit
+bootstrap; every later generation must name exactly generation N-1 and cannot
+name its own workflow SHA as its parent.
+
 The existing `local-validation` check name and push-to-`main` validation remain
 intact while the permit is evaluated. The permit records GitHub's actual
 `workflow_ref` and immutable `workflow_sha`; it must not assert a task-branch
