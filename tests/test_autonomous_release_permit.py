@@ -163,6 +163,7 @@ class AutonomousReleasePermitTests(unittest.TestCase):
             repo, base, head, merge = build_repo(root)
             permit_input = root / "permit-input"
             MODULE.prepare(prepare_args(repo, base, head, merge, permit_input))
+            context = json.loads((permit_input / "context.json").read_text(encoding="utf-8"))
             raw = root / "raw.json"
             raw.write_text('{"verdict":"ALLOW","findings":[]}\n', encoding="utf-8")
             output = root / "review.json"
@@ -178,6 +179,8 @@ class AutonomousReleasePermitTests(unittest.TestCase):
             )
             review = json.loads(output.read_text(encoding="utf-8"))
         self.assertEqual(review["head_sha"], head)
+        self.assertEqual(review["merge_sha"], merge)
+        self.assertEqual(review["merge_tree_sha"], context["merge_tree_sha"])
         self.assertEqual(review["verdict"], "ALLOW")
         self.assertEqual(len(review["context_sha256"]), 64)
         self.assertEqual(len(review["response_sha256"]), 64)
@@ -253,7 +256,7 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertEqual(workflow.count("= \"$EXPECTED_WORKFLOW_SHA\""), 2)
         self.assertEqual(workflow.count("= \"$GITHUB_RUN_ATTEMPT\""), 2)
         self.assertIn(
-            "ref: 87cd43d717dc8df177fccf42274a23e265b1157d",
+            "ref: 1abe6c1247a558b8ef0eeeb5ce19c56e2c50436f",
             workflow,
         )
 

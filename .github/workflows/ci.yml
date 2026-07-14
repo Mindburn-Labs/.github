@@ -301,7 +301,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: Mindburn-Labs/helm-ai-kernel
-          ref: 87cd43d717dc8df177fccf42274a23e265b1157d
+          ref: 1abe6c1247a558b8ef0eeeb5ce19c56e2c50436f
           persist-credentials: false
           path: kernel
 

@@ -321,6 +321,8 @@ def envelope(args: argparse.Namespace) -> None:
         "pull_request": context["pull_request"],
         "base_sha": context["base_sha"],
         "head_sha": context["head_sha"],
+        "merge_sha": context["merge_sha"],
+        "merge_tree_sha": context["merge_tree_sha"],
         "workflow_sha": context["workflow_sha"],
         "run_id": context["run_id"],
         "run_attempt": context["run_attempt"],
