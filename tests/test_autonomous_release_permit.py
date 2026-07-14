@@ -249,6 +249,9 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertIn("ref: ${{ github.workflow_sha }}", workflow)
         self.assertIn("WORKFLOW_REF: ${{ github.workflow_ref }}", workflow)
         self.assertNotIn("WORKFLOW_REF: refs/heads/", workflow)
+        self.assertEqual(workflow.count("name: Verify current authority generation"), 2)
+        self.assertEqual(workflow.count("= \"$EXPECTED_WORKFLOW_SHA\""), 2)
+        self.assertEqual(workflow.count("= \"$GITHUB_RUN_ATTEMPT\""), 2)
         self.assertIn(
             "ref: f967a4aec9fd41d01af5a2dedaf24e66669d95f6",
             workflow,

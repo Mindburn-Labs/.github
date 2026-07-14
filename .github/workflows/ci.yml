@@ -203,6 +203,15 @@ jobs:
           name: release-permit-input
           path: permit-input
 
+      - name: Verify current authority generation
+        env:
+          EXPECTED_WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          set -euo pipefail
+          test "$(jq -r '.workflow_sha' permit-input/context.json)" = "$EXPECTED_WORKFLOW_SHA"
+          test "$(jq -r '.run_id | tostring' permit-input/context.json)" = "$GITHUB_RUN_ID"
+          test "$(jq -r '.run_attempt | tostring' permit-input/context.json)" = "$GITHUB_RUN_ATTEMPT"
+
       - name: Set up pinned Node.js runtime
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
@@ -271,6 +280,15 @@ jobs:
         with:
           name: release-permit-input
           path: permit-input
+
+      - name: Verify current authority generation
+        env:
+          EXPECTED_WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          set -euo pipefail
+          test "$(jq -r '.workflow_sha' permit-input/context.json)" = "$EXPECTED_WORKFLOW_SHA"
+          test "$(jq -r '.run_id | tostring' permit-input/context.json)" = "$GITHUB_RUN_ID"
+          test "$(jq -r '.run_attempt | tostring' permit-input/context.json)" = "$GITHUB_RUN_ATTEMPT"
 
       - name: Download available distinct-provider reviews
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
