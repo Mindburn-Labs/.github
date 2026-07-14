@@ -18,6 +18,7 @@ ESTATE_INVENTORY_PATH = File.join(WORKSPACE_ROOT, "production-readiness", "estat
 MIGRATION_INDEX_PATH = File.join(WORKSPACE_ROOT, "production-readiness", "estate", "migration-index.json")
 TEAM_DOC_PATH = File.join(WORKSPACE_ROOT, "docs_for_team", "docs", "onboarding", "helm-ecosystem-directory-map.md")
 ROOT_DOC_PATH = File.join(WORKSPACE_ROOT, "docs", "architecture", "helm-ecosystem-directory-map.md")
+HANDBOOK_DOC_PATH = File.join(WORKSPACE_ROOT, "docs-engineering-handbook", "docs", "architecture", "helm-ecosystem-directory-map.md")
 ROUTING_DOC_PATH = File.join(WORKSPACE_ROOT, "docs_for_team", "docs", "onboarding", "helm-task-routing.md")
 
 OPTIONS = {
@@ -102,7 +103,7 @@ def group_for(name)
   case name
   when ".github"
     "GitHub Metadata"
-  when "app-developer-portal", "app-helm-console", "app-mindburn-web"
+  when "app-developer-portal", "app-helm-console", "app-helm-docs", "app-mindburn-web"
     "Frontend / User Surfaces"
   when "app-docs-platform", "platform-design-system"
     "Archived UI / Design"
@@ -120,7 +121,7 @@ def group_for(name)
     "Platform / Policy Substrate"
   when /^infra-/, /^gitops-/, "mindburn-infra"
     "Infrastructure / GitOps"
-  when "docs-engineering-handbook", "docs_for_team", "dev-orchestration", "homebrew-tap"
+  when "docs", "docs-engineering-handbook", "docs_for_team", "dev-orchestration", "homebrew-tap"
     "Docs / Onboarding / Local Ops"
   when "ml-orggenome-compiler"
     "OrgGenome / ML"
@@ -315,6 +316,7 @@ def render_markdown(state)
   lines << "- Code, route registries, schemas, generated contracts, release manifests, and GitOps evidence outrank prose docs."
   lines << "- UI code is never an authorization boundary."
   lines << "- RLM output is advisory evidence only; it does not verify HELM behavior by itself."
+  lines << "- HELM is the only Mindburn Labs product. Company Builder, Company OS, and HELM Network are product motions inside HELM; design-partner work becomes reusable HELM blueprints and evidence."
   lines << "- Local `*-wt-*` directories are task checkout directories by naming convention, not separate products or canonical repos."
   lines << "- Compatibility/local-only directories are not GitHub repository truth unless they appear in `.github-repo/repo-manifest.yaml`."
   lines << ""
@@ -351,11 +353,12 @@ def render_markdown(state)
   lines.concat markdown_table(
     ["If you are working on...", "Start here"],
     [
+      ["HELM product strategy, Company Builder, Company OS, Network, or design-partner reuse", "`docs/ai/helm-ai2027-economy-and-growth-strategy.md`, then `docs/architecture/source-truth.md`"],
       ["Kernel verdicts, receipts, EvidencePacks, conformance", "`helm-ai-kernel`"],
       ["Paid HELM AI Enterprise backend/product logic", "`helm-ai-enterprise`, then `svc-helm-control-plane`"],
-      ["Console UX", "Future React console repo; backend truth from `svc-helm-control-plane`"],
-      ["Public docs", "Future website/docs React repo plus headless contract docs"],
-      ["Public marketing site", "Future website/docs React repo"],
+      ["Console UX", "`app-helm-console`; backend truth from `svc-helm-control-plane`"],
+      ["Public docs", "`app-helm-docs`; source content and claims remain governed by their owning repos"],
+      ["Public marketing site", "`app-mindburn-web`; public claims remain evidence-gated"],
       ["Connector contracts or packs", "`helm-ai-enterprise`, `contracts-catalog`, `svc-helm-certification`, `integration-helm`"],
       ["Production release state", "`integration-mindburn-platform`, `gitops-apps`, `gitops-platform`"],
       ["Infrastructure/server access", "`mindburn-infra`, `docs_for_team`"],
@@ -456,7 +459,7 @@ def validate_state!(state, markdown)
 end
 
 def write_outputs(markdown)
-  [TEAM_DOC_PATH, ROOT_DOC_PATH].each do |path|
+  [ROOT_DOC_PATH, TEAM_DOC_PATH, HANDBOOK_DOC_PATH].each do |path|
     FileUtils.mkdir_p(File.dirname(path))
     File.write(path, markdown)
   end
@@ -470,12 +473,14 @@ if options[:write]
   write_outputs(markdown)
   puts "Wrote #{TEAM_DOC_PATH}"
   puts "Wrote #{ROOT_DOC_PATH}"
+  puts "Wrote #{HANDBOOK_DOC_PATH}"
 end
 
 if options[:check]
   expected = {
+    ROOT_DOC_PATH => markdown,
     TEAM_DOC_PATH => markdown,
-    ROOT_DOC_PATH => markdown
+    HANDBOOK_DOC_PATH => markdown
   }
   stale = expected.filter_map do |path, content|
     if !File.exist?(path)
@@ -495,7 +500,7 @@ if options[:json]
     "manifest_repositories" => state.fetch(:manifest_repos).count,
     "local_directories" => state.fetch(:local_dirs).count,
     "migration_entries" => state.fetch(:migration_entries).count,
-    "outputs" => [TEAM_DOC_PATH, ROOT_DOC_PATH]
+    "outputs" => [ROOT_DOC_PATH, TEAM_DOC_PATH, HANDBOOK_DOC_PATH]
   }
   puts JSON.pretty_generate(summary)
 end
