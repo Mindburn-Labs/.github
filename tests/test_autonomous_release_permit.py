@@ -93,7 +93,7 @@ def prepare_args(
         anthropic_model="claude-fable-5",
         openai_model="gpt-5.6-sol",
         authority_manifest=ROOT / "config" / "autonomous-release-authority.json",
-        kernel_sha="c84977eb6339d46240d06646ae9054af58d02f16",
+        kernel_sha="fc171eaaa4cf9e758eaae9e5b2e436499ca48f62",
         gate_profiles=ROOT / "config" / "autonomous-release-gates.json",
         adversarial_corpus=ROOT / "tests" / "fixtures" / "autonomous-release-adversarial.json",
         target_dir=repo,
@@ -153,7 +153,7 @@ class AutonomousReleasePermitTests(unittest.TestCase):
             root = Path(tmpdir)
             repo, base, head, merge = build_repo(root)
             args = prepare_args(repo, base, head, merge, root / "permit-input")
-            args.repository = args.workflow_repository
+            args.repository = args.workflow_repository.swapcase()
             args.workflow_sha = merge
             with self.assertRaisesRegex(
                 MODULE.PermitInputError,
@@ -405,7 +405,7 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertEqual(workflow.count("= \"$EXPECTED_WORKFLOW_SHA\""), 2)
         self.assertEqual(workflow.count("= \"$GITHUB_RUN_ATTEMPT\""), 2)
         self.assertEqual(
-            workflow.count("ref: c84977eb6339d46240d06646ae9054af58d02f16"),
+            workflow.count("ref: fc171eaaa4cf9e758eaae9e5b2e436499ca48f62"),
             2,
         )
         self.assertIn("config/autonomous-release-authority.json", workflow)

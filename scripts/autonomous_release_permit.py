@@ -176,7 +176,7 @@ def prepare(args: argparse.Namespace) -> None:
             run_git(target, "cat-file", "-e", f"{sha}^{{commit}}")
 
     if (
-        args.repository == args.workflow_repository
+        args.repository.casefold() == args.workflow_repository.casefold()
         and args.workflow_sha in {args.head_sha, args.merge_sha}
     ):
         raise PermitInputError(
