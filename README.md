@@ -36,12 +36,14 @@ Repository inventory does not prove production readiness. When there is a confli
 
 ## Autonomous Release Permit Evaluation
 
-`.github/workflows/autonomous-release-permit.yml` is the public, centrally
+`.github/workflows/ci.yml` is the public, centrally
 bindable workflow for an evaluation-only machine quorum. It requires the exact
-pull-request head, deterministic repository gates, independent Claude Fable 5
-and GPT-5.6 Sol reviews, and the source-owned HELM Kernel reducer. It is not
-production-promotion authority, and it does not justify removing the existing
-human approval gate until its live positive and negative paths pass.
+GitHub merge tree, deterministic repository gates, separately executed Claude
+Fable 5 and GPT-5.6 Sol provider reviews, and the source-owned HELM Kernel
+reducer. GitHub Copilot remains the shared control plane for both model jobs.
+The workflow is not production-promotion authority, and it does not justify
+removing the existing human approval gate until its live positive, negative,
+adversarial, and strict-current-base paths pass.
 
 ## Validation
 

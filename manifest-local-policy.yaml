@@ -12,3 +12,7 @@ manifest_only:
     reason: archived 2026-06-10; split into ml-orggenome-compiler + svc-orggenome-inference; local checkout removed
     owner: ml-platform
     expires: 2027-06-30
+  tempora:
+    reason: product checkout lives at /Users/ivan/Code/Tempora outside the Mindburn-Labs workspace root
+    owner: tempora-product
+    expires: 2027-07-14
