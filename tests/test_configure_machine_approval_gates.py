@@ -80,12 +80,34 @@ class FakeClient:
             **MODULE.human_ruleset_state(contract, "before"),
         }
         self.protection = raw_protection(contract["classic_branch_protection"]["expected"])
+        self.review_state = "APPROVED"
         self.puts = 0
         self.posts = 0
         self.etag = 'W/"human-v1"'
 
     def request(self, method: str, path: str, *, payload=None, if_match=None):
         response = MODULE.AdminResponse
+        if path.endswith("/pulls/36/reviews/42"):
+            return response(
+                {
+                    "id": 42,
+                    "state": self.review_state,
+                    "commit_id": CANDIDATE_SHA,
+                    "user": {"login": MODULE.APPROVER_LOGIN},
+                },
+                None,
+            )
+        if path.endswith("/pulls/36"):
+            return response(
+                {
+                    "number": 36,
+                    "state": "open",
+                    "draft": False,
+                    "merged": False,
+                    "head": {"sha": CANDIDATE_SHA},
+                },
+                None,
+            )
         if path.endswith(f"rulesets/{MODULE.STABLE_RULESET_ID}"):
             return response(json.loads(json.dumps(self.workflow)), 'W/"workflow"')
         if path.endswith("rulesets?per_page=100"):
@@ -178,6 +200,14 @@ class ConfigureMachineApprovalGatesTests(unittest.TestCase):
         client.machine["enforcement"] = "evaluate"
         with self.assertRaisesRegex(MODULE.PermitInputError, "not exact and active"):
             MODULE.configure_machine_approval_gates(self.args, client)
+        self.assertEqual(client.puts, 0)
+
+    def test_dismissed_approval_blocks_cutover(self) -> None:
+        client = FakeClient(self.contract)
+        client.review_state = "DISMISSED"
+        with self.assertRaisesRegex(MODULE.PermitInputError, "not exact and active"):
+            MODULE.configure_machine_approval_gates(self.args, client)
+        self.assertEqual(client.posts, 0)
         self.assertEqual(client.puts, 0)
 
 

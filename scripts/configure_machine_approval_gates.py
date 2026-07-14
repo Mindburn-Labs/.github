@@ -323,6 +323,44 @@ def validate_approval(
     return approval
 
 
+def verify_live_approval(
+    client: GitHubAdminClient,
+    approval: dict[str, Any],
+    *,
+    approved_head_sha: str,
+) -> None:
+    pull_request = approval["pull_request"]
+    review_id = approval["review_id"]
+    review = require_object(
+        client.request(
+            "GET",
+            f"/repos/Mindburn-Labs/.github/pulls/{pull_request}/reviews/{review_id}",
+        ),
+        label="live machine approval",
+    )
+    user = review.get("user")
+    if (
+        review.get("state") != "APPROVED"
+        or review.get("commit_id") != approved_head_sha
+        or not isinstance(user, dict)
+        or user.get("login") != APPROVER_LOGIN
+    ):
+        raise PermitInputError("live machine approval is not exact and active")
+    current = require_object(
+        client.request("GET", f"/repos/Mindburn-Labs/.github/pulls/{pull_request}"),
+        label="live approval pull request",
+    )
+    head = current.get("head")
+    if (
+        current.get("state") != "open"
+        or current.get("draft") is True
+        or current.get("merged") is True
+        or not isinstance(head, dict)
+        or head.get("sha") != approved_head_sha
+    ):
+        raise PermitInputError("approved pull request changed before gate cutover")
+
+
 def ensure_machine_ruleset(client: GitHubAdminClient) -> dict[str, Any]:
     response = client.request("GET", f"/orgs/{ORGANIZATION}/rulesets?per_page=100")
     if not isinstance(response.body, list):
@@ -374,6 +412,7 @@ def configure_machine_approval_gates(
         candidate_sha=approved_head_sha,
         pull_request=args.pull_request,
     )
+    verify_live_approval(client, approval, approved_head_sha=approved_head_sha)
 
     stable = require_object(
         client.request("GET", f"/orgs/{ORGANIZATION}/rulesets/{STABLE_RULESET_ID}"),
