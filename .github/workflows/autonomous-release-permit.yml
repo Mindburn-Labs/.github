@@ -10,10 +10,6 @@ on:
 
 permissions: {}
 
-concurrency:
-  group: autonomous-release-permit-${{ github.repository }}-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
-
 jobs:
   repository-gates:
     name: Deterministic repository gates

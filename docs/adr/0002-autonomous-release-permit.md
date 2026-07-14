@@ -19,7 +19,9 @@ two independent AI reviews into one fail-closed release permit:
 - P0-P2 findings block; P3 findings remain advisory;
 - no commit-trailer, author, label, or prior-review authority;
 - no long-lived model credential;
-- no shell, write, URL, or memory tool access for either model.
+- no shell, write, URL, or memory tool access for either model;
+- no `cancel-in-progress` concurrency, because GitHub ruleset workflows do not
+  support that setting.
 
 The organization ruleset must point at the wrapper workflow in
 `Mindburn-Labs/.github` by exact repository, path, ref, and commit SHA. The

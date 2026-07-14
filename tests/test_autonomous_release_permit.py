@@ -144,6 +144,7 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         )
         self.assertIn("copilot-requests: write", workflow)
         self.assertNotIn("pull_request_target", workflow)
+        self.assertNotIn("cancel-in-progress", workflow)
         self.assertIn("--allow-tool=read", workflow)
         self.assertIn("--deny-tool='shell,write,url,memory'", workflow)
         self.assertIn("@github/copilot@1.0.70", workflow)
