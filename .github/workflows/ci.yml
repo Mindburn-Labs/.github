@@ -407,6 +407,13 @@ jobs:
 
       - name: Attest verified permit provenance
         uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763
+        env:
+          # GitHub's public-good persistence path currently compares the
+          # required-workflow URI with a repository-relative identity and
+          # rejects the otherwise valid certificate. The GitHub Sigstore
+          # instance preserves the same OIDC-bound provenance without that
+          # cross-repository normalization seam.
+          INPUT_PRIVATE-SIGNING: "true"
         with:
           subject-path: release-permit.json
 

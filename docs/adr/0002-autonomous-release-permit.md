@@ -143,6 +143,14 @@ Commit trailers remain metadata, not authorization. Useful provenance comes
 from the GitHub actor and app identity, immutable SHAs, signed build and deploy
 attestations, permit digests, and observed-effect receipts.
 
+Permit attestations use GitHub's private Sigstore instance. Required-workflow
+runs expose the authority workflow as an absolute URI, while GitHub's
+public-good repository persistence path currently compares it with a
+repository-relative identity and rejects the otherwise valid certificate. The
+private instance retains OIDC-bound signing and GitHub repository persistence;
+consumers still require the exact signer workflow, signer digest, source digest,
+and GitHub-hosted runner policy when verifying a permit.
+
 Constitution promotion uses two generations. Rulesets keep version N pinned
 while N evaluates the complete N+1 source bundle. Only a valid N-issued permit
 may advance the evaluation pin to N+1. N+1 is then exercised on a separate

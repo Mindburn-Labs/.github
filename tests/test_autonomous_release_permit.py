@@ -450,6 +450,7 @@ class AutonomousReleasePermitTests(unittest.TestCase):
             "uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763",
             workflow,
         )
+        self.assertIn('INPUT_PRIVATE-SIGNING: "true"', workflow)
         self.assertIn("subject-path: release-permit.json", workflow)
         self.assertIn("config/autonomous-release-authority.json", workflow)
         self.assertIn("tests/fixtures/autonomous-release-adversarial.json", workflow)
