@@ -43,6 +43,8 @@ Fable 5 and GPT-5.6 Sol provider reviews, and the source-owned HELM Kernel
 reducer. GitHub Copilot remains the shared control plane for both model jobs.
 The common gate contract requires `make lint` and `make test`; `setup` and
 `build` run when present.
+The pre-existing `local-validation` check and push-to-`main` coverage remain in
+place during evaluation.
 The workflow is not production-promotion authority, and it does not justify
 removing the existing human approval gate until its live positive, negative,
 adversarial, and strict-current-base paths pass.

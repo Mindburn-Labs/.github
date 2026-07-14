@@ -242,9 +242,13 @@ class AutonomousReleasePermitTests(unittest.TestCase):
             workflow,
         )
         self.assertIn("name: HELM Autonomous Release Permit", workflow)
+        self.assertIn("name: local-validation", workflow)
+        self.assertIn("push:\n    branches:\n      - main", workflow)
         self.assertIn("repository: Mindburn-Labs/.github", workflow)
         self.assertNotIn("repository: Mindburn-Labs/platform-actions", workflow)
         self.assertIn("ref: ${{ github.workflow_sha }}", workflow)
+        self.assertIn("WORKFLOW_REF: ${{ github.workflow_ref }}", workflow)
+        self.assertNotIn("WORKFLOW_REF: refs/heads/", workflow)
         self.assertIn(
             "ref: f967a4aec9fd41d01af5a2dedaf24e66669d95f6",
             workflow,

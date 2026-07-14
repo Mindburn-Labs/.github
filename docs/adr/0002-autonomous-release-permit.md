@@ -52,6 +52,11 @@ repository without a Makefile, lint target, or test target fails closed during
 evaluation and must receive an explicit source-owned gate profile before
 activation.
 
+The existing `local-validation` check name and push-to-`main` validation remain
+intact while the permit is evaluated. The permit records GitHub's actual
+`workflow_ref` and immutable `workflow_sha`; it must not assert a task-branch
+reference after the ruleset pin changes.
+
 During evaluation the permit is scoped to measuring merge eligibility; it does
 not govern merges unless the ruleset is activated after proof. It never
 authorizes deployment, production promotion, migrations, key rotation, billing

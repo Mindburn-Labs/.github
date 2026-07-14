@@ -8,13 +8,30 @@ on:
       - synchronize
       - ready_for_review
       - edited
+  push:
+    branches:
+      - main
 
 permissions: {}
 
 jobs:
+  local-validation:
+    name: local-validation
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Validate repository contract and workspace truth
+        run: REQUIRE_WORKSPACE_CONTEXT=0 make lint test
+
   repository-gates:
     name: Deterministic repository gates
-    if: ${{ github.event.pull_request.draft == false }}
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == false }}
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -110,7 +127,7 @@ jobs:
           RUN_ATTEMPT: ${{ github.run_attempt }}
           WORKFLOW_REPOSITORY: Mindburn-Labs/.github
           WORKFLOW_PATH: .github/workflows/ci.yml
-          WORKFLOW_REF: refs/heads/codex/autonomous-release-permit
+          WORKFLOW_REF: ${{ github.workflow_ref }}
           WORKFLOW_SHA: ${{ github.workflow_sha }}
           ANTHROPIC_MODEL: claude-fable-5
           OPENAI_MODEL: gpt-5.6-sol
@@ -239,7 +256,7 @@ jobs:
 
   permit:
     name: HELM Autonomous Release Permit
-    if: ${{ always() }}
+    if: ${{ always() && github.event_name == 'pull_request' }}
     needs:
       - repository-gates
       - prepare
