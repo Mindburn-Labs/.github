@@ -209,6 +209,8 @@ jobs:
           name: verified-authority-promotion
           path: |
             promotion/release-permit.json
+            promotion/release-permit.attestation.json
+            promotion/ratification-input/context.json
             promotion/authority-promotion.json
             promotion/candidate-authority.json
             promotion/pull-request.json
@@ -953,7 +955,7 @@ jobs:
           permission-organization-administration: write
           permission-pull-requests: write
 
-      - name: Converge on merged main or restore the unmerged parent
+      - name: Restore parent authority after incomplete promotion
         env:
           CANDIDATE_REF: ${{ needs.verify-candidate.outputs.candidate_ref }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -963,6 +965,8 @@ jobs:
           current_main="$(gh api repos/Mindburn-Labs/.github/git/ref/heads/main --jq '.object.sha')"
           merge_args=()
           if [[ "$current_main" = "$expected_merge_sha" ]]; then
+            # Admit the expected merge as an observed recovery state only.
+            # The broker always restores both rulesets to the parent authority.
             merge_args+=(--merge-sha "$expected_merge_sha")
           elif [[ "$current_main" != "${{ needs.verify-candidate.outputs.parent_sha }}" ]]; then
             echo "::error::Main is outside the exact parent/merge recovery states"

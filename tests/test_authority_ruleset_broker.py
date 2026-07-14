@@ -189,20 +189,20 @@ class AuthorityRulesetBrokerTests(unittest.TestCase):
         binding = MODULE.workflow_binding(client.current[MODULE.CANDIDATE_RULESET_ID])
         self.assertEqual(binding["sha"], PARENT_SHA)
 
-    def test_restore_after_merge_converges_on_merged_main(self) -> None:
+    def test_restore_after_merge_returns_both_rulesets_to_parent(self) -> None:
         client = FakeClient(
-            ruleset("stable", PARENT_SHA, MODULE.MAIN_REF),
-            ruleset("candidate", CANDIDATE_SHA, CANDIDATE_REF),
+            ruleset("stable", MERGE_SHA, MODULE.MAIN_REF),
+            ruleset("candidate", MERGE_SHA, MODULE.MAIN_REF),
         )
         MODULE.transition(args("restore", merge_sha=MERGE_SHA), client)
         self.assertEqual(
             client.puts,
-            [MODULE.CANDIDATE_RULESET_ID, MODULE.STABLE_RULESET_ID],
+            [MODULE.STABLE_RULESET_ID, MODULE.CANDIDATE_RULESET_ID],
         )
         for ruleset_id in (MODULE.STABLE_RULESET_ID, MODULE.CANDIDATE_RULESET_ID):
             self.assertEqual(
                 MODULE.workflow_binding(client.current[ruleset_id])["sha"],
-                MERGE_SHA,
+                PARENT_SHA,
             )
 
     def test_missing_etag_fails_closed(self) -> None:
@@ -244,7 +244,9 @@ class AuthorityRulesetBrokerTests(unittest.TestCase):
                 if mutation == "bypass":
                     stable["bypass_actors"] = [{"actor_type": "OrganizationAdmin"}]
                 else:
-                    stable["conditions"] = {"ref_name": {"include": ["~ALL"], "exclude": []}}
+                    stable["conditions"] = {
+                        "ref_name": {"include": ["~ALL"], "exclude": []}
+                    }
                 client = FakeClient(
                     stable,
                     ruleset("candidate", PARENT_SHA, MODULE.MAIN_REF),
@@ -306,9 +308,13 @@ class AuthorityRulesetBrokerTests(unittest.TestCase):
         )
         for ruleset_id in (MODULE.STABLE_RULESET_ID, MODULE.CANDIDATE_RULESET_ID):
             binding = MODULE.workflow_binding(client.current[ruleset_id])
-            self.assertEqual((binding["sha"], binding["ref"]), (MERGE_SHA, MODULE.MAIN_REF))
+            self.assertEqual(
+                (binding["sha"], binding["ref"]), (MERGE_SHA, MODULE.MAIN_REF)
+            )
 
-    def test_bootstrap_finalization_compensates_candidate_if_stable_update_fails(self) -> None:
+    def test_bootstrap_finalization_compensates_candidate_if_stable_update_fails(
+        self,
+    ) -> None:
         candidate_ref = "refs/heads/codex/autonomous-release-gen2-bootstrap"
         client = FakeClient(
             ruleset(
@@ -333,7 +339,9 @@ class AuthorityRulesetBrokerTests(unittest.TestCase):
             [MODULE.CANDIDATE_RULESET_ID, MODULE.CANDIDATE_RULESET_ID],
         )
         binding = MODULE.workflow_binding(client.current[MODULE.CANDIDATE_RULESET_ID])
-        self.assertEqual((binding["sha"], binding["ref"]), (CANDIDATE_SHA, candidate_ref))
+        self.assertEqual(
+            (binding["sha"], binding["ref"]), (CANDIDATE_SHA, candidate_ref)
+        )
 
 
 if __name__ == "__main__":

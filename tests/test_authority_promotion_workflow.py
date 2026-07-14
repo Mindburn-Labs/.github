@@ -21,12 +21,15 @@ class AuthorityPromotionWorkflowTests(unittest.TestCase):
         self.assertIn("HELM_AUTHORITY_OBSERVER_PRIVATE_KEY", workflow)
         self.assertEqual(workflow.count("HELM_AUTHORITY_OBSERVER_PRIVATE_KEY"), 2)
         self.assertIn("permission-organization-administration: write", workflow)
-        self.assertIn("separate App token is consumed only by the observer's GET-only client", workflow)
+        self.assertIn(
+            "separate App token is consumed only by the observer's GET-only client",
+            workflow,
+        )
         self.assertIn("permission-actions: read", workflow)
         self.assertIn("permission-attestations: read", workflow)
         self.assertIn("permission-pull-requests: write", workflow)
         self.assertNotIn("permission-contents: write", workflow)
-        merge_job = workflow[workflow.index("  merge:"):workflow.index("  rebind:")]
+        merge_job = workflow[workflow.index("  merge:") : workflow.index("  rebind:")]
         self.assertIn("contents: write", merge_job)
         self.assertNotIn("HELM_AUTHORITY_PROMOTER_PRIVATE_KEY", merge_job)
         self.assertNotIn("permission-organization-administration: write", merge_job)
@@ -37,7 +40,9 @@ class AuthorityPromotionWorkflowTests(unittest.TestCase):
         self.assertNotIn('"PATCH"', observer)
         self.assertNotIn('"DELETE"', observer)
 
-    def test_promotion_requires_attested_lineage_observers_and_compensation(self) -> None:
+    def test_promotion_requires_attested_lineage_observers_and_compensation(
+        self,
+    ) -> None:
         workflow = (ROOT / ".github" / "workflows" / "promote-authority.yml").read_text(
             encoding="utf-8",
         )
@@ -46,12 +51,22 @@ class AuthorityPromotionWorkflowTests(unittest.TestCase):
             workflow,
         )
         self.assertIn('test "$parent_generation" -ge 2', workflow)
-        self.assertIn("Generation 1 is admitted exactly once by bootstrap_authority.py", workflow)
+        self.assertIn(
+            "Generation 1 is admitted exactly once by bootstrap_authority.py", workflow
+        )
         self.assertGreaterEqual(workflow.count("--bundle "), 2)
         self.assertGreaterEqual(workflow.count("offline-attest/attest.mjs"), 2)
         self.assertIn("verify_authority_promotion.py", workflow)
         self.assertIn("name: release-permit-input", workflow)
-        self.assertIn("--trusted-context promotion/ratification-input/context.json", workflow)
+        self.assertIn(
+            "--trusted-context promotion/ratification-input/context.json", workflow
+        )
+        self.assertGreaterEqual(
+            workflow.count("promotion/release-permit.attestation.json"), 3
+        )
+        self.assertGreaterEqual(
+            workflow.count("promotion/ratification-input/context.json"), 4
+        )
         self.assertIn("wait_for_authority_suite.py", workflow)
         self.assertIn("verify_control_plane.py", workflow)
         self.assertIn("--canary-context promotion/suite/canary-context.json", workflow)
@@ -75,13 +90,23 @@ class AuthorityPromotionWorkflowTests(unittest.TestCase):
         self.assertIn('git check-ref-format "$candidate_ref"', workflow)
         self.assertNotIn('--candidate-ref "${{', workflow)
         self.assertEqual(workflow.count('--candidate-ref "$CANDIDATE_REF"'), 5)
-        self.assertIn("--tree-sha \"${{ needs.verify-candidate.outputs.candidate_tree_sha }}\"", workflow)
+        self.assertIn(
+            '--tree-sha "${{ needs.verify-candidate.outputs.candidate_tree_sha }}"',
+            workflow,
+        )
         self.assertIn("Build non-authoritative execution bundle", workflow)
         self.assertNotIn("Attest authority promotion receipt", workflow)
         self.assertIn("Sign independent final promotion receipt", workflow)
         self.assertIn("needs.observe_final.result != 'success'", workflow)
-        self.assertIn('current_main="$(gh api repos/Mindburn-Labs/.github/git/ref/heads/main', workflow)
+        self.assertIn(
+            'current_main="$(gh api repos/Mindburn-Labs/.github/git/ref/heads/main',
+            workflow,
+        )
         self.assertIn('merge_args+=(--merge-sha "$expected_merge_sha")', workflow)
+        self.assertIn("Restore parent authority after incomplete promotion", workflow)
+        self.assertIn(
+            "broker always restores both rulesets to the parent authority", workflow
+        )
         self.assertNotIn("path: candidate-kernel", workflow)
         self.assertNotIn("candidate-permit-verify", workflow)
 
