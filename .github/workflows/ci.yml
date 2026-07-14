@@ -49,10 +49,30 @@ jobs:
             echo "::error::Makefile is required for organization-wide autonomous merging"
             exit 1
           fi
-          make setup
-          make lint
-          make test
-          make build
+          make_database="$(make -qp 2>/dev/null || true)"
+          has_target() {
+            grep -Eq "^$1:([^=]|$)" <<<"$make_database"
+          }
+
+          if has_target setup; then
+            make setup
+          else
+            echo "::notice::Optional make target 'setup' is not defined"
+          fi
+
+          for required_target in lint test; do
+            if ! has_target "$required_target"; then
+              echo "::error::Required make target '$required_target' is not defined"
+              exit 1
+            fi
+            make "$required_target"
+          done
+
+          if has_target build; then
+            make build
+          else
+            echo "::notice::Optional make target 'build' is not defined"
+          fi
 
   prepare:
     name: Bind immutable review input

@@ -46,6 +46,12 @@ Oversized or unsupported work must use a dedicated review lane. Each model
 executes in a separate ephemeral job. Only the strict JSON envelope and content
 digests flow to the Kernel reducer.
 
+The shared repository-gate baseline requires `make lint` and `make test`.
+`make setup` and `make build` run when the target repository defines them. A
+repository without a Makefile, lint target, or test target fails closed during
+evaluation and must receive an explicit source-owned gate profile before
+activation.
+
 During evaluation the permit is scoped to measuring merge eligibility; it does
 not govern merges unless the ruleset is activated after proof. It never
 authorizes deployment, production promotion, migrations, key rotation, billing

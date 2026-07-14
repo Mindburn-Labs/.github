@@ -255,8 +255,11 @@ class AutonomousReleasePermitTests(unittest.TestCase):
             encoding="utf-8",
         )
         self.assertIn("name: Deterministic repository gates", workflow)
-        for command in ("make setup", "make lint", "make test", "make build"):
+        for command in ('make "$required_target"', "Required make target", "Optional make target"):
             self.assertIn(command, workflow)
+        self.assertIn("for required_target in lint test", workflow)
+        self.assertIn("has_target setup", workflow)
+        self.assertIn("has_target build", workflow)
         self.assertIn("ref: ${{ github.sha }}", workflow)
         self.assertIn("--merge-sha \"$MERGE_SHA\"", workflow)
         self.assertIn("persist-credentials: false", workflow)
