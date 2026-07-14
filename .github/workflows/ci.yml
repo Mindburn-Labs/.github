@@ -279,6 +279,15 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Upload non-authoritative provider diagnostic
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-diagnostic-${{ matrix.provider }}
+          path: raw-${{ matrix.provider }}.json
+          if-no-files-found: ignore
+          retention-days: 1
+
   permit:
     name: HELM Autonomous Release Permit
     if: ${{ always() && github.event_name == 'pull_request' }}

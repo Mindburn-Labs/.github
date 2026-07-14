@@ -281,6 +281,10 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertIn("Exactly two review envelopes are required", workflow)
         self.assertIn("exact distinct-provider quorum", workflow)
         self.assertIn("returned an empty response", workflow)
+        self.assertIn("name: Upload non-authoritative provider diagnostic", workflow)
+        self.assertIn("name: release-diagnostic-${{ matrix.provider }}", workflow)
+        self.assertIn("if: ${{ always() }}", workflow)
+        self.assertIn("retention-days: 1", workflow)
 
     def test_workflow_requires_deterministic_repository_gates(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
