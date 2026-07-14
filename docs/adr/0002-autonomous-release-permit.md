@@ -130,12 +130,23 @@ Commit trailers remain metadata, not authorization. Useful provenance comes
 from the GitHub actor and app identity, immutable SHAs, signed build and deploy
 attestations, permit digests, and observed-effect receipts.
 
+Constitution promotion uses two generations. Rulesets keep version N pinned
+while N evaluates the complete N+1 source bundle. Only a valid N-issued permit
+may advance the evaluation pin to N+1. N+1 is then exercised on a separate
+non-authority pull request before it can become enforcing authority. Failed-job
+retries, a branch update, or an administrator editing the pin cannot substitute
+for either generation's evidence.
+
 ## Rollout
 
 1. Publish the Kernel reducer and public organization workflow; retain the
    private reusable workflow only as a convenience for private consumers.
 2. Create the organization ruleset in `evaluate` mode for `~ALL` repositories
-   and default branches.
+   and default branches. Verify effective coverage with live required-workflow
+   runs in public, internal, and private repositories; the organization-level
+   `~ALL` selector alone is not enforcement evidence. Billing, licensing, or
+   plan state that disables rules on private/internal repositories blocks
+   activation.
 3. Prove `ALLOW` on an exact merge tree, structured `DENY` for stale context,
    provider duplication and blocking findings, and a failed check for a missing
    reviewer, malformed response, or model outage.
