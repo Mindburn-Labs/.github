@@ -51,6 +51,7 @@ from verify_control_plane import (
     load_json,
     validate_contract,
     verify_live_environments,
+    verify_live_repository_settings,
 )
 from wait_for_authority_canary import (
     GitHubReadClient,
@@ -107,13 +108,25 @@ def reopen_pull_request(
         or current.get("draft") is True
         or nested(current, "base", "ref", label="pull request base ref") != "main"
         or nested(current, "head", "sha", label="pull request head SHA") != head_sha
-        or nested(current, "head", "repo", "full_name", label="pull request head repository")
+        or nested(
+            current, "head", "repo", "full_name", label="pull request head repository"
+        )
         != repository
     ):
-        raise PermitInputError(f"{repository}#{pull_request} does not match the proof contract")
-    if base_sha is not None and nested(current, "base", "sha", label="base SHA") != base_sha:
-        raise PermitInputError(f"{repository}#{pull_request} base moved before proof trigger")
-    if head_ref is not None and nested(current, "head", "ref", label="head ref") != head_ref:
+        raise PermitInputError(
+            f"{repository}#{pull_request} does not match the proof contract"
+        )
+    if (
+        base_sha is not None
+        and nested(current, "base", "sha", label="base SHA") != base_sha
+    ):
+        raise PermitInputError(
+            f"{repository}#{pull_request} base moved before proof trigger"
+        )
+    if (
+        head_ref is not None
+        and nested(current, "head", "ref", label="head ref") != head_ref
+    ):
         raise PermitInputError(f"{repository}#{pull_request} head ref drifted")
     if current.get("state") == "open":
         current = client.request("PATCH", path, payload={"state": "closed"})
@@ -124,7 +137,9 @@ def reopen_pull_request(
         reopened.get("state") != "open"
         or nested(reopened, "head", "sha", label="reopened head SHA") != head_sha
     ):
-        raise PermitInputError(f"GitHub did not reopen exact {repository}#{pull_request}")
+        raise PermitInputError(
+            f"GitHub did not reopen exact {repository}#{pull_request}"
+        )
     return reopened
 
 
@@ -134,7 +149,9 @@ def trigger_suite(
     *,
     workflow_sha: str,
 ) -> dict[str, Any]:
-    started_at = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(seconds=2)
+    started_at = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(
+        seconds=2
+    )
     for case in contract["adversarial_suite"]["cases"]:
         reopen_pull_request(
             client,
@@ -226,14 +243,47 @@ def verify_ratification(
     return permit, promotion
 
 
-def verify_control(args: argparse.Namespace, client: GitHubReadClient) -> dict[str, Any]:
+def verify_control(
+    args: argparse.Namespace, client: GitHubReadClient
+) -> dict[str, Any]:
     contract = validate_contract(
         load_json(args.control_contract, label="control contract"),
         load_json(args.adversarial_corpus, label="adversarial corpus"),
     )
     return {
         "contract": contract,
+        "repository_settings": verify_live_repository_settings(contract, client),
         "environments": verify_live_environments(contract, client),
+    }
+
+
+def ensure_recovery_head_ref_policy(client: GitHubMergeClient) -> dict[str, Any]:
+    path = f"/repos/{REPOSITORY}"
+    before = client.get(path).get("delete_branch_on_merge")
+    if not isinstance(before, bool):
+        raise PermitInputError(
+            "GitHub did not return the authority branch-deletion setting"
+        )
+    if before:
+        updated = client.request(
+            "PATCH",
+            path,
+            payload={"delete_branch_on_merge": False},
+        )
+        if updated.get("delete_branch_on_merge") is not False:
+            raise PermitInputError(
+                "GitHub did not preserve authority heads for fail-closed recovery"
+            )
+    after = client.get(path).get("delete_branch_on_merge")
+    if after is not False:
+        raise PermitInputError(
+            "authority head refs are not preserved for incomplete promotion"
+        )
+    return {
+        "schema": "mindburn.release-authority-repository-settings/v1",
+        "repository": REPOSITORY,
+        "delete_branch_on_merge_before": before,
+        "delete_branch_on_merge_after": after,
     }
 
 
@@ -243,7 +293,9 @@ def prepare(
     observer_token: str,
     approver_token: str,
 ) -> dict[str, Any]:
-    args.candidate_sha = require_sha(args.candidate_sha, label="candidate_sha", length=40)
+    args.candidate_sha = require_sha(
+        args.candidate_sha, label="candidate_sha", length=40
+    )
     args.candidate_ref = validate_ref(args.candidate_ref, label="candidate_ref")
     if args.candidate_pr <= 0:
         raise PermitInputError("candidate_pr must be positive")
@@ -265,6 +317,11 @@ def prepare(
             args,
             attestation_token=observer_token,
         )
+        repository_settings = ensure_recovery_head_ref_policy(merge_client)
+        write_json(
+            args.output_dir / "repository-settings.json",
+            repository_settings,
+        )
         control = verify_control(args, read_client)
         observer_control = verify_control(args, observer_client)
         if control != observer_control:
@@ -272,17 +329,22 @@ def prepare(
         write_json(args.output_dir / "control-plane-before.json", control)
         write_json(args.output_dir / "control-plane-observer.json", observer_control)
         head_ref = args.candidate_ref.removeprefix("refs/heads/")
-        reopen_candidate = merge_client.get(f"/repos/{REPOSITORY}/pulls/{args.candidate_pr}")
+        reopen_candidate = merge_client.get(
+            f"/repos/{REPOSITORY}/pulls/{args.candidate_pr}"
+        )
         if (
             nested(reopen_candidate, "base", "sha", label="candidate base SHA")
             != ratification["base_sha"]
             or nested(reopen_candidate, "head", "sha", label="candidate head SHA")
             != args.candidate_sha
-            or nested(reopen_candidate, "head", "ref", label="candidate head ref") != head_ref
+            or nested(reopen_candidate, "head", "ref", label="candidate head ref")
+            != head_ref
             or reopen_candidate.get("state") != "open"
             or reopen_candidate.get("draft") is True
         ):
-            raise PermitInputError("candidate pull request drifted from the ratification")
+            raise PermitInputError(
+                "candidate pull request drifted from the ratification"
+            )
 
         live_stable = get_ruleset(ruleset_client, STABLE_RULESET_ID)
         live_candidate = get_ruleset(ruleset_client, CANDIDATE_RULESET_ID)
@@ -320,7 +382,9 @@ def prepare(
             enforced = True
         write_json(args.output_dir / "ruleset-stage.json", stage_receipt)
 
-        trigger = trigger_suite(control["contract"], merge_client, workflow_sha=args.candidate_sha)
+        trigger = trigger_suite(
+            control["contract"], merge_client, workflow_sha=args.candidate_sha
+        )
         trigger_path = args.output_dir / "suite-trigger.json"
         write_json(trigger_path, trigger)
         promoter_suite = wait_for_suite(
@@ -366,7 +430,9 @@ def prepare(
             enforced = True
         write_json(args.output_dir / "ruleset-enforce.json", enforce_receipt)
 
-        liveness_started = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(seconds=2)
+        liveness_started = datetime.now(timezone.utc).replace(
+            microsecond=0
+        ) - timedelta(seconds=2)
         reopen_pull_request(
             merge_client,
             repository=REPOSITORY,
@@ -444,9 +510,14 @@ def prepare(
             "merge_tree_sha": liveness["merge_tree_sha"],
             "evidence_sha256": {
                 "authority_suite": sha256_file(promoter_path),
-                "control_plane": sha256_file(args.output_dir / "control-plane-before.json"),
+                "control_plane": sha256_file(
+                    args.output_dir / "control-plane-before.json"
+                ),
                 "control_plane_observer": sha256_file(
                     args.output_dir / "control-plane-observer.json",
+                ),
+                "repository_settings": sha256_file(
+                    args.output_dir / "repository-settings.json",
                 ),
                 "machine_approval": sha256_file(approval_path),
                 "machine_gates": sha256_file(gate_path),
@@ -505,9 +576,18 @@ def validate_ready(args: argparse.Namespace) -> dict[str, Any]:
     )
     if ready["schema"] != READY_SCHEMA or ready["repository"] != REPOSITORY:
         raise PermitInputError("unsupported bootstrap-ready receipt")
-    for field in ("base_sha", "candidate_sha", "candidate_tree_sha", "merge_sha", "merge_tree_sha"):
+    for field in (
+        "base_sha",
+        "candidate_sha",
+        "candidate_tree_sha",
+        "merge_sha",
+        "merge_tree_sha",
+    ):
         require_sha(ready[field], label=f"bootstrap-ready {field}", length=40)
-    if ready["candidate_sha"] != args.candidate_sha or ready["pull_request"] != args.candidate_pr:
+    if (
+        ready["candidate_sha"] != args.candidate_sha
+        or ready["pull_request"] != args.candidate_pr
+    ):
         raise PermitInputError("bootstrap-ready receipt names the wrong candidate")
     return ready
 
@@ -528,7 +608,9 @@ def confirmed_or_atomic_merge(
     if main_sha == ready["base_sha"]:
         return atomic_merge(merge_args, client)
     if main_sha != ready["merge_sha"]:
-        raise PermitInputError("authority main is outside the resumable bootstrap states")
+        raise PermitInputError(
+            "authority main is outside the resumable bootstrap states"
+        )
     pull_request = client.get(f"/repos/{REPOSITORY}/pulls/{ready['pull_request']}")
     validate_pull_request(
         pull_request,
@@ -567,7 +649,9 @@ def finalize(
     observer_token: str,
     approver_token: str,
 ) -> dict[str, Any]:
-    args.candidate_sha = require_sha(args.candidate_sha, label="candidate_sha", length=40)
+    args.candidate_sha = require_sha(
+        args.candidate_sha, label="candidate_sha", length=40
+    )
     args.candidate_ref = validate_ref(args.candidate_ref, label="candidate_ref")
     ready = validate_ready(args)
     if ready["candidate_ref"] != args.candidate_ref:
@@ -583,7 +667,9 @@ def finalize(
         attestation_token=observer_token,
     )
     if promotion["candidate_tree_sha"] != ready["candidate_tree_sha"]:
-        raise PermitInputError("ratification tree does not match bootstrap-ready receipt")
+        raise PermitInputError(
+            "ratification tree does not match bootstrap-ready receipt"
+        )
     verify_control(args, read_client)
 
     liveness_dir = args.ready.parent / "authority-liveness"
@@ -594,6 +680,7 @@ def finalize(
         "authority_suite": args.ready.parent / "authority-suite.json",
         "control_plane": args.ready.parent / "control-plane-before.json",
         "control_plane_observer": args.ready.parent / "control-plane-observer.json",
+        "repository_settings": args.ready.parent / "repository-settings.json",
         "machine_approval": args.ready.parent / "machine-approval.json",
         "machine_gates": args.ready.parent / "machine-gates.json",
         "liveness_bundle": liveness_bundle_path,
@@ -604,7 +691,9 @@ def finalize(
         "ratification_permit": args.permit,
         "suite_trigger": args.ready.parent / "suite-trigger.json",
     }
-    if {name: sha256_file(path) for name, path in paths.items()} != ready["evidence_sha256"]:
+    if {name: sha256_file(path) for name, path in paths.items()} != ready[
+        "evidence_sha256"
+    ]:
         raise PermitInputError("bootstrap evidence digest mismatch")
 
     liveness_run = read_client.get_json(
@@ -619,7 +708,9 @@ def finalize(
         pull_request=args.candidate_pr,
         head_sha=args.candidate_sha,
         expected_workflow_sha=args.candidate_sha,
-        expected_authority=load_json_file(args.candidate_authority, label="candidate authority"),
+        expected_authority=load_json_file(
+            args.candidate_authority, label="candidate authority"
+        ),
         kernel_verifier=args.permit_verifier,
         attestation_token=observer_token,
     )
@@ -683,7 +774,9 @@ def finalize(
         admin_client,
     )
     if canonical_json(gate_receipt) != paths["machine_gates"].read_bytes():
-        raise PermitInputError("machine approval gate state changed after bootstrap prepare")
+        raise PermitInputError(
+            "machine approval gate state changed after bootstrap prepare"
+        )
     merge_receipt = confirmed_or_atomic_merge(ready, merge_client)
     ruleset_receipt = transition(
         transition_args(
@@ -763,11 +856,15 @@ def main(argv: list[str]) -> int:
         if not token:
             raise PermitInputError("GH_TOKEN is required")
         if not observer_token:
-            raise PermitInputError("HELM_AUTHORITY_BOOTSTRAP_OBSERVER_TOKEN is required")
+            raise PermitInputError(
+                "HELM_AUTHORITY_BOOTSTRAP_OBSERVER_TOKEN is required"
+            )
         if not approver_token:
             raise PermitInputError("HELM_AUTHORITY_APPROVER_TOKEN is required")
         if len({token, observer_token, approver_token}) != 3:
-            raise PermitInputError("bootstrap executor, observer, and approver tokens must be distinct")
+            raise PermitInputError(
+                "bootstrap executor, observer, and approver tokens must be distinct"
+            )
         if args.command == "prepare":
             if not 60 <= args.timeout_seconds <= 3600:
                 raise PermitInputError("timeout_seconds must be between 60 and 3600")

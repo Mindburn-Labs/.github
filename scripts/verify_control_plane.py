@@ -54,7 +54,9 @@ def validate_environment(value: Any, *, index: int) -> dict[str, Any]:
     if value["name"] not in ENVIRONMENT_NAMES:
         raise PermitInputError(f"{label} has an unexpected name")
     if value["protection_rule_types"] != ["branch_policy"]:
-        raise PermitInputError(f"{label} must have no reviewers, wait timer, or custom gate")
+        raise PermitInputError(
+            f"{label} must have no reviewers, wait timer, or custom gate"
+        )
     if value["deployment_branch_policy"] != {
         "protected_branches": False,
         "custom_branch_policies": True,
@@ -94,13 +96,31 @@ def validate_contract(
 ) -> dict[str, Any]:
     require_exact_keys(
         contract,
-        required={"schema", "repository", "environments", "adversarial_suite"},
+        required={
+            "schema",
+            "repository",
+            "repository_settings",
+            "environments",
+            "adversarial_suite",
+        },
         label="control contract",
     )
     if contract["schema"] != CONTROL_SCHEMA:
         raise PermitInputError("unsupported control-plane contract schema")
     if contract["repository"] != AUTHORITY_REPOSITORY:
         raise PermitInputError("control contract names the wrong authority repository")
+    settings = contract["repository_settings"]
+    if not isinstance(settings, dict):
+        raise PermitInputError("control repository_settings must be an object")
+    require_exact_keys(
+        settings,
+        required={"delete_branch_on_merge"},
+        label="control repository_settings",
+    )
+    if settings["delete_branch_on_merge"] is not False:
+        raise PermitInputError(
+            "authority head refs must survive incomplete post-merge promotion"
+        )
 
     environments = contract["environments"]
     if not isinstance(environments, list) or len(environments) != 2:
@@ -109,7 +129,9 @@ def validate_contract(
         validate_environment(environment, index=index)
         for index, environment in enumerate(environments)
     ]
-    if {environment["name"] for environment in validated_environments} != ENVIRONMENT_NAMES:
+    if {
+        environment["name"] for environment in validated_environments
+    } != ENVIRONMENT_NAMES:
         raise PermitInputError("control contract environment identities are not exact")
 
     suite = contract["adversarial_suite"]
@@ -124,10 +146,16 @@ def validate_contract(
         raise PermitInputError("control suite names the wrong lab repository")
     cases = suite["cases"]
     if not isinstance(cases, list) or len(cases) != 8:
-        raise PermitInputError("control suite must contain seven attacks and one ALLOW canary")
-    validated_cases = [validate_case(case, index=index) for index, case in enumerate(cases)]
+        raise PermitInputError(
+            "control suite must contain seven attacks and one ALLOW canary"
+        )
+    validated_cases = [
+        validate_case(case, index=index) for index, case in enumerate(cases)
+    ]
     if {case["pull_request"] for case in validated_cases} != set(range(1, 9)):
-        raise PermitInputError("control suite pull requests must be exactly 1 through 8")
+        raise PermitInputError(
+            "control suite pull requests must be exactly 1 through 8"
+        )
     if sum(case["expected"] == "ALLOW" for case in validated_cases) != 1:
         raise PermitInputError("control suite must contain exactly one ALLOW canary")
 
@@ -157,8 +185,25 @@ def validate_contract(
         if case["expected"] != "ALLOW"
     }
     if suite_by_id != expected_by_id:
-        raise PermitInputError("control suite does not exactly cover the adversarial corpus")
+        raise PermitInputError(
+            "control suite does not exactly cover the adversarial corpus"
+        )
     return contract
+
+
+def verify_live_repository_settings(
+    contract: dict[str, Any],
+    client: GitHubReadClient,
+) -> dict[str, Any]:
+    repository = client.get_json(f"/repos/{AUTHORITY_REPOSITORY}")
+    actual = {
+        "delete_branch_on_merge": repository.get("delete_branch_on_merge"),
+    }
+    if actual != contract["repository_settings"]:
+        raise PermitInputError(
+            "authority repository settings drifted from the recovery contract"
+        )
+    return actual
 
 
 def verify_live_environments(
@@ -178,7 +223,10 @@ def verify_live_environments(
         )
         if rule_types != expected["protection_rule_types"]:
             raise PermitInputError(f"environment {name} protection rules drifted")
-        if environment.get("deployment_branch_policy") != expected["deployment_branch_policy"]:
+        if (
+            environment.get("deployment_branch_policy")
+            != expected["deployment_branch_policy"]
+        ):
             raise PermitInputError(f"environment {name} deployment policy drifted")
         policies = client.get_json(
             f"/repos/{AUTHORITY_REPOSITORY}/environments/{name}/deployment-branch-policies",
@@ -223,20 +271,21 @@ def main(argv: list[str]) -> int:
             load_json(args.adversarial_corpus, label="adversarial corpus"),
         )
         environments = []
+        repository_settings = {}
         if not args.offline:
             import os
 
-            environments = verify_live_environments(
-                contract,
-                GitHubReadClient(
-                    os.environ.get("GH_TOKEN", ""),
-                    api_url=os.environ.get("GITHUB_API_URL", "https://api.github.com"),
-                ),
+            client = GitHubReadClient(
+                os.environ.get("GH_TOKEN", ""),
+                api_url=os.environ.get("GITHUB_API_URL", "https://api.github.com"),
             )
+            repository_settings = verify_live_repository_settings(contract, client)
+            environments = verify_live_environments(contract, client)
         receipt = {
             "schema": "mindburn.release-control-plane-verification/v1",
             "contract_sha256": hashlib.sha256(args.contract.read_bytes()).hexdigest(),
             "live": not args.offline,
+            "repository_settings": repository_settings,
             "environments": environments,
             "suite_cases": len(contract["adversarial_suite"]["cases"]),
         }

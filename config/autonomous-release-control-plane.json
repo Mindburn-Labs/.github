@@ -87,5 +87,8 @@
     }
   ],
   "repository": "Mindburn-Labs/.github",
+  "repository_settings": {
+    "delete_branch_on_merge": false
+  },
   "schema": "mindburn.release-control-plane/v1"
 }

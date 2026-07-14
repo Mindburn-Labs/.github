@@ -43,7 +43,9 @@ class TriggerClient:
     def __init__(self, contract: dict[str, object]) -> None:
         repository = contract["adversarial_suite"]["repository"]
         self.pulls = {
-            case["pull_request"]: pull_request(repository, case["pull_request"], case["head_sha"])
+            case["pull_request"]: pull_request(
+                repository, case["pull_request"], case["head_sha"]
+            )
             for case in contract["adversarial_suite"]["cases"]
         }
         self.patches = 0
@@ -82,7 +84,37 @@ class ResumeMergeClient:
         raise AssertionError(f"unexpected GET {path}")
 
 
+class RepositorySettingsClient:
+    def __init__(self, delete_branch_on_merge: bool) -> None:
+        self.delete_branch_on_merge = delete_branch_on_merge
+        self.patches = 0
+
+    def get(self, path: str):
+        if path != f"/repos/{MODULE.REPOSITORY}":
+            raise AssertionError(path)
+        return {"delete_branch_on_merge": self.delete_branch_on_merge}
+
+    def request(self, method: str, path: str, *, payload=None):
+        if (
+            method != "PATCH"
+            or path != f"/repos/{MODULE.REPOSITORY}"
+            or payload != {"delete_branch_on_merge": False}
+        ):
+            raise AssertionError((method, path, payload))
+        self.delete_branch_on_merge = False
+        self.patches += 1
+        return {"delete_branch_on_merge": False}
+
+
 class BootstrapAuthorityTests(unittest.TestCase):
+    def test_bootstrap_preserves_candidate_head_for_fail_closed_recovery(self) -> None:
+        for initial, expected_patches in ((True, 1), (False, 0)):
+            with self.subTest(initial=initial):
+                client = RepositorySettingsClient(initial)
+                receipt = MODULE.ensure_recovery_head_ref_policy(client)
+                self.assertFalse(receipt["delete_branch_on_merge_after"])
+                self.assertEqual(client.patches, expected_patches)
+
     def test_suite_trigger_reopens_every_exact_permanent_case(self) -> None:
         contract = MODULE.validate_contract(
             MODULE.load_json(
@@ -98,7 +130,9 @@ class BootstrapAuthorityTests(unittest.TestCase):
         trigger = MODULE.trigger_suite(contract, client, workflow_sha=CANDIDATE_SHA)
         self.assertEqual(trigger["cases"], contract["adversarial_suite"]["cases"])
         self.assertEqual(client.patches, 16)
-        self.assertTrue(all(value["state"] == "open" for value in client.pulls.values()))
+        self.assertTrue(
+            all(value["state"] == "open" for value in client.pulls.values())
+        )
 
     def test_suite_trigger_rejects_head_drift(self) -> None:
         contract = MODULE.validate_contract(
