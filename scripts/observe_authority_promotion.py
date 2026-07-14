@@ -32,7 +32,7 @@ from wait_for_authority_canary import (
     WORKFLOW_PATH,
     GitHubReadClient,
     artifact_for_run,
-    extract_permit,
+    extract_attested_permit,
     verify_candidate_permit,
 )
 
@@ -232,12 +232,21 @@ def observe(
     ratification_artifact = read_client.get_bytes(
         f"/repos/{AUTHORITY_REPOSITORY}/actions/artifacts/{ratification_artifact_id}/zip",
     )
-    artifact_ratification = extract_permit(ratification_artifact)
+    artifact_ratification, artifact_ratification_bundle = extract_attested_permit(
+        ratification_artifact,
+    )
     supplied_ratification = args.ratification_permit.read_bytes()
-    if artifact_ratification != supplied_ratification:
-        raise PermitInputError("supplied ratification permit is not the run artifact")
+    supplied_ratification_bundle = args.ratification_bundle.read_bytes()
+    if (
+        artifact_ratification != supplied_ratification
+        or artifact_ratification_bundle != supplied_ratification_bundle
+    ):
+        raise PermitInputError(
+            "supplied ratification permit or bundle is not the run artifact",
+        )
     ratification_permit = verify_candidate_permit(
         args.ratification_permit,
+        args.ratification_bundle,
         run=ratification_run,
         repository=AUTHORITY_REPOSITORY,
         pull_request=execution["candidate_pull_request"],
@@ -291,12 +300,14 @@ def observe(
     artifact = read_client.get_bytes(
         f"/repos/{CANARY_REPOSITORY}/actions/artifacts/{artifact_id}/zip",
     )
-    artifact_permit = extract_permit(artifact)
+    artifact_permit, artifact_bundle = extract_attested_permit(artifact)
     supplied_permit = args.canary_permit.read_bytes()
-    if artifact_permit != supplied_permit:
-        raise PermitInputError("supplied canary permit is not the run artifact")
+    supplied_bundle = args.canary_bundle.read_bytes()
+    if artifact_permit != supplied_permit or artifact_bundle != supplied_bundle:
+        raise PermitInputError("supplied canary permit or bundle is not the run artifact")
     permit = verify_candidate_permit(
         args.canary_permit,
+        args.canary_bundle,
         run=run,
         repository=CANARY_REPOSITORY,
         pull_request=CANARY_PULL_REQUEST,
@@ -357,7 +368,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--parent-authority", type=Path, required=True)
     parser.add_argument("--candidate-authority", type=Path, required=True)
     parser.add_argument("--ratification-permit", type=Path, required=True)
+    parser.add_argument("--ratification-bundle", type=Path, required=True)
     parser.add_argument("--canary-permit", type=Path, required=True)
+    parser.add_argument("--canary-bundle", type=Path, required=True)
     parser.add_argument("--canary-receipt", type=Path, required=True)
     parser.add_argument("--parent-kernel-verifier", type=Path, required=True)
     parser.add_argument("--promotion-run-id", type=int, required=True)

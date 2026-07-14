@@ -114,6 +114,7 @@ jobs:
           set -euo pipefail
           merge_sha="$(jq -er '.merge_sha' promotion/release-permit.json)"
           gh attestation verify promotion/release-permit.json \
+            --bundle promotion/release-permit.attestation.json \
             --repo Mindburn-Labs/.github \
             --signer-workflow Mindburn-Labs/.github/.github/workflows/ci.yml \
             --signer-digest "$GITHUB_SHA" \
@@ -295,6 +296,7 @@ jobs:
             --expected-authority promotion/candidate-authority.json \
             --kernel-verifier "$GITHUB_WORKSPACE/parent-permit-verify" \
             --output promotion/canary-permit.json \
+            --bundle promotion/canary-permit.attestation.json \
             --receipt promotion/canary-receipt.json
 
       - name: Merge exact ratified authority tree through normal branch policy
@@ -463,23 +465,41 @@ jobs:
             --parent-authority broker/config/autonomous-release-authority.json \
             --candidate-authority promotion/candidate-authority.json \
             --ratification-permit promotion/release-permit.json \
+            --ratification-bundle promotion/release-permit.attestation.json \
             --canary-permit promotion/canary-permit.json \
+            --canary-bundle promotion/canary-permit.attestation.json \
             --canary-receipt promotion/canary-receipt.json \
             --parent-kernel-verifier "$GITHUB_WORKSPACE/parent-permit-verify" \
             --promotion-run-id "$GITHUB_RUN_ID" \
             --promotion-run-attempt "$GITHUB_RUN_ATTEMPT" \
             --output promotion/pre-activation-observer-receipt.json
 
-      - name: Attest independent pre-activation receipt
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763
+      - name: Set up pinned attestation runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          subject-path: promotion/pre-activation-observer-receipt.json
+          node-version: "24.15.0"
+          cache: npm
+          cache-dependency-path: broker/tools/offline-attest/package-lock.json
+
+      - name: Install integrity-locked offline attestation signer
+        run: npm ci --ignore-scripts --no-audit --no-fund --prefix broker/tools/offline-attest
+
+      - name: Sign independent pre-activation receipt
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node broker/tools/offline-attest/attest.mjs \
+            promotion/pre-activation-observer-receipt.json \
+            promotion/pre-activation-observer-receipt.attestation.json
 
       - name: Upload independent pre-activation receipt
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: helm-authority-pre-activation-observer
-          path: promotion/pre-activation-observer-receipt.json
+          path: |
+            promotion/pre-activation-observer-receipt.json
+            promotion/pre-activation-observer-receipt.attestation.json
           if-no-files-found: error
           retention-days: 90
 
@@ -518,6 +538,7 @@ jobs:
           set -euo pipefail
           receipt=observation/pre-activation-observer-receipt.json
           gh attestation verify "$receipt" \
+            --bundle observation/pre-activation-observer-receipt.attestation.json \
             --repo Mindburn-Labs/.github \
             --signer-workflow Mindburn-Labs/.github/.github/workflows/promote-authority.yml \
             --signer-digest "$PARENT_SHA" \
@@ -646,23 +667,41 @@ jobs:
             --parent-authority broker/config/autonomous-release-authority.json \
             --candidate-authority promotion/candidate-authority.json \
             --ratification-permit promotion/release-permit.json \
+            --ratification-bundle promotion/release-permit.attestation.json \
             --canary-permit promotion/canary-permit.json \
+            --canary-bundle promotion/canary-permit.attestation.json \
             --canary-receipt promotion/canary-receipt.json \
             --parent-kernel-verifier "$GITHUB_WORKSPACE/parent-permit-verify" \
             --promotion-run-id "$GITHUB_RUN_ID" \
             --promotion-run-attempt "$GITHUB_RUN_ATTEMPT" \
             --output promotion/final-observer-receipt.json
 
-      - name: Attest independent final promotion receipt
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763
+      - name: Set up pinned attestation runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          subject-path: promotion/final-observer-receipt.json
+          node-version: "24.15.0"
+          cache: npm
+          cache-dependency-path: broker/tools/offline-attest/package-lock.json
+
+      - name: Install integrity-locked offline attestation signer
+        run: npm ci --ignore-scripts --no-audit --no-fund --prefix broker/tools/offline-attest
+
+      - name: Sign independent final promotion receipt
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node broker/tools/offline-attest/attest.mjs \
+            promotion/final-observer-receipt.json \
+            promotion/final-observer-receipt.attestation.json
 
       - name: Upload independent final promotion receipt
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: helm-authority-promotion-receipt
-          path: promotion/final-observer-receipt.json
+          path: |
+            promotion/final-observer-receipt.json
+            promotion/final-observer-receipt.attestation.json
           if-no-files-found: error
           retention-days: 90
 

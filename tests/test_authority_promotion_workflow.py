@@ -38,6 +38,8 @@ class AuthorityPromotionWorkflowTests(unittest.TestCase):
             encoding="utf-8",
         )
         self.assertIn("--signer-digest \"$GITHUB_SHA\"", workflow)
+        self.assertGreaterEqual(workflow.count("--bundle "), 2)
+        self.assertGreaterEqual(workflow.count("offline-attest/attest.mjs"), 2)
         self.assertIn("verify_authority_promotion.py", workflow)
         self.assertIn("wait_for_authority_canary.py", workflow)
         self.assertIn("pull-request 8", workflow)
@@ -51,7 +53,7 @@ class AuthorityPromotionWorkflowTests(unittest.TestCase):
         self.assertIn("test \"$merge_tree_sha\"", workflow)
         self.assertIn("Build non-authoritative execution bundle", workflow)
         self.assertNotIn("Attest authority promotion receipt", workflow)
-        self.assertIn("Attest independent final promotion receipt", workflow)
+        self.assertIn("Sign independent final promotion receipt", workflow)
         self.assertIn("needs.observe_final.result != 'success'", workflow)
         self.assertNotIn("path: candidate-kernel", workflow)
         self.assertNotIn("candidate-permit-verify", workflow)

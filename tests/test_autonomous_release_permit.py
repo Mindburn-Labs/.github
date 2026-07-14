@@ -93,7 +93,7 @@ def prepare_args(
         anthropic_model="claude-fable-5",
         openai_model="gpt-5.6-sol",
         authority_manifest=ROOT / "config" / "autonomous-release-authority.json",
-        kernel_sha="1ee8227af57b0c174d9659c14fcea57f7ea66860",
+        kernel_sha="f267bf75266264a35e2ddd645171deb125a43efd",
         gate_profiles=ROOT / "config" / "autonomous-release-gates.json",
         adversarial_corpus=ROOT / "tests" / "fixtures" / "autonomous-release-adversarial.json",
         target_dir=repo,
@@ -407,6 +407,12 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         helper = (ROOT / "scripts" / "autonomous_release_permit.py").read_text(
             encoding="utf-8",
         )
+        signer = (ROOT / "tools" / "offline-attest" / "attest.mjs").read_text(
+            encoding="utf-8",
+        )
+        signer_lock = (ROOT / "tools" / "offline-attest" / "package-lock.json").read_text(
+            encoding="utf-8",
+        )
         self.assertIn("copilot-requests: write", workflow)
         self.assertNotIn("pull_request_target", workflow)
         self.assertNotIn("cancel-in-progress", workflow)
@@ -441,17 +447,19 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertEqual(workflow.count("= \"$EXPECTED_WORKFLOW_SHA\""), 2)
         self.assertEqual(workflow.count("= \"$GITHUB_RUN_ATTEMPT\""), 2)
         self.assertEqual(
-            workflow.count("ref: 1ee8227af57b0c174d9659c14fcea57f7ea66860"),
+            workflow.count("ref: f267bf75266264a35e2ddd645171deb125a43efd"),
             2,
         )
         self.assertIn("attestations: write", workflow)
         self.assertIn("id-token: write", workflow)
-        self.assertIn(
-            "uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763",
-            workflow,
-        )
-        self.assertIn('INPUT_PRIVATE-SIGNING: "true"', workflow)
-        self.assertIn("subject-path: release-permit.json", workflow)
+        self.assertNotIn("uses: actions/attest@", workflow)
+        self.assertIn("npm ci --ignore-scripts", workflow)
+        self.assertIn("policy/tools/offline-attest/attest.mjs", workflow)
+        self.assertIn("release-permit.attestation.json", workflow)
+        self.assertIn("new DSSEBundleBuilder", signer)
+        self.assertIn('new CIContextProvider("sigstore")', signer)
+        self.assertIn('"@sigstore/sign": "5.0.0"', signer_lock)
+        self.assertNotIn("@actions/attest", signer_lock)
         self.assertIn("config/autonomous-release-authority.json", workflow)
         self.assertIn("tests/fixtures/autonomous-release-adversarial.json", workflow)
         self.assertIn("path: verifier-source", workflow)

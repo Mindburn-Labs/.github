@@ -25,6 +25,7 @@ from verify_authority_promotion import validate_permit, verify_permit_with_kerne
 API_VERSION = "2026-03-10"
 MAX_API_BYTES = 4 << 20
 MAX_PERMIT_BYTES = 2 << 20
+MAX_BUNDLE_BYTES = 4 << 20
 WORKFLOW_NAME = "HELM Autonomous Release Permit"
 WORKFLOW_PATH = ".github/workflows/ci.yml"
 SIGNER_WORKFLOW = "Mindburn-Labs/.github/.github/workflows/ci.yml"
@@ -79,21 +80,33 @@ def parse_time(value: str, *, label: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
-def extract_permit(archive: bytes) -> bytes:
+def extract_attested_permit(archive: bytes) -> tuple[bytes, bytes]:
     try:
         with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
             entries = bundle.infolist()
-            if len(entries) != 1 or entries[0].filename != "release-permit.json":
-                raise PermitInputError("canary artifact must contain exactly release-permit.json")
-            entry = entries[0]
-            if entry.is_dir() or entry.file_size > MAX_PERMIT_BYTES:
+            expected = {
+                "release-permit.json": MAX_PERMIT_BYTES,
+                "release-permit.attestation.json": MAX_BUNDLE_BYTES,
+            }
+            if len(entries) != len(expected) or {entry.filename for entry in entries} != set(expected):
+                raise PermitInputError(
+                    "canary artifact must contain exactly the permit and attestation bundle",
+                )
+            by_name = {entry.filename: entry for entry in entries}
+            if any(
+                entry.is_dir() or entry.file_size <= 0 or entry.file_size > expected[name]
+                for name, entry in by_name.items()
+            ):
                 raise PermitInputError("canary permit exceeds the size limit")
-            content = bundle.read(entry)
+            permit = bundle.read(by_name["release-permit.json"])
+            attestation = bundle.read(by_name["release-permit.attestation.json"])
     except zipfile.BadZipFile as exc:
         raise PermitInputError("canary artifact is not a valid ZIP archive") from exc
-    if len(content) > MAX_PERMIT_BYTES:
+    if not permit or len(permit) > MAX_PERMIT_BYTES:
         raise PermitInputError("canary permit exceeds the size limit")
-    return content
+    if not attestation or len(attestation) > MAX_BUNDLE_BYTES:
+        raise PermitInputError("canary attestation bundle exceeds the size limit")
+    return permit, attestation
 
 
 def load_json_file(path: Path, *, label: str) -> dict[str, Any]:
@@ -108,6 +121,7 @@ def load_json_file(path: Path, *, label: str) -> dict[str, Any]:
 
 def verify_attestation(
     permit_path: Path,
+    bundle_path: Path,
     *,
     repository: str,
     workflow_sha: str,
@@ -119,6 +133,8 @@ def verify_attestation(
             "attestation",
             "verify",
             str(permit_path),
+            "--bundle",
+            str(bundle_path),
             "--repo",
             repository,
             "--signer-workflow",
@@ -141,6 +157,7 @@ def verify_attestation(
 
 def verify_candidate_permit(
     permit_path: Path,
+    bundle_path: Path,
     *,
     run: dict[str, Any],
     repository: str,
@@ -168,6 +185,7 @@ def verify_candidate_permit(
         raise PermitInputError("canary permit authority does not match the candidate manifest")
     verify_attestation(
         permit_path,
+        bundle_path,
         repository=repository,
         workflow_sha=expected_workflow_sha,
         source_sha=permit["merge_sha"],
@@ -232,11 +250,15 @@ def wait_for_canary(args: argparse.Namespace, client: GitHubReadClient) -> dict[
                 f"/repos/{args.repository}/actions/artifacts/{artifact_id}/zip",
                 accept="application/vnd.github+json",
             )
+            permit_bytes, bundle_bytes = extract_attested_permit(archive)
             args.output.parent.mkdir(parents=True, exist_ok=True)
-            args.output.write_bytes(extract_permit(archive))
+            args.bundle.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_bytes(permit_bytes)
+            args.bundle.write_bytes(bundle_bytes)
             try:
                 permit = verify_candidate_permit(
                     args.output,
+                    args.bundle,
                     run=run,
                     repository=args.repository,
                     pull_request=args.pull_request,
@@ -247,6 +269,7 @@ def wait_for_canary(args: argparse.Namespace, client: GitHubReadClient) -> dict[
                 )
             except PermitInputError:
                 args.output.unlink(missing_ok=True)
+                args.bundle.unlink(missing_ok=True)
                 rejected_runs.add(run_id)
                 continue
             return {
@@ -275,6 +298,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-authority", type=Path, required=True)
     parser.add_argument("--kernel-verifier", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--bundle", type=Path, required=True)
     parser.add_argument("--receipt", type=Path, required=True)
     parser.add_argument("--timeout-seconds", type=int, default=1200)
     parser.add_argument("--poll-seconds", type=int, default=15)
@@ -286,6 +310,8 @@ def main(argv: list[str]) -> int:
         args = build_parser().parse_args(argv)
         if args.pull_request <= 0:
             raise PermitInputError("pull_request must be positive")
+        if args.output.resolve() == args.bundle.resolve():
+            raise PermitInputError("permit output and attestation bundle must differ")
         if not 60 <= args.timeout_seconds <= 1800:
             raise PermitInputError("timeout_seconds must be between 60 and 1800")
         if not 5 <= args.poll_seconds <= 60:
