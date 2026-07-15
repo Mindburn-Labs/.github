@@ -1,11 +1,16 @@
 name: Promote HELM Release Authority
 
 on:
-  workflow_run:
-    workflows:
-      - HELM Autonomous Release Permit
-    types:
-      - completed
+  workflow_dispatch:
+    inputs:
+      permit_run_attempt:
+        description: Exact attempt of the parent-authority permit run
+        required: true
+        type: string
+      permit_run_id:
+        description: Exact parent-authority permit run to promote
+        required: true
+        type: string
 
 permissions: {}
 
@@ -16,15 +21,11 @@ concurrency:
 jobs:
   verify-candidate:
     name: Verify previous-generation ratification
-    if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.repository.full_name == 'Mindburn-Labs/.github' &&
-      github.event.workflow_run.head_repository.full_name == 'Mindburn-Labs/.github'
     permissions:
       actions: read
       attestations: read
       contents: read
+      pull-requests: read
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
@@ -35,6 +36,9 @@ jobs:
       candidate_ref: ${{ steps.metadata.outputs.candidate_ref }}
       candidate_sha: ${{ steps.metadata.outputs.candidate_sha }}
       candidate_tree_sha: ${{ steps.candidate-tree.outputs.candidate_tree_sha }}
+      control_sha: ${{ steps.metadata.outputs.control_sha }}
+      current_main_sha: ${{ steps.metadata.outputs.current_main_sha }}
+      merge_sha: ${{ steps.metadata.outputs.merge_sha }}
       parent_kernel_sha: ${{ steps.metadata.outputs.kernel_sha }}
       parent_generation: ${{ steps.metadata.outputs.parent_generation }}
       parent_sha: ${{ steps.metadata.outputs.parent_sha }}
@@ -45,7 +49,7 @@ jobs:
           name: helm-autonomous-release-permit
           path: promotion
           github-token: ${{ github.token }}
-          run-id: ${{ github.event.workflow_run.id }}
+          run-id: ${{ inputs.permit_run_id }}
 
       - name: Download triggering trusted permit context
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
@@ -53,27 +57,67 @@ jobs:
           name: release-permit-input
           path: promotion/ratification-input
           github-token: ${{ github.token }}
-          run-id: ${{ github.event.workflow_run.id }}
+          run-id: ${{ inputs.permit_run_id }}
+
+      - name: Download triggering raw review evidence
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: release-review-*
+          path: promotion/ratification-reviews
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.permit_run_id }}
 
       - name: Bind trigger, permit, pull request, and current base
         id: metadata
         env:
           GH_TOKEN: ${{ github.token }}
-          TRIGGER_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-          TRIGGER_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
-          TRIGGER_RUN_ID: ${{ github.event.workflow_run.id }}
+          TRIGGER_RUN_ATTEMPT: ${{ inputs.permit_run_attempt }}
+          TRIGGER_RUN_ID: ${{ inputs.permit_run_id }}
         run: |
           set -euo pipefail
+          control_ref=refs/heads/authority/control-v1
+          test "$GITHUB_REF" = "$control_ref"
+          test "$GITHUB_SHA" = "$GITHUB_WORKFLOW_SHA"
+          test "$GITHUB_WORKFLOW_REF" = "Mindburn-Labs/.github/.github/workflows/promote-authority.yml@$control_ref"
+          test "$(gh api repos/Mindburn-Labs/.github/git/ref/heads/authority/control-v1 --jq '.object.sha')" = "$GITHUB_WORKFLOW_SHA"
+          [[ "$TRIGGER_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$TRIGGER_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          trigger_completed=0
+          for _ in $(seq 1 60); do
+            gh api "repos/Mindburn-Labs/.github/actions/runs/$TRIGGER_RUN_ID" \
+              > promotion/trigger-run.json
+            test "$(jq -er '.id | tostring' promotion/trigger-run.json)" = "$TRIGGER_RUN_ID"
+            test "$(jq -er '.run_attempt | tostring' promotion/trigger-run.json)" = "$TRIGGER_RUN_ATTEMPT"
+            if [[ "$(jq -er '.status' promotion/trigger-run.json)" = "completed" ]]; then
+              trigger_completed=1
+              break
+            fi
+            sleep 2
+          done
+          test "$trigger_completed" = "1"
+          test "$(jq -er '.id | tostring' promotion/trigger-run.json)" = "$TRIGGER_RUN_ID"
+          test "$(jq -er '.run_attempt | tostring' promotion/trigger-run.json)" = "$TRIGGER_RUN_ATTEMPT"
+          test "$(jq -er '.status' promotion/trigger-run.json)" = "completed"
+          test "$(jq -er '.conclusion' promotion/trigger-run.json)" = "success"
+          test "$(jq -er '.event' promotion/trigger-run.json)" = "pull_request"
+          test "$(jq -er '.name' promotion/trigger-run.json)" = "HELM Autonomous Release Permit"
+          test "$(jq -er '.path' promotion/trigger-run.json)" = ".github/workflows/ci.yml"
+          test "$(jq -er '.repository.full_name' promotion/trigger-run.json)" = "Mindburn-Labs/.github"
+          test "$(jq -er '.head_repository.full_name' promotion/trigger-run.json)" = "Mindburn-Labs/.github"
+          test "$(jq -er '.pull_requests | length' promotion/trigger-run.json)" = "1"
+          trigger_head_sha="$(jq -er '.head_sha' promotion/trigger-run.json)"
+          [[ "$trigger_head_sha" =~ ^[0-9a-f]{40}$ ]]
           permit=promotion/release-permit.json
           test -f "$permit"
           parent_sha="$(jq -er '.workflow_sha' "$permit")"
           parent_generation="$(jq -er '.authority.generation' "$permit")"
           [[ "$parent_generation" =~ ^[1-9][0-9]*$ ]]
           # Generation 1 is admitted exactly once by bootstrap_authority.py.
-          # This on-main workflow is authoritative only from generation 2 onward.
+          # The immutable controller admits only generation 2 and later parents.
           test "$parent_generation" -ge 2
           test "$(jq -er '.repository' "$permit")" = "Mindburn-Labs/.github"
-          test "$(jq -er '.head_sha' "$permit")" = "$TRIGGER_HEAD_SHA"
+          test "$(jq -er '.head_sha' "$permit")" = "$trigger_head_sha"
           test "$(jq -er '.run_id | tostring' "$permit")" = "$TRIGGER_RUN_ID"
           test "$(jq -er '.run_attempt | tostring' "$permit")" = "$TRIGGER_RUN_ATTEMPT"
           candidate_sha="$(jq -er '.head_sha' "$permit")"
@@ -89,8 +133,8 @@ jobs:
           [[ "$kernel_sha" =~ ^[0-9a-f]{40}$ ]]
           [[ "$candidate_pr" =~ ^[1-9][0-9]*$ ]]
           current_main="$(gh api repos/Mindburn-Labs/.github/git/ref/heads/main --jq '.object.sha')"
-          test "$current_main" = "$GITHUB_SHA"
           gh api "repos/Mindburn-Labs/.github/pulls/$candidate_pr" > promotion/pull-request.json
+          test "$(jq -er '.pull_requests[0].number' promotion/trigger-run.json)" = "$candidate_pr"
           test "$(jq -er '.draft' promotion/pull-request.json)" = "false"
           test "$(jq -er '.base.ref' promotion/pull-request.json)" = "main"
           test "$(jq -er '.base.sha' promotion/pull-request.json)" = "$base_sha"
@@ -126,7 +170,10 @@ jobs:
             echo "candidate_pr=$candidate_pr"
             echo "candidate_ref=$candidate_ref"
             echo "candidate_sha=$candidate_sha"
+            echo "control_sha=$GITHUB_WORKFLOW_SHA"
+            echo "current_main_sha=$current_main"
             echo "kernel_sha=$kernel_sha"
+            echo "merge_sha=$merge_sha"
             echo "parent_generation=$parent_generation"
             echo "parent_sha=$parent_sha"
           } >> "$GITHUB_OUTPUT"
@@ -172,6 +219,7 @@ jobs:
           python3 broker/scripts/verify_control_plane.py \
             --contract broker/config/autonomous-release-control-plane.json \
             --adversarial-corpus broker/tests/fixtures/autonomous-release-adversarial.json \
+            --effective-only \
             --output control-plane-parent.json
 
       - name: Checkout exact candidate authority tree
@@ -205,14 +253,16 @@ jobs:
           CANDIDATE_SHA: ${{ steps.metadata.outputs.candidate_sha }}
           PARENT_GENERATION: ${{ steps.metadata.outputs.parent_generation }}
           PARENT_SHA: ${{ steps.metadata.outputs.parent_sha }}
-          TRIGGER_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
-          TRIGGER_RUN_ID: ${{ github.event.workflow_run.id }}
+          TRIGGER_RUN_ATTEMPT: ${{ inputs.permit_run_attempt }}
+          TRIGGER_RUN_ID: ${{ inputs.permit_run_id }}
         run: |
           set -euo pipefail
           python3 broker/scripts/verify_authority_promotion.py \
             --permit promotion/release-permit.json \
             --permit-verifier "$GITHUB_WORKSPACE/release-permit-verify" \
             --trusted-context promotion/ratification-input/context.json \
+            --review-evidence-dir promotion/ratification-reviews \
+            --recomputed-permit promotion/parent-recomputed-permit.json \
             --candidate-repository candidate \
             --candidate-sha "$CANDIDATE_SHA" \
             --candidate-pr "$CANDIDATE_PR" \
@@ -242,6 +292,9 @@ jobs:
             promotion/release-permit.json
             promotion/release-permit.attestation.json
             promotion/ratification-input/context.json
+            promotion/ratification-reviews
+            promotion/parent-rebuilt-reviews
+            promotion/parent-recomputed-permit.json
             promotion/authority-promotion.json
             promotion/candidate-authority.json
             promotion/parent-authority.json
@@ -249,15 +302,105 @@ jobs:
             promotion/pull-request.json
             control-plane-parent.json
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 90
 
-  stage:
-    name: Stage and canary candidate authority
+  reconcile:
+    name: Reconcile promotion state before credentialed work
     needs: verify-candidate
     environment: authority-promotion
     permissions:
-      actions: read
       contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      rulesets_active: ${{ steps.reconcile.outputs.rulesets_active }}
+      state: ${{ steps.reconcile.outputs.state }}
+    steps:
+      - name: Checkout immutable parent authority broker
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ needs.verify-candidate.outputs.parent_sha }}
+          persist-credentials: false
+          path: broker
+
+      - name: Recheck live reconciliation control plane before credential use
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/verify_control_plane.py \
+            --contract broker/config/autonomous-release-control-plane.json \
+            --adversarial-corpus broker/tests/fixtures/autonomous-release-adversarial.json \
+            --effective-only \
+            --output control-plane-reconcile.json
+
+      - name: Mint short-lived ruleset-only promoter token
+        id: app-token
+        # At this exact action SHA, action.yml defines client-id and deprecates app-id.
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.HELM_AUTHORITY_PROMOTER_CLIENT_ID }}
+          private-key: ${{ secrets.HELM_AUTHORITY_PROMOTER_PRIVATE_KEY }}
+          owner: Mindburn-Labs
+          repositories: .github
+          permission-contents: read
+          permission-organization-administration: write
+
+      - name: Bind exact promoter App identity
+        env:
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          INSTALLATION_ID: ${{ steps.app-token.outputs.installation-id }}
+        run: |
+          set -euo pipefail
+          test "$APP_SLUG" = "helm-authority-promoter"
+          test "$INSTALLATION_ID" = "146541790"
+
+      - name: Verify exact controller ruleset with promoter App
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/verify_control_plane.py \
+            --contract broker/config/autonomous-release-control-plane.json \
+            --adversarial-corpus broker/tests/fixtures/autonomous-release-adversarial.json \
+            --ruleset-only \
+            --output control-ruleset-reconcile.json
+
+      - name: Reconcile only the exact parent/candidate/merge lineage
+        id: reconcile
+        env:
+          CANDIDATE_REF: ${{ needs.verify-candidate.outputs.candidate_ref }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/authority_ruleset_broker.py reconcile \
+            --parent-sha "${{ needs.verify-candidate.outputs.parent_sha }}" \
+            --candidate-sha "${{ needs.verify-candidate.outputs.candidate_sha }}" \
+            --candidate-ref "$CANDIDATE_REF" \
+            --merge-sha "${{ needs.verify-candidate.outputs.merge_sha }}" \
+            --output ruleset-reconcile.json
+          echo "rulesets_active=$(jq -er '.rulesets_active' ruleset-reconcile.json)" >> "$GITHUB_OUTPUT"
+          echo "state=$(jq -er '.state' ruleset-reconcile.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload reconciliation receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: helm-authority-reconciliation
+          path: ruleset-reconcile.json
+          if-no-files-found: error
+          retention-days: 90
+
+  stage:
+    name: Stage and canary candidate authority
+    needs:
+      - verify-candidate
+      - reconcile
+    environment: authority-promotion
+    permissions:
+      actions: read
+      attestations: read
+      contents: read
+      pull-requests: read
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -282,6 +425,7 @@ jobs:
           python3 broker/scripts/verify_control_plane.py \
             --contract broker/config/autonomous-release-control-plane.json \
             --adversarial-corpus broker/tests/fixtures/autonomous-release-adversarial.json \
+            --effective-only \
             --output promotion/control-plane-promoter.json
 
       - name: Checkout exact parent Kernel for canary verification
@@ -326,8 +470,20 @@ jobs:
           test "$APP_SLUG" = "helm-authority-promoter"
           test "$INSTALLATION_ID" = "146541790"
 
+      - name: Verify exact controller ruleset with promoter App
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/verify_control_plane.py \
+            --contract broker/config/autonomous-release-control-plane.json \
+            --adversarial-corpus broker/tests/fixtures/autonomous-release-adversarial.json \
+            --ruleset-only \
+            --output promotion/control-ruleset-stage.json
+
       - name: Advance evaluation-only candidate authority
         id: advance
+        if: needs.reconcile.outputs.state != 'active'
         env:
           CANDIDATE_REF: ${{ needs.verify-candidate.outputs.candidate_ref }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -393,6 +549,46 @@ jobs:
             --kernel-verifier "$GITHUB_WORKSPACE/parent-permit-verify" \
             --output-dir promotion/suite \
             --receipt promotion/authority-suite.json
+
+      - name: Mint isolated approval-only App token
+        id: approver-token
+        # At this exact action SHA, action.yml defines client-id and deprecates app-id.
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.HELM_AUTHORITY_APPROVER_CLIENT_ID }}
+          private-key: ${{ secrets.HELM_AUTHORITY_APPROVER_PRIVATE_KEY }}
+          owner: Mindburn-Labs
+          repositories: .github
+          permission-pull-requests: write
+
+      - name: Bind exact approval App identity
+        env:
+          APP_SLUG: ${{ steps.approver-token.outputs.app-slug }}
+          INSTALLATION_ID: ${{ steps.approver-token.outputs.installation-id }}
+        run: |
+          set -euo pipefail
+          test "$APP_SLUG" = "helm-authority-approver"
+          test "$INSTALLATION_ID" = "146576964"
+
+      - name: Approve only the exact parent-signed head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HELM_AUTHORITY_APPROVER_TOKEN: ${{ steps.approver-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/submit_machine_approval.py \
+            --permit promotion/release-permit.json \
+            --permit-bundle promotion/release-permit.attestation.json \
+            --trusted-context promotion/ratification-input/context.json \
+            --kernel-verifier "$GITHUB_WORKSPACE/parent-permit-verify" \
+            --repository Mindburn-Labs/.github \
+            --pull-request "${{ needs.verify-candidate.outputs.candidate_pr }}" \
+            --head-sha "${{ needs.verify-candidate.outputs.candidate_sha }}" \
+            --workflow-sha "${{ needs.verify-candidate.outputs.parent_sha }}" \
+            --approver-app-slug "${{ steps.approver-token.outputs.app-slug }}" \
+            --approver-installation-id "${{ steps.approver-token.outputs.installation-id }}" \
+            --allow-merged-resume \
+            --output promotion/machine-approval.json
 
       - name: Upload staged authority evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -489,6 +685,17 @@ jobs:
           persist-credentials: false
           path: broker
 
+      - name: Recheck live rebind control plane before credential use
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/verify_control_plane.py \
+            --contract broker/config/autonomous-release-control-plane.json \
+            --adversarial-corpus broker/tests/fixtures/autonomous-release-adversarial.json \
+            --effective-only \
+            --output control-plane-rebind.json
+
       - name: Download staged authority evidence
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
@@ -527,6 +734,17 @@ jobs:
           test "$APP_SLUG" = "helm-authority-promoter"
           test "$INSTALLATION_ID" = "146541790"
 
+      - name: Verify exact controller ruleset with promoter App
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/verify_control_plane.py \
+            --contract broker/config/autonomous-release-control-plane.json \
+            --adversarial-corpus broker/tests/fixtures/autonomous-release-adversarial.json \
+            --ruleset-only \
+            --output promotion/control-ruleset-rebind.json
+
       - name: Rebind evaluation-only candidate to merged main
         env:
           CANDIDATE_REF: ${{ needs.verify-candidate.outputs.candidate_ref }}
@@ -553,16 +771,18 @@ jobs:
             --arg merge_sha "${{ needs.merge.outputs.merge_sha }}" \
             --arg merge_tree_sha "${{ needs.merge.outputs.merge_tree_sha }}" \
             --arg parent_sha "${{ needs.verify-candidate.outputs.parent_sha }}" \
+            --arg control_sha "${{ needs.verify-candidate.outputs.control_sha }}" \
             --slurpfile promotion promotion/authority-promotion.json \
             --arg authority_suite_sha256 "$(sha256sum promotion/authority-suite.json | awk '{print $1}')" \
             --slurpfile canary promotion/suite/canary-receipt.json \
             --slurpfile ratification promotion/release-permit.json \
             '{
-              schema: "mindburn.release-authority-promotion-execution/v1",
+              schema: "mindburn.release-authority-promotion-execution/v2",
               parent_generation: $promotion[0].parent_generation,
               candidate_generation: $promotion[0].candidate_generation,
               parent_base_sha: $ratification[0].base_sha,
               parent_workflow_sha: $parent_sha,
+              control_workflow_sha: $control_sha,
               candidate_workflow_sha: $candidate_sha,
               candidate_workflow_ref: $candidate_ref,
               candidate_tree_sha: $candidate_tree_sha,
@@ -590,6 +810,7 @@ jobs:
     name: Independently observe staged authority
     needs:
       - verify-candidate
+      - reconcile
       - rebind
     environment: authority-observer
     permissions:
@@ -621,11 +842,13 @@ jobs:
           python3 broker/scripts/verify_control_plane.py \
             --contract broker/config/autonomous-release-control-plane.json \
             --adversarial-corpus broker/tests/fixtures/autonomous-release-adversarial.json \
+            --effective-only \
             --output promotion/control-plane-pre-observer.json
 
-      # GitHub requires Administration(write) even for org-ruleset GET. This
-      # separate App token is consumed only by the observer's GET-only client.
-      - name: Mint independent GET-only observer token
+      # The observer token deliberately omits organization Administration.
+      # Its code proves the write-gated org-ruleset GET returns HTTP 403, then
+      # observes only effective repository rules and immutable evidence.
+      - name: Mint mechanically read-only observer token
         id: observer-token
         # At this exact action SHA, action.yml defines client-id and deprecates app-id.
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
@@ -639,7 +862,6 @@ jobs:
           permission-actions: read
           permission-attestations: read
           permission-contents: read
-          permission-organization-administration: write
           permission-pull-requests: read
 
       - name: Bind exact observer App identity
@@ -650,6 +872,17 @@ jobs:
           set -euo pipefail
           test "$APP_SLUG" = "helm-authority-observer"
           test "$INSTALLATION_ID" = "146542079"
+
+      - name: Verify effective controller lock with observer App
+        env:
+          GH_TOKEN: ${{ steps.observer-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/verify_control_plane.py \
+            --contract broker/config/autonomous-release-control-plane.json \
+            --adversarial-corpus broker/tests/fixtures/autonomous-release-adversarial.json \
+            --effective-only \
+            --output promotion/control-ruleset-pre-observer.json
 
       - name: Checkout exact parent Kernel for ratification verification
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -689,10 +922,11 @@ jobs:
       - name: Compare intended and actual staged state
         env:
           GH_TOKEN: ${{ steps.observer-token.outputs.token }}
+          OBSERVATION_PHASE: ${{ needs.reconcile.outputs.state == 'active' && 'final' || 'pre-activation' }}
         run: |
           set -euo pipefail
           python3 broker/scripts/observe_authority_promotion.py \
-            --phase pre-activation \
+            --phase "$OBSERVATION_PHASE" \
             --execution promotion/authority-promotion-execution.json \
             --parent-authority broker/config/autonomous-release-authority.json \
             --candidate-authority promotion/candidate-authority.json \
@@ -705,6 +939,7 @@ jobs:
             --canary-receipt promotion/suite/canary-receipt.json \
             --authority-suite promotion/authority-suite.json \
             --parent-kernel-verifier "$GITHUB_WORKSPACE/parent-permit-verify" \
+            --replay-dir promotion/observer-replay-pre-activation \
             --promotion-run-id "$GITHUB_RUN_ID" \
             --promotion-run-attempt "$GITHUB_RUN_ATTEMPT" \
             --output promotion/pre-activation-observer-receipt.json
@@ -735,6 +970,7 @@ jobs:
           path: |
             promotion/pre-activation-observer-receipt.json
             promotion/pre-activation-observer-receipt.attestation.json
+            promotion/observer-replay-pre-activation
           if-no-files-found: error
           retention-days: 90
 
@@ -742,6 +978,7 @@ jobs:
     name: Activate independently observed authority
     needs:
       - verify-candidate
+      - reconcile
       - merge
       - rebind
       - observe_pre_activation
@@ -774,10 +1011,13 @@ jobs:
           python3 broker/scripts/verify_control_plane.py \
             --contract broker/config/autonomous-release-control-plane.json \
             --adversarial-corpus broker/tests/fixtures/autonomous-release-adversarial.json \
+            --effective-only \
             --output observation/control-plane-activation.json
 
       - name: Verify observer provenance and exact promotion run
         env:
+          CONTROL_SHA: ${{ needs.verify-candidate.outputs.control_sha }}
+          EXPECTED_OBSERVER_PHASE: ${{ needs.reconcile.outputs.state == 'active' && 'final' || 'pre-activation' }}
           GH_TOKEN: ${{ github.token }}
           PARENT_SHA: ${{ needs.verify-candidate.outputs.parent_sha }}
         run: |
@@ -787,17 +1027,20 @@ jobs:
             --bundle observation/pre-activation-observer-receipt.attestation.json \
             --repo Mindburn-Labs/.github \
             --signer-workflow Mindburn-Labs/.github/.github/workflows/promote-authority.yml \
-            --signer-digest "$PARENT_SHA" \
-            --source-digest "$PARENT_SHA" \
+            --signer-digest "$CONTROL_SHA" \
+            --source-digest "$CONTROL_SHA" \
             --deny-self-hosted-runners
           jq -e \
             --arg candidate "${{ needs.verify-candidate.outputs.candidate_sha }}" \
+            --arg control "$CONTROL_SHA" \
             --arg merge "${{ needs.merge.outputs.merge_sha }}" \
             --arg parent "$PARENT_SHA" \
+            --arg phase "$EXPECTED_OBSERVER_PHASE" \
             --argjson attempt "$GITHUB_RUN_ATTEMPT" \
             --argjson run "$GITHUB_RUN_ID" \
-            '.schema == "mindburn.release-authority-observer-receipt/v1" and
-             .phase == "pre-activation" and .decision == "ALLOW" and
+            '.schema == "mindburn.release-authority-observer-receipt/v3" and
+             .phase == $phase and .decision == "ALLOW" and
+             .control_workflow_sha == $control and
              .parent_workflow_sha == $parent and
              .candidate_workflow_sha == $candidate and
              .merged_workflow_sha == $merge and
@@ -828,6 +1071,17 @@ jobs:
           set -euo pipefail
           test "$APP_SLUG" = "helm-authority-promoter"
           test "$INSTALLATION_ID" = "146541790"
+
+      - name: Verify exact controller ruleset with promoter App
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/verify_control_plane.py \
+            --contract broker/config/autonomous-release-control-plane.json \
+            --adversarial-corpus broker/tests/fixtures/autonomous-release-adversarial.json \
+            --ruleset-only \
+            --output observation/control-ruleset-activation.json
 
       - name: Activate merged authority only after observer ALLOW
         env:
@@ -886,11 +1140,13 @@ jobs:
           python3 broker/scripts/verify_control_plane.py \
             --contract broker/config/autonomous-release-control-plane.json \
             --adversarial-corpus broker/tests/fixtures/autonomous-release-adversarial.json \
+            --effective-only \
             --output promotion/control-plane-final-observer.json
 
-      # GitHub requires Administration(write) even for org-ruleset GET. This
-      # separate App token is consumed only by the observer's GET-only client.
-      - name: Mint independent GET-only observer token
+      # The observer token deliberately omits organization Administration.
+      # Its code proves the write-gated org-ruleset GET returns HTTP 403, then
+      # observes only effective repository rules and immutable evidence.
+      - name: Mint mechanically read-only observer token
         id: observer-token
         # At this exact action SHA, action.yml defines client-id and deprecates app-id.
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
@@ -904,7 +1160,6 @@ jobs:
           permission-actions: read
           permission-attestations: read
           permission-contents: read
-          permission-organization-administration: write
           permission-pull-requests: read
 
       - name: Bind exact observer App identity
@@ -915,6 +1170,17 @@ jobs:
           set -euo pipefail
           test "$APP_SLUG" = "helm-authority-observer"
           test "$INSTALLATION_ID" = "146542079"
+
+      - name: Verify effective controller lock with observer App
+        env:
+          GH_TOKEN: ${{ steps.observer-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/verify_control_plane.py \
+            --contract broker/config/autonomous-release-control-plane.json \
+            --adversarial-corpus broker/tests/fixtures/autonomous-release-adversarial.json \
+            --effective-only \
+            --output promotion/control-ruleset-final-observer.json
 
       - name: Checkout exact parent Kernel for ratification verification
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -952,6 +1218,7 @@ jobs:
             --canary-receipt promotion/suite/canary-receipt.json \
             --authority-suite promotion/authority-suite.json \
             --parent-kernel-verifier "$GITHUB_WORKSPACE/parent-permit-verify" \
+            --replay-dir promotion/observer-replay-final \
             --promotion-run-id "$GITHUB_RUN_ID" \
             --promotion-run-attempt "$GITHUB_RUN_ATTEMPT" \
             --output promotion/final-observer-receipt.json
@@ -982,6 +1249,7 @@ jobs:
           path: |
             promotion/final-observer-receipt.json
             promotion/final-observer-receipt.attestation.json
+            promotion/observer-replay-final
           if-no-files-found: error
           retention-days: 90
 
@@ -1017,6 +1285,17 @@ jobs:
           persist-credentials: false
           path: broker
 
+      - name: Recheck live recovery control plane before credential use
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/verify_control_plane.py \
+            --contract broker/config/autonomous-release-control-plane.json \
+            --adversarial-corpus broker/tests/fixtures/autonomous-release-adversarial.json \
+            --effective-only \
+            --output control-plane-recovery.json
+
       - name: Download signed promotion evidence
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
@@ -1047,6 +1326,17 @@ jobs:
           set -euo pipefail
           test "$APP_SLUG" = "helm-authority-promoter"
           test "$INSTALLATION_ID" = "146541790"
+
+      - name: Verify exact controller ruleset with promoter App
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/verify_control_plane.py \
+            --contract broker/config/autonomous-release-control-plane.json \
+            --adversarial-corpus broker/tests/fixtures/autonomous-release-adversarial.json \
+            --ruleset-only \
+            --output ruleset-control-recovery.json
 
       - name: Restore parent authority after incomplete promotion
         env:

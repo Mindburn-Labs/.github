@@ -66,6 +66,7 @@ class FakeClient:
         candidate: dict[str, object],
         *,
         fail_put: int | None = None,
+        apply_then_fail_put: int | None = None,
     ) -> None:
         self.current = {
             MODULE.STABLE_RULESET_ID: json.loads(json.dumps(stable)),
@@ -73,7 +74,9 @@ class FakeClient:
         }
         self.puts: list[int] = []
         self.fail_put = fail_put
+        self.apply_then_fail_put = apply_then_fail_put
         self.fail_cas = False
+        self.main_sha = PARENT_SHA
         self.etags = {
             MODULE.STABLE_RULESET_ID: 'W/"stable-1"',
             MODULE.CANDIDATE_RULESET_ID: 'W/"candidate-1"',
@@ -108,7 +111,13 @@ class FakeClient:
         self.current[ruleset_id] = updated
         self.puts.append(ruleset_id)
         self.etags[ruleset_id] = f'W/"{ruleset_id}-{len(self.puts) + 1}"'
+        if self.apply_then_fail_put == ruleset_id:
+            self.apply_then_fail_put = None
+            raise MODULE.PermitInputError("simulated lost PUT confirmation")
         return MODULE.APIResponse(updated, self.etags[ruleset_id])
+
+    def get_main_sha(self) -> str:
+        return self.main_sha
 
 
 def args(operation: str, *, merge_sha: str | None = None) -> argparse.Namespace:
@@ -167,6 +176,70 @@ class AuthorityRulesetBrokerTests(unittest.TestCase):
             binding = MODULE.workflow_binding(client.current[ruleset_id])
             self.assertEqual(binding["sha"], MERGE_SHA)
             self.assertEqual(binding["ref"], MODULE.MAIN_REF)
+
+    def test_rebind_and_activate_are_idempotent_after_full_activation(self) -> None:
+        client = FakeClient(
+            ruleset("stable", MERGE_SHA, MODULE.MAIN_REF),
+            ruleset("candidate", MERGE_SHA, MODULE.MAIN_REF),
+        )
+        MODULE.transition(args("rebind", merge_sha=MERGE_SHA), client)
+        MODULE.transition(args("activate", merge_sha=MERGE_SHA), client)
+        self.assertEqual(client.puts, [])
+
+    def test_advance_is_idempotent_after_runner_loss(self) -> None:
+        client = FakeClient(
+            ruleset("stable", PARENT_SHA, MODULE.MAIN_REF),
+            ruleset("candidate", CANDIDATE_SHA, CANDIDATE_REF),
+        )
+        receipt = MODULE.transition(args("advance"), client)
+        self.assertEqual(receipt["operation"], "advance")
+        self.assertEqual(client.puts, [])
+
+    def test_reconcile_short_circuits_fully_active_duplicate(self) -> None:
+        client = FakeClient(
+            ruleset("stable", MERGE_SHA, MODULE.MAIN_REF),
+            ruleset("candidate", MERGE_SHA, MODULE.MAIN_REF),
+        )
+        reconcile = args("reconcile", merge_sha=MERGE_SHA)
+        client.main_sha = MERGE_SHA
+        receipt = MODULE.transition(reconcile, client)
+        self.assertTrue(receipt["rulesets_active"])
+        self.assertEqual(receipt["schema"], MODULE.RECONCILE_SCHEMA)
+        self.assertEqual(receipt["state"], "active")
+        self.assertEqual(client.puts, [])
+
+    def test_reconcile_post_merge_repairs_candidate_without_downgrading_stable(
+        self,
+    ) -> None:
+        client = FakeClient(
+            ruleset("stable", MERGE_SHA, MODULE.MAIN_REF),
+            ruleset("candidate", PARENT_SHA, MODULE.MAIN_REF),
+        )
+        reconcile = args("reconcile", merge_sha=MERGE_SHA)
+        client.main_sha = MERGE_SHA
+        receipt = MODULE.transition(reconcile, client)
+        self.assertTrue(receipt["rulesets_active"])
+        self.assertEqual(client.puts, [MODULE.CANDIDATE_RULESET_ID])
+        self.assertEqual(
+            MODULE.workflow_binding(client.current[MODULE.STABLE_RULESET_ID])["sha"],
+            MERGE_SHA,
+        )
+
+    def test_reconcile_post_merge_retry_only_restores_shadow_candidate(self) -> None:
+        client = FakeClient(
+            ruleset("stable", PARENT_SHA, MODULE.MAIN_REF),
+            ruleset("candidate", MERGE_SHA, MODULE.MAIN_REF),
+        )
+        reconcile = args("reconcile", merge_sha=MERGE_SHA)
+        client.main_sha = MERGE_SHA
+        receipt = MODULE.transition(reconcile, client)
+        self.assertFalse(receipt["rulesets_active"])
+        self.assertEqual(receipt["state"], "post-merge-retry")
+        self.assertEqual(client.puts, [MODULE.CANDIDATE_RULESET_ID])
+        self.assertEqual(
+            MODULE.workflow_binding(client.current[MODULE.STABLE_RULESET_ID])["sha"],
+            PARENT_SHA,
+        )
 
     def test_concurrent_ruleset_drift_fails_closed(self) -> None:
         client = FakeClient(
@@ -349,6 +422,40 @@ class AuthorityRulesetBrokerTests(unittest.TestCase):
         self.assertEqual(
             (binding["sha"], binding["ref"]), (CANDIDATE_SHA, candidate_ref)
         )
+
+    def test_bootstrap_retry_repairs_confirmation_lost_forward_state(self) -> None:
+        candidate_ref = "refs/heads/codex/autonomous-release-gen2-bootstrap"
+        client = FakeClient(
+            ruleset("stable", CANDIDATE_SHA, candidate_ref),
+            ruleset("candidate", CANDIDATE_SHA, candidate_ref),
+            apply_then_fail_put=MODULE.STABLE_RULESET_ID,
+        )
+        bootstrap_args = argparse.Namespace(
+            operation="bootstrap-finalize",
+            parent_sha=MODULE.LEGACY_PARENT_WORKFLOW_SHA,
+            candidate_sha=CANDIDATE_SHA,
+            candidate_ref=candidate_ref,
+            merge_sha=MERGE_SHA,
+        )
+        with self.assertRaisesRegex(MODULE.PermitInputError, "candidate was restored"):
+            MODULE.transition(bootstrap_args, client)
+        self.assertEqual(
+            (
+                MODULE.workflow_binding(client.current[MODULE.STABLE_RULESET_ID])[
+                    "sha"
+                ],
+                MODULE.workflow_binding(client.current[MODULE.CANDIDATE_RULESET_ID])[
+                    "sha"
+                ],
+            ),
+            (MERGE_SHA, CANDIDATE_SHA),
+        )
+        MODULE.transition(bootstrap_args, client)
+        for ruleset_id in (MODULE.STABLE_RULESET_ID, MODULE.CANDIDATE_RULESET_ID):
+            binding = MODULE.workflow_binding(client.current[ruleset_id])
+            self.assertEqual(
+                (binding["sha"], binding["ref"]), (MERGE_SHA, MODULE.MAIN_REF)
+            )
 
 
 if __name__ == "__main__":

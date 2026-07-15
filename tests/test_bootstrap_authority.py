@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 
 
@@ -106,7 +107,161 @@ class RepositorySettingsClient:
         return {"delete_branch_on_merge": False}
 
 
+class ControlPlaneAdminClient:
+    RULESET_ID = 4242
+
+    def __init__(self, *, wrong_ref: bool = False) -> None:
+        self.ruleset: dict[str, object] | None = None
+        self.etag = 'W/"control-1"'
+        self.ref_sha = "9" * 40 if wrong_ref else None
+        self.environment_policies = {
+            "authority-observer": [],
+            "authority-promotion": [],
+        }
+        self.operations: list[str] = []
+
+    def response(self, body, etag=None):
+        return SimpleNamespace(body=json.loads(json.dumps(body)), etag=etag)
+
+    def request(self, method: str, path: str, *, payload=None, if_match=None):
+        self.operations.append(f"{method} {path}")
+        if path == "/orgs/Mindburn-Labs/rulesets?per_page=100" and method == "GET":
+            summaries = (
+                []
+                if self.ruleset is None
+                else [{"id": self.RULESET_ID, "name": self.ruleset["name"]}]
+            )
+            return self.response(summaries)
+        if path == "/orgs/Mindburn-Labs/rulesets" and method == "POST":
+            if self.ruleset is not None or payload is None:
+                raise AssertionError("unexpected control ruleset creation")
+            if any(rule.get("type") == "creation" for rule in payload["rules"]):
+                raise AssertionError(
+                    "control ref creation was blocked before it existed"
+                )
+            self.ruleset = {"id": self.RULESET_ID, **payload}
+            return self.response(self.ruleset, self.etag)
+        if path == f"/orgs/Mindburn-Labs/rulesets/{self.RULESET_ID}":
+            if self.ruleset is None:
+                raise AssertionError("control ruleset is absent")
+            if method == "GET":
+                return self.response(self.ruleset, self.etag)
+            if method == "PUT":
+                if (
+                    if_match != self.etag
+                    or payload is None
+                    or self.ref_sha != MERGE_SHA
+                ):
+                    raise AssertionError("control ruleset was finalized out of order")
+                self.ruleset = {"id": self.RULESET_ID, **payload}
+                self.etag = 'W/"control-2"'
+                return self.response(self.ruleset, self.etag)
+        if path.endswith("/git/matching-refs/heads/authority/control-v1"):
+            refs = (
+                []
+                if self.ref_sha is None
+                else [
+                    {
+                        "ref": "refs/heads/authority/control-v1",
+                        "object": {"sha": self.ref_sha},
+                    }
+                ]
+            )
+            return self.response(refs)
+        if path.endswith("/git/refs") and method == "POST":
+            if payload != {
+                "ref": "refs/heads/authority/control-v1",
+                "sha": MERGE_SHA,
+            }:
+                raise AssertionError("wrong immutable control ref payload")
+            self.ref_sha = MERGE_SHA
+            return self.response({"ref": payload["ref"], "object": {"sha": MERGE_SHA}})
+        if path.endswith("/deployment-branch-policies"):
+            environment = path.split("/environments/", 1)[1].split("/", 1)[0]
+            policies = self.environment_policies[environment]
+            if method == "GET":
+                return self.response(
+                    {"total_count": len(policies), "branch_policies": policies}
+                )
+            if method == "POST":
+                if (
+                    payload != {"name": "authority/control-v1", "type": "branch"}
+                    or self.ruleset is None
+                    or not any(
+                        rule.get("type") == "creation" for rule in self.ruleset["rules"]
+                    )
+                    or self.ref_sha != MERGE_SHA
+                ):
+                    raise AssertionError("environment enabled before immutable control")
+                created = {"id": len(policies) + 1, **payload}
+                policies.append(created)
+                return self.response(created)
+        raise AssertionError(f"unexpected request {method} {path}")
+
+
+class ControlPlaneObserverClient:
+    def __init__(self, admin: ControlPlaneAdminClient) -> None:
+        self.admin = admin
+
+    def get_json(self, path: str):
+        if path == f"/orgs/Mindburn-Labs/rulesets/{self.admin.RULESET_ID}":
+            assert self.admin.ruleset is not None
+            return self.admin.ruleset
+        if path.endswith("/git/ref/heads/authority/control-v1"):
+            return {"object": {"sha": self.admin.ref_sha}}
+        if "/branches/authority%2Fcontrol-v1" in path:
+            return {"protected": True, "commit": {"sha": self.admin.ref_sha}}
+        if "/contents/.github/workflows/promote-authority.yml" in path:
+            return {
+                "type": "file",
+                "path": ".github/workflows/promote-authority.yml",
+                "sha": "8" * 40,
+            }
+        if path.endswith("/deployment-branch-policies"):
+            environment = path.split("/environments/", 1)[1].split("/", 1)[0]
+            policies = self.admin.environment_policies[environment]
+            return {"total_count": len(policies), "branch_policies": policies}
+        if "/environments/" in path:
+            return {
+                "can_admins_bypass": False,
+                "protection_rules": [{"type": "branch_policy", "id": 1}],
+                "deployment_branch_policy": {
+                    "protected_branches": False,
+                    "custom_branch_policies": True,
+                },
+            }
+        raise AssertionError(f"unexpected observer GET {path}")
+
+    def get_bytes(self, path: str) -> bytes:
+        if path == "/orgs/Mindburn-Labs/rulesets?per_page=100":
+            assert self.admin.ruleset is not None
+            return json.dumps(
+                [
+                    {
+                        "id": self.admin.RULESET_ID,
+                        "name": self.admin.ruleset["name"],
+                    }
+                ]
+            ).encode()
+        if path.endswith("/rules/branches/authority%2Fcontrol-v1"):
+            assert self.admin.ruleset is not None
+            return json.dumps(self.admin.ruleset["rules"]).encode()
+        raise AssertionError(f"unexpected observer bytes GET {path}")
+
+
 class BootstrapAuthorityTests(unittest.TestCase):
+    def load_control_contract(self):
+        return MODULE.validate_contract(
+            MODULE.load_json(
+                ROOT / "config" / "autonomous-release-control-plane.json",
+                label="contract",
+            ),
+            MODULE.load_json(
+                ROOT / "tests" / "fixtures" / "autonomous-release-adversarial.json",
+                label="corpus",
+            ),
+        )
+
     def test_bootstrap_preserves_candidate_head_for_fail_closed_recovery(self) -> None:
         for initial, expected_patches in ((True, 1), (False, 0)):
             with self.subTest(initial=initial):
@@ -190,6 +345,108 @@ class BootstrapAuthorityTests(unittest.TestCase):
             )
             with self.assertRaises(MODULE.PermitInputError):
                 MODULE.validate_ready(args)
+
+    def test_control_ref_locks_before_environments_are_enabled(self) -> None:
+        contract = self.load_control_contract()
+        admin = ControlPlaneAdminClient()
+        observer = ControlPlaneObserverClient(admin)
+        receipt = MODULE.install_control_workflow(
+            contract,
+            admin,
+            observer,
+            expected_sha=MERGE_SHA,
+        )
+        environments = MODULE.enable_control_environments(
+            contract,
+            admin,
+            observer,
+            expected_sha=MERGE_SHA,
+        )
+        self.assertEqual(receipt["sha"], MERGE_SHA)
+        self.assertEqual(len(environments), 2)
+        create_ruleset = admin.operations.index("POST /orgs/Mindburn-Labs/rulesets")
+        create_ref = admin.operations.index(
+            "POST /repos/Mindburn-Labs/.github/git/refs"
+        )
+        lock_ruleset = admin.operations.index(
+            f"PUT /orgs/Mindburn-Labs/rulesets/{admin.RULESET_ID}"
+        )
+        enable_environment = next(
+            index
+            for index, operation in enumerate(admin.operations)
+            if operation.startswith("POST /repos/Mindburn-Labs/.github/environments/")
+        )
+        self.assertLess(create_ruleset, create_ref)
+        self.assertLess(create_ref, lock_ruleset)
+        self.assertLess(lock_ruleset, enable_environment)
+
+        before_retry = list(admin.operations)
+        MODULE.install_control_workflow(
+            contract,
+            admin,
+            observer,
+            expected_sha=MERGE_SHA,
+        )
+        MODULE.enable_control_environments(
+            contract,
+            admin,
+            observer,
+            expected_sha=MERGE_SHA,
+        )
+        retry_mutations = [
+            operation
+            for operation in admin.operations[len(before_retry) :]
+            if operation.startswith(("POST ", "PUT "))
+        ]
+        self.assertEqual(retry_mutations, [])
+
+    def test_wrong_control_ref_keeps_environments_disabled(self) -> None:
+        contract = self.load_control_contract()
+        admin = ControlPlaneAdminClient(wrong_ref=True)
+        observer = ControlPlaneObserverClient(admin)
+        with self.assertRaisesRegex(MODULE.PermitInputError, "wrong reviewed SHA"):
+            MODULE.install_control_workflow(
+                contract,
+                admin,
+                observer,
+                expected_sha=MERGE_SHA,
+            )
+        self.assertTrue(
+            all(not policies for policies in admin.environment_policies.values())
+        )
+
+    def test_environment_enable_resumes_from_one_exact_policy(self) -> None:
+        contract = self.load_control_contract()
+        admin = ControlPlaneAdminClient()
+        observer = ControlPlaneObserverClient(admin)
+        MODULE.install_control_workflow(
+            contract,
+            admin,
+            observer,
+            expected_sha=MERGE_SHA,
+        )
+        admin.environment_policies["authority-observer"] = [
+            {"id": 1, "name": "authority/control-v1", "type": "branch"}
+        ]
+        before = len(admin.operations)
+        receipts = MODULE.enable_control_environments(
+            contract,
+            admin,
+            observer,
+            expected_sha=MERGE_SHA,
+        )
+        mutations = [
+            operation
+            for operation in admin.operations[before:]
+            if operation.startswith("POST ")
+        ]
+        self.assertEqual(len(receipts), 2)
+        self.assertEqual(
+            mutations,
+            [
+                "POST /repos/Mindburn-Labs/.github/environments/authority-promotion/deployment-branch-policies"
+            ],
+        )
 
 
 if __name__ == "__main__":

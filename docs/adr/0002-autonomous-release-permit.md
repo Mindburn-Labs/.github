@@ -66,6 +66,18 @@ and decision must match the candidate permit byte for byte for both `ALLOW` and
 `DENY`; shape-valid summaries or candidate-authored reducer output are not
 proof.
 
+Secret-bearing promotion is not triggered with `workflow_run`, because GitHub
+would load that workflow from mutable default-branch source. The permit job has
+no App secret and may only dispatch the fixed
+`authority/control-v1:.github/workflows/promote-authority.yml` controller for a
+strict generation N to N+1 change. That controller is created at the reviewed
+generation-2 merge SHA and then covered by an active organization ruleset that
+denies creation, update, and deletion with no bypass actors. The two credential
+environments disable administrator bypass and admit only the exact controller
+branch. During bootstrap they admit no branch at all. A same-repository pull
+request may therefore request a dispatch, but it cannot substitute the signed
+parent run, execute different controller YAML, or load an App key.
+
 Every admitted repository has an explicit source-owned gate profile. There is
 no command-discovery or Makefile fallback. The profile names an exact command
 vector and SHA-256 digests for every build file that can alter those commands;
@@ -238,10 +250,19 @@ before using the token. The approval broker additionally requires the exact
 single-target token scope (the App itself is installed on only the three public
 autonomous repositories) and confirms the persisted review author before
 emitting a receipt.
+The promoter and approval-only App material exists only in the
+`authority-promotion` environment; observer material exists only in
+`authority-observer`. Neither key nor client ID is an organization-level or
+repository-level Actions secret. The immutable controller checks its live
+workflow ref and SHA before it consumes either environment.
 
 The steady-state promotion transaction is deliberately split across isolated
-jobs and three GitHub Apps. The approval-only App turns a signed ALLOW into an
-exact-head review but cannot read or write contents. The promoter can advance
+jobs and three GitHub Apps. The immutable controller downloads the exact
+successful parent permit run named by the uncredentialed dispatcher and binds
+its run ID, attempt, repository, workflow path, pull request, head, and signed
+provenance before any credentialed job. The approval-only App then turns that
+signed ALLOW into an exact-head review but cannot read or write contents. The
+promoter can advance
 and restore exact ruleset bindings and run a permanent seven-attack plus
 one-ALLOW suite, but cannot write repository contents. A separate job with no
 App secret advances `main` only with an exact `beforeOid`/`afterOid`
@@ -280,6 +301,13 @@ recovery fails closed and requires a new source-owned bootstrap. This
 deliberately favors safety over liveness. The executor therefore cannot mint
 its own success receipt.
 
+The controller YAML is a deliberately fixed control ABI. Later authority
+generations may evolve the reducer, broker, tests, and policy only through the
+previous-generation permit; the controller checks those components out from
+the permit-named parent SHA. Changing the controller ref itself requires a new
+machine-proven bootstrap or controller-migration protocol. It is never advanced
+as part of an ordinary authority promotion.
+
 GitHub's organization-ruleset API has two provider constraints that the broker
 must not conceal. Organization-ruleset `GET` requires the same organization
 Administration (write) permission as `PUT`, so the observer uses a separate App
@@ -288,12 +316,13 @@ installation token. The mutation broker requires an ETag on every ruleset GET,
 re-reads the exact body and ETag, sends that value in `If-Match`, rejects HTTP
 412, and performs an exact read-back. A missing ETag is a fail-closed error.
 
-Generation 1 is a one-time source-owned bootstrap because the promotion
-workflow cannot trigger from a file that is not yet on the default branch.
+Generation 1 is a one-time source-owned bootstrap because neither the reviewed
+generation-2 controller ref nor its machine interlocks exist yet.
 `scripts/bootstrap_authority.py` is split into `prepare` and `finalize` phases:
 
 1. verify the generation-1 dual-model ALLOW, GitHub Sigstore provenance,
-   trusted context, exact candidate tree, and live environment contract;
+   trusted context, exact candidate tree, and the live zero-admission
+   environment contract with administrator bypass disabled;
 2. stage generation 2 in evaluation mode and freshly execute all eight
    permanent proof cases;
 3. independently reverify the same signed case artifacts byte-for-byte;
@@ -304,7 +333,11 @@ workflow cannot trigger from a file that is not yet on the default branch.
    three public repositories, and only then retire `.github` and Kernel from
    the CODEOWNER-specific organization rule; the `.github` classic one-review
    setting remains active; and
-7. reverify the ready receipt and the live PR's current GitHub-generated merge,
+7. create a staging control ruleset that blocks update and deletion, publish
+   `authority/control-v1` at the exact reviewed merge SHA, add the creation ban,
+   independently verify the locked ref and active rules, and only then admit
+   that ref to both credential environments; and
+8. reverify the ready receipt and the live PR's current GitHub-generated merge,
    atomically advance `main` to that exact liveness merge commit, then bind both
    machine rulesets to the merged `main` SHA.
 
@@ -331,11 +364,13 @@ but is not an approval identity.
    both live model jobs, and add a protected lane for changes to workflow, gate,
    test-harness, and Kernel authority files. A target branch must not be able to
    weaken its own required commands or evidence threshold.
-5. Activate the machine workflow rule only after live 2-of-2 evidence and the
+5. Disable both credential environments, install and independently read back
+   the immutable no-bypass controller, then admit only that controller branch.
+6. Activate the machine workflow rule only after live 2-of-2 evidence and the
    complete permanent adversarial suite exist.
-6. Then remove human approval requirements only for repositories already under
+7. Then remove human approval requirements only for repositories already under
    the active machine rule. Preserve deletion, non-fast-forward, conversation,
    and machine-workflow requirements.
-7. Rebind the ruleset to merged `main` SHAs and retain rollback payloads.
+8. Rebind the ruleset to merged `main` SHAs and retain rollback payloads.
 
 If any proof fails, the existing human gate remains active.

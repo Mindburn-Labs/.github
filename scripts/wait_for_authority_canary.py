@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+import hashlib
 import io
 import json
 import os
@@ -12,6 +13,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from typing import Any
 import urllib.error
@@ -19,7 +21,12 @@ import urllib.parse
 import urllib.request
 import zipfile
 
-from autonomous_release_permit import PermitInputError, parse_json_strict, require_sha
+from autonomous_release_permit import (
+    PermitInputError,
+    parse_json_strict,
+    rebuild_review_evidence,
+    require_sha,
+)
 from verify_authority_promotion import validate_permit, verify_permit_with_kernel
 
 
@@ -31,10 +38,79 @@ MAX_CONTEXT_BYTES = 2 << 20
 MAX_PROMPT_BYTES = 2 << 20
 MAX_PATCH_BYTES = 4 << 20
 MAX_REVIEW_BYTES = 2 << 20
+MAX_REVIEW_TRANSPORT_BYTES = 16 << 20
 MODEL_REVIEW_PROVIDERS = ("anthropic", "openai")
+MODEL_REVIEW_MODELS = {
+    "anthropic": "claude-fable-5",
+    "openai": "gpt-5.6-sol",
+}
 WORKFLOW_NAME = "HELM Autonomous Release Permit"
 WORKFLOW_PATH = ".github/workflows/ci.yml"
 SIGNER_WORKFLOW = "Mindburn-Labs/.github/.github/workflows/ci.yml"
+PROVENANCE_ARTIFACT = "release-workflow-provenance"
+PROVENANCE_SCHEMA = "mindburn.release-workflow-provenance/v1"
+MAX_PROVENANCE_BYTES = 64 << 10
+MAX_PROVENANCE_BUNDLE_BYTES = 4 << 20
+
+
+def sanitized_subprocess_environment(
+    *, github_token: str | None = None
+) -> dict[str, str]:
+    """Return the minimum ambient environment needed by trusted local tools."""
+    environment = {
+        key: value
+        for key in (
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "LC_CTYPE",
+            "PATH",
+            "SSL_CERT_DIR",
+            "SSL_CERT_FILE",
+            "TMPDIR",
+            "XDG_CONFIG_HOME",
+        )
+        if (value := os.environ.get(key))
+    }
+    environment.setdefault("PATH", os.defpath)
+    if github_token is not None:
+        if not github_token:
+            raise PermitInputError(
+                "attestation verification requires an explicit token"
+            )
+        environment["GH_TOKEN"] = github_token
+    return environment
+
+
+def _url_origin(url: str) -> tuple[str, str, int | None]:
+    parsed = urllib.parse.urlsplit(url)
+    scheme = parsed.scheme.lower()
+    host = (parsed.hostname or "").lower()
+    if not scheme or not host:
+        raise PermitInputError("GitHub redirect target has no absolute origin")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise PermitInputError("GitHub redirect target has an invalid port") from exc
+    if port is None:
+        port = {"http": 80, "https": 443}.get(scheme)
+    return scheme, host, port
+
+
+class StripCrossOriginAuthorizationRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Never forward GitHub credentials to an artifact storage origin."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        source_origin = _url_origin(req.full_url)
+        target_origin = _url_origin(newurl)
+        if target_origin[0] not in {"http", "https"}:
+            raise PermitInputError("GitHub redirect target must use HTTP(S)")
+        if source_origin[0] == "https" and target_origin[0] != "https":
+            raise PermitInputError("GitHub redirect target cannot downgrade HTTPS")
+        redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if redirected is not None and source_origin != target_origin:
+            redirected.remove_header("Authorization")
+        return redirected
 
 
 class GitHubReadClient:
@@ -43,6 +119,9 @@ class GitHubReadClient:
             raise PermitInputError("GH_TOKEN is required")
         self.token = token
         self.api_url = api_url.rstrip("/")
+        self.opener = urllib.request.build_opener(
+            StripCrossOriginAuthorizationRedirectHandler()
+        )
 
     def get_bytes(
         self, path: str, *, accept: str = "application/vnd.github+json"
@@ -57,7 +136,7 @@ class GitHubReadClient:
             method="GET",
         )
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:  # nosec B310
+            with self.opener.open(request, timeout=30) as response:  # nosec B310
                 content = response.read(MAX_API_BYTES + 1)
         except urllib.error.HTTPError as exc:
             detail = exc.read(4096).decode("utf-8", errors="replace").strip()
@@ -80,6 +159,37 @@ class GitHubReadClient:
         if not isinstance(value, dict):
             raise PermitInputError(f"GitHub GET {path} returned a non-object")
         return value
+
+
+def require_get_forbidden(
+    client: GitHubReadClient,
+    path: str,
+    *,
+    label: str,
+) -> None:
+    """Prove a token cannot use a safe GET endpoint that requires write scope."""
+    request = urllib.request.Request(
+        client.api_url + path,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": " ".join(("Bearer", client.token)),
+            "X-GitHub-Api-Version": API_VERSION,
+        },
+        method="GET",
+    )
+    try:
+        with client.opener.open(request, timeout=30) as response:  # nosec B310
+            response.read(1)
+    except urllib.error.HTTPError as exc:
+        exc.read(4096)
+        if exc.code == 403:
+            return
+        raise PermitInputError(
+            f"{label} denial returned unexpected HTTP {exc.code}"
+        ) from exc
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise PermitInputError(f"{label} denial could not be verified: {exc}") from exc
+    raise PermitInputError(f"{label} token retains forbidden write authority")
 
 
 def parse_time(value: str, *, label: str) -> datetime:
@@ -158,34 +268,41 @@ def extract_trusted_context(archive: bytes) -> bytes:
     return context
 
 
-def extract_model_review(archive: bytes, provider: str) -> bytes:
+def extract_model_review(archive: bytes, provider: str) -> tuple[bytes, bytes, bytes]:
     if provider not in MODEL_REVIEW_PROVIDERS:
         raise PermitInputError(f"unsupported model review provider: {provider}")
-    expected_name = f"review-{provider}.json"
+    expected = {
+        f"raw-{provider}.txt": MAX_REVIEW_TRANSPORT_BYTES,
+        f"normalized-{provider}.json": MAX_REVIEW_BYTES,
+        f"review-{provider}.json": MAX_REVIEW_BYTES,
+    }
     try:
         with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
             entries = bundle.infolist()
-            if len(entries) != 1 or entries[0].filename != expected_name:
+            if len(entries) != len(expected) or {
+                entry.filename for entry in entries
+            } != set(expected):
                 raise PermitInputError(
-                    f"{provider} review artifact must contain exactly {expected_name}",
+                    f"{provider} review artifact must contain exact raw, normalized, and envelope evidence",
                 )
-            entry = entries[0]
-            if (
+            by_name = {entry.filename: entry for entry in entries}
+            if any(
                 entry.is_dir()
                 or entry.file_size <= 0
-                or entry.file_size > MAX_REVIEW_BYTES
+                or entry.file_size > expected[name]
+                for name, entry in by_name.items()
             ):
                 raise PermitInputError(
                     f"{provider} review artifact exceeds the size limit"
                 )
-            review = bundle.read(entry)
+            raw = bundle.read(by_name[f"raw-{provider}.txt"])
+            normalized = bundle.read(by_name[f"normalized-{provider}.json"])
+            review = bundle.read(by_name[f"review-{provider}.json"])
     except zipfile.BadZipFile as exc:
         raise PermitInputError(
             f"{provider} review artifact is not a valid ZIP archive"
         ) from exc
-    if not review or len(review) > MAX_REVIEW_BYTES:
-        raise PermitInputError(f"{provider} review artifact exceeds the size limit")
-    return review
+    return raw, normalized, review
 
 
 def load_json_file(path: Path, *, label: str) -> dict[str, Any]:
@@ -207,10 +324,7 @@ def verify_attestation(
     source_sha: str,
     github_token: str,
 ) -> None:
-    environment = os.environ.copy()
-    if not github_token:
-        raise PermitInputError("attestation verification requires an explicit token")
-    environment["GH_TOKEN"] = github_token
+    environment = sanitized_subprocess_environment(github_token=github_token)
     process = subprocess.run(
         [
             "gh",
@@ -308,13 +422,163 @@ def artifact_for_run(
     return matches[0]["id"]
 
 
+def extract_workflow_provenance(archive: bytes) -> tuple[bytes, bytes]:
+    expected = {
+        "release-workflow-provenance.json": MAX_PROVENANCE_BYTES,
+        "release-workflow-provenance.attestation.json": MAX_PROVENANCE_BUNDLE_BYTES,
+    }
+    try:
+        with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
+            entries = bundle.infolist()
+            if len(entries) != len(expected) or {
+                entry.filename for entry in entries
+            } != set(expected):
+                raise PermitInputError(
+                    "workflow provenance artifact must contain exactly the marker and attestation",
+                )
+            by_name = {entry.filename: entry for entry in entries}
+            if any(
+                entry.is_dir()
+                or entry.file_size <= 0
+                or entry.file_size > expected[name]
+                for name, entry in by_name.items()
+            ):
+                raise PermitInputError(
+                    "workflow provenance artifact exceeds the size limit"
+                )
+            provenance = bundle.read(by_name["release-workflow-provenance.json"])
+            attestation = bundle.read(
+                by_name["release-workflow-provenance.attestation.json"],
+            )
+    except zipfile.BadZipFile as exc:
+        raise PermitInputError(
+            "workflow provenance artifact is not a valid ZIP archive",
+        ) from exc
+    return provenance, attestation
+
+
+def verify_run_workflow_provenance(
+    client: GitHubReadClient,
+    repository: str,
+    run: dict[str, Any],
+    *,
+    head_sha: str,
+    expected_workflow_sha: str,
+    directory: Path | None = None,
+) -> dict[str, Any] | None:
+    run_id = run.get("id")
+    if not isinstance(run_id, int):
+        raise PermitInputError("workflow provenance run ID is invalid")
+    artifact_id = artifact_for_run(
+        client,
+        repository,
+        run_id,
+        PROVENANCE_ARTIFACT,
+    )
+    if artifact_id is None:
+        return None
+    provenance_bytes, bundle_bytes = extract_workflow_provenance(
+        client.get_bytes(
+            f"/repos/{repository}/actions/artifacts/{artifact_id}/zip",
+            accept="application/vnd.github+json",
+        ),
+    )
+    try:
+        provenance = parse_json_strict(
+            provenance_bytes.decode("utf-8"),
+            label="workflow provenance",
+        )
+    except UnicodeDecodeError as exc:
+        raise PermitInputError("workflow provenance is not UTF-8") from exc
+    if not isinstance(provenance, dict):
+        raise PermitInputError("workflow provenance must be an object")
+    expected_keys = {
+        "schema",
+        "repository",
+        "workflow_path",
+        "workflow_sha",
+        "head_sha",
+        "merge_sha",
+        "run_id",
+        "run_attempt",
+    }
+    if set(provenance) != expected_keys:
+        raise PermitInputError("workflow provenance keys are not exact")
+    common = {
+        "schema": PROVENANCE_SCHEMA,
+        "repository": repository,
+        "workflow_path": WORKFLOW_PATH,
+        "head_sha": head_sha,
+        "run_id": run_id,
+        "run_attempt": run.get("run_attempt"),
+    }
+    for field, value in common.items():
+        if provenance.get(field) != value:
+            raise PermitInputError(
+                f"workflow provenance {field} does not match the run"
+            )
+    workflow_sha = require_sha(
+        provenance.get("workflow_sha"),
+        label="workflow provenance workflow_sha",
+        length=40,
+    )
+    merge_sha = require_sha(
+        provenance.get("merge_sha"),
+        label="workflow provenance merge_sha",
+        length=40,
+    )
+    if directory is None:
+        temporary = tempfile.TemporaryDirectory(prefix="helm-workflow-provenance-")
+        output_dir = Path(temporary.name)
+    else:
+        temporary = None
+        output_dir = directory
+        output_dir.mkdir(parents=True, exist_ok=False)
+    try:
+        provenance_path = output_dir / "release-workflow-provenance.json"
+        bundle_path = output_dir / "release-workflow-provenance.attestation.json"
+        provenance_path.write_bytes(provenance_bytes)
+        bundle_path.write_bytes(bundle_bytes)
+        verify_attestation(
+            provenance_path,
+            bundle_path,
+            repository=repository,
+            workflow_sha=workflow_sha,
+            source_sha=merge_sha,
+            github_token=client.token,
+        )
+    finally:
+        if temporary is not None:
+            temporary.cleanup()
+    return {
+        "workflow_sha": workflow_sha,
+        "is_expected_workflow": workflow_sha == expected_workflow_sha,
+        "merge_sha": merge_sha,
+        "workflow_provenance_sha256": hashlib.sha256(provenance_bytes).hexdigest(),
+    }
+
+
+def run_sort_key(run: dict[str, Any]) -> tuple[int, int, int]:
+    """Sort repeated workflow runs newest-first without trusting list order."""
+    run_number = run.get("run_number")
+    run_attempt = run.get("run_attempt")
+    run_id = run.get("id")
+    return (
+        run_number if isinstance(run_number, int) else 0,
+        run_attempt if isinstance(run_attempt, int) else 0,
+        run_id if isinstance(run_id, int) else 0,
+    )
+
+
 def write_model_reviews(
     client: GitHubReadClient,
     repository: str,
     run_id: int,
     directory: Path,
+    *,
+    context_path: Path,
 ) -> dict[str, Path]:
-    reviews: dict[str, bytes] = {}
+    evidence: dict[str, tuple[bytes, bytes, bytes]] = {}
     for provider in MODEL_REVIEW_PROVIDERS:
         artifact_id = artifact_for_run(
             client,
@@ -326,7 +590,7 @@ def write_model_reviews(
             raise PermitInputError(
                 f"candidate run is missing the {provider} review artifact"
             )
-        reviews[provider] = extract_model_review(
+        evidence[provider] = extract_model_review(
             client.get_bytes(
                 f"/repos/{repository}/actions/artifacts/{artifact_id}/zip",
                 accept="application/vnd.github+json",
@@ -337,9 +601,22 @@ def write_model_reviews(
     directory.mkdir(parents=True, exist_ok=True)
     paths: dict[str, Path] = {}
     for provider in MODEL_REVIEW_PROVIDERS:
-        path = directory / f"review-{provider}.json"
-        path.write_bytes(reviews[provider])
-        paths[provider] = path
+        raw, normalized, review = evidence[provider]
+        raw_path = directory / f"raw-{provider}.txt"
+        normalized_path = directory / f"normalized-{provider}.json"
+        review_path = directory / f"review-{provider}.json"
+        raw_path.write_bytes(raw)
+        normalized_path.write_bytes(normalized)
+        review_path.write_bytes(review)
+        paths[provider] = rebuild_review_evidence(
+            context=context_path,
+            raw_transport=raw_path,
+            normalized_response=normalized_path,
+            review_envelope=review_path,
+            provider=provider,
+            model=MODEL_REVIEW_MODELS[provider],
+            output_dir=directory / f"parent-rebuilt-{provider}",
+        )
     return paths
 
 
@@ -367,6 +644,7 @@ def verify_permit_reduction(
         check=False,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env=sanitized_subprocess_environment(),
     )
     permit = load_json_file(permit_path, label="candidate reduced permit")
     expected_status = {"ALLOW": 0, "DENY": 3}.get(permit.get("decision"))
@@ -398,7 +676,6 @@ def wait_for_canary(
     started_at = parse_time(args.started_at, label="started_at")
     authority = load_json_file(args.expected_authority, label="expected authority")
     deadline = time.monotonic() + args.timeout_seconds
-    rejected_runs: set[int] = set()
     while time.monotonic() < deadline:
         query = urllib.parse.urlencode(
             {"event": "pull_request", "head_sha": head_sha, "per_page": 100},
@@ -407,96 +684,121 @@ def wait_for_canary(
         runs = payload.get("workflow_runs")
         if not isinstance(runs, list):
             raise PermitInputError("GitHub Actions runs response is malformed")
-        for run in runs:
-            if not isinstance(run, dict) or not isinstance(run.get("id"), int):
-                continue
-            run_id = run["id"]
-            if run_id in rejected_runs:
-                continue
-            if (
-                run.get("name") != WORKFLOW_NAME
-                or run.get("path") != WORKFLOW_PATH
-                or run.get("head_sha") != head_sha
-                or parse_time(run.get("created_at"), label="run created_at")
-                < started_at
-                or run.get("status") != "completed"
-                or run.get("conclusion") != "success"
-            ):
-                continue
-            artifact_id = artifact_for_run(client, args.repository, run_id)
-            context_artifact_id = artifact_for_run(
+        matching = [
+            run
+            for run in runs
+            if isinstance(run, dict)
+            and isinstance(run.get("id"), int)
+            and run.get("name") == WORKFLOW_NAME
+            and run.get("path") == WORKFLOW_PATH
+            and run.get("head_sha") == head_sha
+            and parse_time(run.get("created_at"), label="run created_at") >= started_at
+        ]
+        matching.sort(key=run_sort_key, reverse=True)
+        exact_run = None
+        unclassified_newer_run = False
+        for run in matching:
+            provenance = verify_run_workflow_provenance(
+                client,
+                args.repository,
+                run,
+                head_sha=head_sha,
+                expected_workflow_sha=workflow_sha,
+            )
+            if provenance is None:
+                unclassified_newer_run = True
+                break
+            if provenance["is_expected_workflow"]:
+                exact_run = run
+                break
+        if unclassified_newer_run or exact_run is None:
+            time.sleep(args.poll_seconds)
+            continue
+
+        run = exact_run
+        run_id = run["id"]
+        if run.get("status") != "completed":
+            time.sleep(args.poll_seconds)
+            continue
+        if run.get("conclusion") != "success":
+            raise PermitInputError(
+                f"newest exact candidate workflow run {run_id} did not succeed"
+            )
+        artifact_id = artifact_for_run(client, args.repository, run_id)
+        context_artifact_id = artifact_for_run(
+            client,
+            args.repository,
+            run_id,
+            "release-permit-input",
+        )
+        if artifact_id is None or context_artifact_id is None:
+            raise PermitInputError(
+                f"newest exact candidate workflow run {run_id} lacks permit evidence"
+            )
+        archive = client.get_bytes(
+            f"/repos/{args.repository}/actions/artifacts/{artifact_id}/zip",
+            accept="application/vnd.github+json",
+        )
+        permit_bytes, bundle_bytes = extract_attested_permit(archive)
+        context_archive = client.get_bytes(
+            f"/repos/{args.repository}/actions/artifacts/{context_artifact_id}/zip",
+            accept="application/vnd.github+json",
+        )
+        context_bytes = extract_trusted_context(context_archive)
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.bundle.parent.mkdir(parents=True, exist_ok=True)
+        args.context.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_bytes(permit_bytes)
+        args.bundle.write_bytes(bundle_bytes)
+        args.context.write_bytes(context_bytes)
+        review_dir = args.context.parent / "reviews"
+        try:
+            review_paths = write_model_reviews(
                 client,
                 args.repository,
                 run_id,
-                "release-permit-input",
+                review_dir,
+                context_path=args.context,
             )
-            if artifact_id is None or context_artifact_id is None:
-                rejected_runs.add(run_id)
-                continue
-            archive = client.get_bytes(
-                f"/repos/{args.repository}/actions/artifacts/{artifact_id}/zip",
-                accept="application/vnd.github+json",
+            permit = verify_candidate_permit(
+                args.output,
+                args.bundle,
+                args.context,
+                run=run,
+                repository=args.repository,
+                pull_request=args.pull_request,
+                head_sha=head_sha,
+                expected_workflow_sha=workflow_sha,
+                expected_authority=authority,
+                kernel_verifier=args.kernel_verifier,
+                attestation_token=client.token,
             )
-            permit_bytes, bundle_bytes = extract_attested_permit(archive)
-            context_archive = client.get_bytes(
-                f"/repos/{args.repository}/actions/artifacts/{context_artifact_id}/zip",
-                accept="application/vnd.github+json",
+            verify_permit_reduction(
+                args.kernel_verifier,
+                args.output,
+                args.context,
+                review_paths,
+                review_dir / "parent-kernel-permit.json",
             )
-            context_bytes = extract_trusted_context(context_archive)
-            args.output.parent.mkdir(parents=True, exist_ok=True)
-            args.bundle.parent.mkdir(parents=True, exist_ok=True)
-            args.context.parent.mkdir(parents=True, exist_ok=True)
-            args.output.write_bytes(permit_bytes)
-            args.bundle.write_bytes(bundle_bytes)
-            args.context.write_bytes(context_bytes)
-            review_dir = args.context.parent / "reviews"
-            try:
-                review_paths = write_model_reviews(
-                    client,
-                    args.repository,
-                    run_id,
-                    review_dir,
-                )
-                permit = verify_candidate_permit(
-                    args.output,
-                    args.bundle,
-                    args.context,
-                    run=run,
-                    repository=args.repository,
-                    pull_request=args.pull_request,
-                    head_sha=head_sha,
-                    expected_workflow_sha=workflow_sha,
-                    expected_authority=authority,
-                    kernel_verifier=args.kernel_verifier,
-                    attestation_token=client.token,
-                )
-                verify_permit_reduction(
-                    args.kernel_verifier,
-                    args.output,
-                    args.context,
-                    review_paths,
-                    review_dir / "parent-kernel-permit.json",
-                )
-            except PermitInputError:
-                args.output.unlink(missing_ok=True)
-                args.bundle.unlink(missing_ok=True)
-                args.context.unlink(missing_ok=True)
-                if review_dir.exists():
-                    shutil.rmtree(review_dir)
-                rejected_runs.add(run_id)
-                continue
-            return {
-                "schema": "mindburn.release-authority-canary/v1",
-                "repository": args.repository,
-                "pull_request": args.pull_request,
-                "head_sha": head_sha,
-                "workflow_sha": workflow_sha,
-                "run_id": run_id,
-                "run_attempt": run["run_attempt"],
-                "permit_id": permit["permit_id"],
-                "merge_sha": permit["merge_sha"],
-                "merge_tree_sha": permit["merge_tree_sha"],
-            }
+        except (OSError, PermitInputError):
+            args.output.unlink(missing_ok=True)
+            args.bundle.unlink(missing_ok=True)
+            args.context.unlink(missing_ok=True)
+            if review_dir.exists():
+                shutil.rmtree(review_dir)
+            raise
+        return {
+            "schema": "mindburn.release-authority-canary/v1",
+            "repository": args.repository,
+            "pull_request": args.pull_request,
+            "head_sha": head_sha,
+            "workflow_sha": workflow_sha,
+            "run_id": run_id,
+            "run_attempt": run["run_attempt"],
+            "permit_id": permit["permit_id"],
+            "merge_sha": permit["merge_sha"],
+            "merge_tree_sha": permit["merge_tree_sha"],
+        }
         time.sleep(args.poll_seconds)
     raise PermitInputError(
         "timed out waiting for an attested candidate-authority ALLOW canary"

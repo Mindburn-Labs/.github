@@ -85,6 +85,13 @@ Both the promoter and independent observer download the exact two raw provider
 review envelopes and require the immutable parent Kernel to reproduce the
 candidate's `ALLOW` or `DENY` permit byte for byte; a candidate-authored summary
 cannot stand in for reduction evidence.
+The permit workflow has no App secret. It dispatches promotion only for an
+exact next-generation authority change, and the secret-bearing transaction can
+run only from the permanently locked `authority/control-v1` workflow ref.
+Organization rules deny creation, update, and deletion of that ref with no
+bypass actors. Both authority environments disable administrator bypass and
+admit only that ref, so neither a pull request nor mutable `main` can load the
+promoter, observer, or approver credentials.
 Credentialed jobs also bind the pinned token action's live App slug and
 installation ID before use; the approval broker independently checks exact
 repository scope and the persisted GitHub review actor.

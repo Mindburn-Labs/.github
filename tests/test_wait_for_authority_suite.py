@@ -50,6 +50,128 @@ class FakeJobClient:
 
 
 class AuthoritySuiteTests(unittest.TestCase):
+    def test_unclassified_newer_case_run_blocks_older_exact_allow(self) -> None:
+        case = {
+            "id": "allow",
+            "expected": "ALLOW",
+            "pull_request": 8,
+            "head_sha": "b" * 40,
+        }
+        trigger = {
+            "repository": "Mindburn-Labs/lab",
+            "workflow_sha": "a" * 40,
+            "started_at": "2026-07-14T00:00:00Z",
+            "cases": [case],
+        }
+        newer = {"id": 11, "run_number": 11, "run_attempt": 1, "status": "in_progress"}
+        older = {"id": 10, "run_number": 10, "run_attempt": 1, "status": "completed"}
+        client = mock.Mock(token="observer-token")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            args = mock.Mock(
+                contract=Path(tmpdir) / "contract.json",
+                adversarial_corpus=Path(tmpdir) / "corpus.json",
+                trigger=Path(tmpdir) / "trigger.json",
+                expected_workflow_sha="a" * 40,
+                expected_authority=Path(tmpdir) / "authority.json",
+                output_dir=Path(tmpdir) / "suite",
+                timeout_seconds=60,
+                poll_seconds=5,
+            )
+            with (
+                mock.patch.object(MODULE, "load_json", return_value={}),
+                mock.patch.object(MODULE, "validate_contract", return_value={}),
+                mock.patch.object(MODULE, "validate_trigger", return_value=trigger),
+                mock.patch.object(MODULE, "load_json_file", return_value={}),
+                mock.patch.object(
+                    MODULE,
+                    "candidate_runs",
+                    return_value=[newer, older],
+                ),
+                mock.patch.object(
+                    MODULE,
+                    "verify_run_workflow_provenance",
+                    return_value=None,
+                ) as provenance,
+                mock.patch.object(MODULE.time, "monotonic", side_effect=[0, 0, 61]),
+                mock.patch.object(MODULE.time, "sleep"),
+                mock.patch.object(MODULE, "verify_case") as verify,
+                self.assertRaisesRegex(MODULE.PermitInputError, "timed out"),
+            ):
+                MODULE.wait_for_suite(args, client)
+        provenance.assert_called_once()
+        self.assertIs(provenance.call_args.args[2], newer)
+        verify.assert_not_called()
+
+    def test_newest_exact_case_failure_never_falls_back_to_older_run(self) -> None:
+        case = {
+            "id": "allow",
+            "expected": "ALLOW",
+            "pull_request": 8,
+            "head_sha": "b" * 40,
+        }
+        trigger = {
+            "repository": "Mindburn-Labs/lab",
+            "workflow_sha": "a" * 40,
+            "started_at": "2026-07-14T00:00:00Z",
+            "cases": [case],
+        }
+        newer = {
+            "id": 11,
+            "run_number": 11,
+            "run_attempt": 1,
+            "status": "completed",
+        }
+        older = {
+            "id": 10,
+            "run_number": 10,
+            "run_attempt": 1,
+            "status": "completed",
+        }
+        client = mock.Mock(token="observer-token")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            args = mock.Mock(
+                contract=Path(tmpdir) / "contract.json",
+                adversarial_corpus=Path(tmpdir) / "corpus.json",
+                trigger=Path(tmpdir) / "trigger.json",
+                expected_workflow_sha="a" * 40,
+                expected_authority=Path(tmpdir) / "authority.json",
+                output_dir=Path(tmpdir) / "suite",
+                timeout_seconds=60,
+                poll_seconds=5,
+            )
+            with (
+                mock.patch.object(MODULE, "load_json", return_value={}),
+                mock.patch.object(MODULE, "validate_contract", return_value={}),
+                mock.patch.object(
+                    MODULE,
+                    "validate_trigger",
+                    return_value=trigger,
+                ),
+                mock.patch.object(MODULE, "load_json_file", return_value={}),
+                mock.patch.object(
+                    MODULE,
+                    "candidate_runs",
+                    return_value=[newer, older],
+                ),
+                mock.patch.object(
+                    MODULE,
+                    "verify_run_workflow_provenance",
+                    return_value={"is_expected_workflow": True},
+                ),
+                mock.patch.object(
+                    MODULE,
+                    "verify_case",
+                    side_effect=MODULE.PermitInputError("tampered permit"),
+                ) as verify,
+                self.assertRaisesRegex(
+                    MODULE.PermitInputError,
+                    "case allow run 11 failed validation",
+                ),
+            ):
+                MODULE.wait_for_suite(args, client)
+        self.assertEqual(verify.call_count, 1)
+        self.assertIs(verify.call_args.kwargs["run"], newer)
+
     def test_allow_and_deny_cases_are_both_reduced_by_parent_kernel(self) -> None:
         for expected, conclusion in (("ALLOW", "success"), ("DENY", "failure")):
             with (
@@ -194,9 +316,8 @@ class AuthoritySuiteTests(unittest.TestCase):
         )
         with (
             tempfile.TemporaryDirectory() as tmpdir,
-            mock.patch.object(
-                MODULE,
-                "verify_attestation",
+            mock.patch(
+                "wait_for_authority_canary.verify_attestation",
             ) as verifier,
         ):
             detail = MODULE.validate_pre_model_reject(
@@ -296,6 +417,7 @@ class AuthoritySuiteTests(unittest.TestCase):
         )
         with (
             tempfile.TemporaryDirectory() as tmpdir,
+            mock.patch("wait_for_authority_canary.verify_attestation"),
             self.assertRaisesRegex(
                 MODULE.PermitInputError,
                 "workflow_sha does not match the proof run",
