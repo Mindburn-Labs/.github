@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 from pathlib import Path
@@ -45,43 +46,82 @@ PERMIT_KEYS = (
     "reasons",
 )
 
+PARENT_WORKFLOW_PATH = Path(".github/workflows/ci.yml")
+
+# The parent checkout is the trusted authority. Its complete workflow is the
+# allowlist: the candidate may differ only at the four bindings that move the
+# Kernel verifier to the candidate authority generation. The following static
+# shape makes the authority surface explicit and rejects a parent checkout that
+# has drifted from the reviewed protocol without this verifier being updated.
+AUTHORITY_TOP_LEVEL_KEYS = ("name", "on", "permissions", "jobs")
+AUTHORITY_TRIGGERS: dict[str, Any] = {
+    "pull_request": {
+        "types": ["opened", "reopened", "synchronize", "ready_for_review", "edited"]
+    },
+    "push": {"branches": ["main"]},
+}
+AUTHORITY_JOB_IDS = (
+    "local-validation",
+    "workflow-provenance",
+    "repository-gates",
+    "prepare",
+    "model-review",
+    "permit",
+    "machine-approval",
+)
+AUTHORITY_JOB_NEEDS: dict[str, Any] = {
+    "local-validation": None,
+    "workflow-provenance": None,
+    "repository-gates": None,
+    "prepare": "repository-gates",
+    "model-review": "prepare",
+    "permit": ["repository-gates", "prepare", "model-review"],
+    "machine-approval": "permit",
+}
+
 CHECKOUT_ACTION = "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683"
 KERNEL_REPOSITORY = "Mindburn-Labs/helm-ai-kernel"
 PREPARE_KERNEL_STEP = "Checkout pinned Kernel verifier source for isolated review"
 PERMIT_KERNEL_STEP = "Checkout pinned Kernel verifier"
+MACHINE_APPROVAL_KERNEL_STEP = "Checkout pinned Kernel verifier"
 PREPARE_BUNDLE_STEP = "Prepare commit-bound review bundle"
-PREPARE_KERNEL_PATH = "verifier-source"
-PERMIT_KERNEL_PATH = "kernel"
-PREPARE_KERNEL_SPARSE_PATHS = (
-    "core/pkg/releasepermit",
-    "core/cmd/release-permit-verify",
+KERNEL_BINDINGS = (
+    ("prepare", PREPARE_KERNEL_STEP, "with", "ref"),
+    ("permit", PERMIT_KERNEL_STEP, "with", "ref"),
+    ("machine-approval", MACHINE_APPROVAL_KERNEL_STEP, "with", "ref"),
+    ("prepare", PREPARE_BUNDLE_STEP, "env", "KERNEL_SHA"),
 )
-PERMIT_RUNTIME_COPY = (
-    "cp policy/scripts/autonomous_release_permit.py "
-    "autonomous-review-runtime/policy/scripts/autonomous_release_permit.py"
+
+APPROVER_TOKEN_STEP = "Mint isolated approval-only App token"
+APPROVER_TOKEN_ACTION = (
+    "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1"
 )
-PREPARE_COMMAND = (
-    'python3 policy/scripts/autonomous_release_permit.py prepare '
-    '--repository "$REPOSITORY" --pull-request "$PULL_REQUEST" '
-    '--base-ref "$BASE_REF" --base-sha "$BASE_SHA" --head-sha "$HEAD_SHA" '
-    '--merge-sha "$MERGE_SHA" --workflow-repository "$WORKFLOW_REPOSITORY" '
-    '--workflow-path "$WORKFLOW_PATH" --workflow-ref "$WORKFLOW_REF" '
-    '--workflow-sha "$WORKFLOW_SHA" --run-id "$RUN_ID" '
-    '--run-attempt "$RUN_ATTEMPT" '
-    "--issued-at \"$(date -u +'%Y-%m-%dT%H:%M:%SZ')\" "
-    '--anthropic-model "$ANTHROPIC_MODEL" --openai-model "$OPENAI_MODEL" '
-    '--authority-manifest policy/config/autonomous-release-authority.json '
-    '--kernel-sha "$KERNEL_SHA" '
-    '--gate-profiles policy/config/autonomous-release-gates.json '
-    '--adversarial-corpus policy/tests/fixtures/autonomous-release-adversarial.json '
-    '--target-dir target --output-dir permit-input '
-    '--max-patch-bytes "$MAX_PATCH_BYTES" '
-    '--max-changed-blob-bytes "$MAX_CHANGED_BLOB_BYTES"'
+APPROVER_TOKEN_ID = "approver-token"
+APPROVER_TOKEN_REFERENCE = "${{ steps.approver-token.outputs.token }}"
+APPROVAL_STEP = "Approve only the exact signed head"
+IMMUTABLE_WORKFLOW_REF = "${{ github.workflow_sha }}"
+MACHINE_APPROVAL_VERIFIER_BUILD = (
+    'go build -trimpath -o "$GITHUB_WORKSPACE/release-permit-verify" '
+    "./cmd/release-permit-verify"
+)
+MACHINE_APPROVAL_STEP_NAMES = (
+    "Download signed ALLOW permit",
+    "Download permit context",
+    "Checkout immutable approval broker",
+    "Checkout pinned Kernel verifier",
+    "Set up pinned Kernel toolchain",
+    "Build source-owned permit verifier",
+    "Mint isolated approval-only App token",
+    "Bind exact approval App identity",
+    "Approve only the exact signed head",
+    "Retain approval receipt",
 )
 
 # Psych is already a repository prerequisite. It is used here rather than a
-# permissive YAML loader so comments, duplicate keys, aliases, and merge keys
-# cannot manufacture a lexical-looking authority workflow.
+# permissive YAML loader so comments, duplicate keys, aliases, merge keys, or
+# YAML 1.1 coercion (notably on -> true) cannot manufacture an authority
+# workflow that looks equivalent only after parsing. The AST projection keeps
+# scalar spellings intact while rejecting non-standard tags.
 STRICT_WORKFLOW_YAML_PARSER = r'''
 require "json"
 require "psych"
@@ -92,6 +132,10 @@ def reject_unsafe_yaml(node)
   end
 
   case node
+  when Psych::Nodes::Scalar
+    if node.tag
+      raise "YAML tags are not allowed"
+    end
   when Psych::Nodes::Alias
     raise "YAML aliases or anchors are not allowed"
   when Psych::Nodes::Mapping
@@ -119,14 +163,35 @@ def reject_unsafe_yaml(node)
   end
 end
 
+def project_yaml(node)
+  case node
+  when Psych::Nodes::Scalar
+    node.value
+  when Psych::Nodes::Sequence
+    node.children.map { |child| project_yaml(child) }
+  when Psych::Nodes::Mapping
+    object = {}
+    node.children.each_slice(2) do |key, value|
+      object[key.value] = project_yaml(value)
+    end
+    object
+  else
+    raise "unsupported YAML node: #{node.class}"
+  end
+end
+
 begin
   source = STDIN.read
   stream = Psych.parse_stream(source)
   unless stream.children.length == 1
     raise "YAML document must contain exactly one document"
   end
-  reject_unsafe_yaml(stream.children.first)
-  document = Psych.safe_load(source, permitted_classes: [], aliases: false)
+  document_node = stream.children.first
+  unless document_node.is_a?(Psych::Nodes::Document) && document_node.children.length == 1
+    raise "YAML document must contain exactly one root node"
+  end
+  reject_unsafe_yaml(document_node)
+  document = project_yaml(document_node.children.first)
   unless document.is_a?(Hash)
     raise "YAML document must be an object"
   end
@@ -152,7 +217,11 @@ def require_mapping(value: Any, *, label: str) -> dict[str, Any]:
     return value
 
 
-def parse_strict_workflow_yaml(content: str) -> dict[str, Any]:
+def parse_strict_workflow_yaml(
+    content: str,
+    *,
+    label: str = "candidate workflow",
+) -> dict[str, Any]:
     try:
         process = subprocess.run(
             ["ruby", "-e", STRICT_WORKFLOW_YAML_PARSER],
@@ -163,19 +232,19 @@ def parse_strict_workflow_yaml(content: str) -> dict[str, Any]:
         )
     except OSError as exc:
         raise PermitInputError(
-            f"candidate workflow YAML parser is unavailable: {exc}"
+            f"{label} YAML parser is unavailable: {exc}"
         ) from exc
     if process.returncode != 0:
         detail = process.stderr.decode("utf-8", errors="replace").strip()
-        raise PermitInputError(f"candidate workflow YAML rejected: {detail}")
-    parsed = load_json_bytes(process.stdout, label="candidate workflow YAML")
-    return require_mapping(parsed, label="candidate workflow")
+        raise PermitInputError(f"{label} YAML rejected: {detail}")
+    parsed = load_json_bytes(process.stdout, label=f"{label} YAML")
+    return require_mapping(parsed, label=label)
 
 
 def find_named_step(job: dict[str, Any], *, name: str, label: str) -> dict[str, Any]:
     steps = job.get("steps")
     if not isinstance(steps, list):
-        raise PermitInputError(f"candidate {label} steps must be an array")
+        raise PermitInputError(f"{label} steps must be an array")
     matches = [
         step
         for step in steps
@@ -183,168 +252,285 @@ def find_named_step(job: dict[str, Any], *, name: str, label: str) -> dict[str, 
     ]
     if len(matches) != 1:
         raise PermitInputError(
-            f"candidate {label} must contain exactly one {name!r} step"
+            f"{label} must contain exactly one {name!r} step"
         )
     return matches[0]
 
 
-def validate_kernel_checkout(
-    step: dict[str, Any],
+def require_ordered_keys(
+    value: dict[str, Any],
+    *,
+    expected: tuple[str, ...],
+    label: str,
+) -> None:
+    if tuple(value) != expected:
+        raise PermitInputError(
+            f"{label} keys must exactly match the parent-owned authority contract"
+        )
+
+
+def validate_authority_workflow_shape(
+    workflow: dict[str, Any],
     *,
     label: str,
-    kernel_sha: str,
-    path: str,
-    sparse_paths: tuple[str, ...] | None,
 ) -> None:
-    if step.get("uses") != CHECKOUT_ACTION:
-        raise PermitInputError(f"candidate {label} must use the pinned checkout action")
-    checkout = require_mapping(step.get("with"), label=f"candidate {label} with")
-    expected_keys = {"repository", "ref", "persist-credentials", "path"}
-    if sparse_paths is not None:
-        expected_keys.add("sparse-checkout")
-    require_exact_keys(
-        checkout,
-        required=expected_keys,
-        label=f"candidate {label} checkout",
+    require_ordered_keys(
+        workflow,
+        expected=AUTHORITY_TOP_LEVEL_KEYS,
+        label=label,
     )
-    if checkout["repository"] != KERNEL_REPOSITORY:
-        raise PermitInputError(f"candidate {label} repository is not the Kernel")
-    if checkout["ref"] != kernel_sha:
-        raise PermitInputError(f"candidate {label} ref is not the authority Kernel SHA")
-    if checkout["persist-credentials"] is not False:
-        raise PermitInputError(f"candidate {label} must disable persisted credentials")
-    if checkout["path"] != path:
-        raise PermitInputError(f"candidate {label} path is not the expected path")
-    if sparse_paths is not None:
-        sparse_checkout = checkout["sparse-checkout"]
-        if not isinstance(sparse_checkout, str) or tuple(
-            line for line in sparse_checkout.splitlines() if line
-        ) != sparse_paths:
+    if workflow["on"] != AUTHORITY_TRIGGERS:
+        raise PermitInputError(f"{label} triggers differ from the authority contract")
+    if workflow["permissions"] != {}:
+        raise PermitInputError(
+            f"{label} top-level permissions differ from the authority contract"
+        )
+
+    jobs = require_mapping(workflow["jobs"], label=f"{label} jobs")
+    require_ordered_keys(jobs, expected=AUTHORITY_JOB_IDS, label=f"{label} jobs")
+    for job_id, expected_needs in AUTHORITY_JOB_NEEDS.items():
+        job = require_mapping(jobs[job_id], label=f"{label} {job_id} job")
+        observed_needs = job.get("needs")
+        if expected_needs is None:
+            if "needs" in job:
+                raise PermitInputError(
+                    f"{label} {job_id} job must not declare dependencies"
+                )
+        elif observed_needs != expected_needs:
             raise PermitInputError(
-                f"candidate {label} sparse checkout paths are not exact"
+                f"{label} {job_id} dependency graph differs from the authority contract"
             )
 
 
-def collect_shell_commands(run: Any, *, label: str) -> list[str]:
-    if not isinstance(run, str):
-        raise PermitInputError(f"candidate {label} must be a string")
-    commands: list[str] = []
-    current: list[str] = []
-    for raw_line in run.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        continued = line.endswith("\\")
-        if continued:
-            line = line[:-1].rstrip()
-            if not line:
-                raise PermitInputError(f"candidate {label} has an empty continuation")
-        current.append(line)
-        if not continued:
-            commands.append(" ".join(current))
-            current = []
-    if current:
-        raise PermitInputError(f"candidate {label} has an unterminated continuation")
-    return commands
+def find_value_paths(value: Any, *, target: str, path: str) -> list[str]:
+    if isinstance(value, dict):
+        paths: list[str] = []
+        for key, child in value.items():
+            paths.extend(find_value_paths(child, target=target, path=f"{path}.{key}"))
+        return paths
+    if isinstance(value, list):
+        paths = []
+        for index, child in enumerate(value):
+            paths.extend(find_value_paths(child, target=target, path=f"{path}[{index}]"))
+        return paths
+    return [path] if value == target else []
 
 
-def parse_restricted_prepare_command(run: Any) -> None:
-    commands = collect_shell_commands(run, label="prepare command")
-    if any(command.startswith("#") for command in commands):
-        raise PermitInputError("candidate prepare command cannot contain comments")
-    if len(commands) != 2 or commands[0] != "set -euo pipefail":
-        raise PermitInputError("candidate prepare command has an unexpected control shape")
-    if commands[1] != PREPARE_COMMAND:
-        raise PermitInputError("candidate prepare command has an unexpected semantic shape")
-
-
-def reject_alternate_authority_execution(
-    job: dict[str, Any],
+def validate_machine_approval_chain(
+    workflow: dict[str, Any],
     *,
     label: str,
-    kernel_step_name: str,
-    prepare_step_name: str | None,
 ) -> None:
-    steps = job.get("steps")
+    jobs = require_mapping(workflow.get("jobs"), label=f"{label} jobs")
+    machine_approval = require_mapping(
+        jobs.get("machine-approval"),
+        label=f"{label} machine-approval job",
+    )
+    steps = machine_approval.get("steps")
     if not isinstance(steps, list):
-        raise PermitInputError(f"candidate {label} steps must be an array")
-    for index, step in enumerate(steps):
-        if not isinstance(step, dict):
-            continue
-        checkout = step.get("with")
-        if (
-            isinstance(checkout, dict)
-            and checkout.get("repository") == KERNEL_REPOSITORY
-            and step.get("name") != kernel_step_name
+        raise PermitInputError(f"{label} machine-approval steps must be an array")
+    if tuple(
+        step.get("name") if isinstance(step, dict) else None for step in steps
+    ) != MACHINE_APPROVAL_STEP_NAMES:
+        raise PermitInputError(
+            f"{label} machine-approval steps differ from the authority contract"
+        )
+
+    broker_step = find_named_step(
+        machine_approval,
+        name="Checkout immutable approval broker",
+        label=f"{label} machine-approval job",
+    )
+    broker_checkout = require_mapping(
+        broker_step.get("with"),
+        label=f"{label} immutable approval broker checkout",
+    )
+    if (
+        broker_step.get("uses") != CHECKOUT_ACTION
+        or broker_checkout.get("repository") != "Mindburn-Labs/.github"
+        or broker_checkout.get("ref") != IMMUTABLE_WORKFLOW_REF
+        or broker_checkout.get("persist-credentials") != "false"
+        or broker_checkout.get("path") != "policy"
+    ):
+        raise PermitInputError(
+            f"{label} immutable approval broker checkout differs from the authority contract"
+        )
+
+    kernel_step = find_named_step(
+        machine_approval,
+        name=MACHINE_APPROVAL_KERNEL_STEP,
+        label=f"{label} machine-approval job",
+    )
+    kernel_checkout = require_mapping(
+        kernel_step.get("with"),
+        label=f"{label} machine-approval Kernel checkout",
+    )
+    if (
+        kernel_step.get("uses") != CHECKOUT_ACTION
+        or kernel_checkout.get("repository") != KERNEL_REPOSITORY
+        or kernel_checkout.get("persist-credentials") != "false"
+        or kernel_checkout.get("path") != "kernel"
+    ):
+        raise PermitInputError(
+            f"{label} machine-approval Kernel checkout differs from the authority contract"
+        )
+    require_sha(
+        kernel_checkout.get("ref"),
+        label=f"{label} machine-approval Kernel checkout ref",
+        length=40,
+    )
+
+    verifier_build = find_named_step(
+        machine_approval,
+        name="Build source-owned permit verifier",
+        label=f"{label} machine-approval job",
+    )
+    if (
+        verifier_build.get("working-directory") != "kernel/core"
+        or verifier_build.get("run") != MACHINE_APPROVAL_VERIFIER_BUILD
+    ):
+        raise PermitInputError(
+            f"{label} machine-approval verifier build differs from the authority contract"
+        )
+
+    token_step = find_named_step(
+        machine_approval,
+        name=APPROVER_TOKEN_STEP,
+        label=f"{label} machine-approval job",
+    )
+    if token_step.get("id") != APPROVER_TOKEN_ID:
+        raise PermitInputError(f"{label} approval token step ID is not exact")
+    if token_step.get("uses") != APPROVER_TOKEN_ACTION:
+        raise PermitInputError(f"{label} approval token action SHA is not exact")
+
+    approval_step = find_named_step(
+        machine_approval,
+        name=APPROVAL_STEP,
+        label=f"{label} machine-approval job",
+    )
+    approval_environment = require_mapping(
+        approval_step.get("env"),
+        label=f"{label} exact-head approval environment",
+    )
+    if (
+        approval_environment.get("HELM_AUTHORITY_APPROVER_TOKEN")
+        != APPROVER_TOKEN_REFERENCE
+    ):
+        raise PermitInputError(
+            f"{label} exact-head approval does not consume the isolated App token"
+        )
+    token_paths = find_value_paths(
+        workflow,
+        target=APPROVER_TOKEN_REFERENCE,
+        path="workflow",
+    )
+    expected_token_path = (
+        "workflow.jobs.machine-approval.steps[8].env."
+        "HELM_AUTHORITY_APPROVER_TOKEN"
+    )
+    if token_paths != [expected_token_path]:
+        raise PermitInputError(
+            f"{label} isolated App token must have exactly one approval-step consumer"
+        )
+
+
+def parent_workflow_source() -> Path:
+    path = Path(__file__).resolve().parents[1] / PARENT_WORKFLOW_PATH
+    if path.is_symlink() or not path.is_file():
+        raise PermitInputError("parent authority workflow source is not a regular file")
+    return path
+
+
+def expected_candidate_workflow(kernel_sha: str) -> dict[str, Any]:
+    require_sha(kernel_sha, label="candidate authority kernel_sha", length=40)
+    parent_path = parent_workflow_source()
+    try:
+        parent_text = parent_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise PermitInputError(
+            f"unable to read parent authority workflow: {exc}"
+        ) from exc
+    parent = parse_strict_workflow_yaml(parent_text, label="parent authority workflow")
+    validate_authority_workflow_shape(parent, label="parent authority workflow")
+    validate_machine_approval_chain(parent, label="parent authority workflow")
+
+    expected = copy.deepcopy(parent)
+    jobs = require_mapping(expected["jobs"], label="parent authority workflow jobs")
+    for job_id, step_name, section_name, field_name in KERNEL_BINDINGS:
+        job = require_mapping(
+            jobs[job_id],
+            label=f"parent authority workflow {job_id} job",
+        )
+        step = find_named_step(
+            job,
+            name=step_name,
+            label=f"parent authority workflow {job_id} job",
+        )
+        section = require_mapping(
+            step.get(section_name),
+            label=f"parent authority workflow {job_id} {step_name} {section_name}",
+        )
+        baseline_value = section.get(field_name)
+        require_sha(
+            baseline_value,
+            label=(
+                "parent authority workflow "
+                f"{job_id} {step_name} {section_name}.{field_name}"
+            ),
+            length=40,
+        )
+        section[field_name] = kernel_sha
+    return expected
+
+
+def first_workflow_difference(
+    expected: Any,
+    candidate: Any,
+    *,
+    path: str = "workflow",
+) -> str | None:
+    if type(expected) is not type(candidate):
+        return path
+    if isinstance(expected, dict):
+        if tuple(expected) != tuple(candidate):
+            return f"{path} keys/order"
+        for key, expected_value in expected.items():
+            difference = first_workflow_difference(
+                expected_value,
+                candidate[key],
+                path=f"{path}.{key}",
+            )
+            if difference is not None:
+                return difference
+        return None
+    if isinstance(expected, list):
+        if len(expected) != len(candidate):
+            return f"{path} length"
+        for index, (expected_value, candidate_value) in enumerate(
+            zip(expected, candidate, strict=True)
         ):
-            raise PermitInputError(
-                f"candidate {label} has an alternate Kernel checkout at step {index}"
+            difference = first_workflow_difference(
+                expected_value,
+                candidate_value,
+                path=f"{path}[{index}]",
             )
-        run = step.get("run")
-        if (
-            isinstance(run, str)
-            and any(
-                "autonomous_release_permit.py" in command
-                and command != PERMIT_RUNTIME_COPY
-                for command in collect_shell_commands(
-                    run,
-                    label=f"{label} step {index} run",
-                )
-            )
-            and step.get("name") != prepare_step_name
-        ):
-            raise PermitInputError(
-                f"candidate {label} has an alternate permit-builder command at step {index}"
-            )
+            if difference is not None:
+                return difference
+        return None
+    return None if expected == candidate else path
 
 
 def validate_candidate_workflow(workflow: str, *, kernel_sha: str) -> None:
     candidate = parse_strict_workflow_yaml(workflow)
-    jobs = require_mapping(candidate.get("jobs"), label="candidate workflow jobs")
-    prepare = require_mapping(jobs.get("prepare"), label="candidate prepare job")
-    permit = require_mapping(jobs.get("permit"), label="candidate permit job")
-    reject_alternate_authority_execution(
-        prepare,
-        label="prepare job",
-        kernel_step_name=PREPARE_KERNEL_STEP,
-        prepare_step_name=PREPARE_BUNDLE_STEP,
-    )
-    reject_alternate_authority_execution(
-        permit,
-        label="permit job",
-        kernel_step_name=PERMIT_KERNEL_STEP,
-        prepare_step_name=None,
-    )
-
-    validate_kernel_checkout(
-        find_named_step(prepare, name=PREPARE_KERNEL_STEP, label="prepare job"),
-        label="prepare Kernel checkout",
-        kernel_sha=kernel_sha,
-        path=PREPARE_KERNEL_PATH,
-        sparse_paths=PREPARE_KERNEL_SPARSE_PATHS,
-    )
-    validate_kernel_checkout(
-        find_named_step(permit, name=PERMIT_KERNEL_STEP, label="permit job"),
-        label="permit Kernel checkout",
-        kernel_sha=kernel_sha,
-        path=PERMIT_KERNEL_PATH,
-        sparse_paths=None,
-    )
-
-    prepare_bundle = find_named_step(
-        prepare,
-        name=PREPARE_BUNDLE_STEP,
-        label="prepare job",
-    )
-    environment = require_mapping(
-        prepare_bundle.get("env"),
-        label="candidate prepare command environment",
-    )
-    if environment.get("KERNEL_SHA") != kernel_sha:
+    validate_authority_workflow_shape(candidate, label="candidate workflow")
+    validate_machine_approval_chain(candidate, label="candidate workflow")
+    expected = expected_candidate_workflow(kernel_sha)
+    difference = first_workflow_difference(expected, candidate)
+    if difference is not None:
         raise PermitInputError(
-            "candidate prepare KERNEL_SHA is not the authority Kernel SHA"
+            "candidate workflow differs from the complete parent-owned authority "
+            f"contract at {difference}"
         )
-    parse_restricted_prepare_command(prepare_bundle.get("run"))
 
 
 def run_git(repository: Path, *arguments: str) -> bytes:

@@ -55,11 +55,20 @@ Both the promoter and independent observer download the exact two raw provider
 review envelopes and require the immutable parent Kernel to reproduce the
 candidate's `ALLOW` or `DENY` permit byte for byte; a candidate-authored summary
 cannot stand in for reduction evidence.
-Successor ratification also structurally parses the candidate workflow with
-Ruby/Psych before it inspects workflow authority semantics. Duplicate keys, aliases,
-merge keys, comments, or repeated text cannot stand in for the exact
-credentialless Kernel checkouts and the canonical permit-input command bound to
-the candidate authority manifest and Kernel SHA.
+Successor ratification structurally parses the candidate workflow with
+Ruby/Psych into an AST-preserving projection before it evaluates authority
+semantics. That preserves YAML scalar spellings (including the `on` trigger
+key) and rejects duplicate keys, aliases, merge keys, and custom tags. The
+previous immutable workflow is the complete parent-owned allowlist: candidate
+top-level keys, triggers, permissions, absence of defaults/concurrency,
+known-job graph, job execution fields, ordered steps, action SHAs, inputs,
+environment, scripts, and artifact paths must all match it exactly. The only
+permitted successor differences are the three declared Kernel checkout refs
+and the matching `prepare` `KERNEL_SHA`. The approval chain is also modeled
+explicitly: its immutable broker checkout and verifier build remain ordered,
+the approval-only App action SHA and step ID are exact, and that App token has
+one consumer only—the exact-head approval step. Comments, repeated text, or
+an unreviewed execution surface cannot constitute authority evidence.
 Credentialed jobs also bind the pinned token action's live App slug and
 installation ID before use; the approval broker independently checks exact
 repository scope and the persisted GitHub review actor.

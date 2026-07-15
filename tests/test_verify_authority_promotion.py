@@ -35,70 +35,34 @@ def git(repository: Path, *arguments: str) -> str:
     ).strip()
 
 
-def minimal_semantic_workflow() -> str:
-    return f"""name: permit
-jobs:
-  prepare:
-    steps:
-      - name: {MODULE.PREPARE_KERNEL_STEP}
-        uses: {MODULE.CHECKOUT_ACTION}
-        with:
-          repository: {MODULE.KERNEL_REPOSITORY}
-          ref: {CANDIDATE_KERNEL_SHA}
-          persist-credentials: false
-          path: {MODULE.PREPARE_KERNEL_PATH}
-          sparse-checkout: |
-            core/pkg/releasepermit
-            core/cmd/release-permit-verify
-      - name: {MODULE.PREPARE_BUNDLE_STEP}
-        env:
-          KERNEL_SHA: {CANDIDATE_KERNEL_SHA}
-        run: |
-          set -euo pipefail
-          python3 policy/scripts/autonomous_release_permit.py prepare \\
-            --repository "$REPOSITORY" \\
-            --pull-request "$PULL_REQUEST" \\
-            --base-ref "$BASE_REF" \\
-            --base-sha "$BASE_SHA" \\
-            --head-sha "$HEAD_SHA" \\
-            --merge-sha "$MERGE_SHA" \\
-            --workflow-repository "$WORKFLOW_REPOSITORY" \\
-            --workflow-path "$WORKFLOW_PATH" \\
-            --workflow-ref "$WORKFLOW_REF" \\
-            --workflow-sha "$WORKFLOW_SHA" \\
-            --run-id "$RUN_ID" \\
-            --run-attempt "$RUN_ATTEMPT" \\
-            --issued-at "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \\
-            --anthropic-model "$ANTHROPIC_MODEL" \\
-            --openai-model "$OPENAI_MODEL" \\
-            --authority-manifest policy/config/autonomous-release-authority.json \\
-            --kernel-sha "$KERNEL_SHA" \\
-            --gate-profiles policy/config/autonomous-release-gates.json \\
-            --adversarial-corpus policy/tests/fixtures/autonomous-release-adversarial.json \\
-            --target-dir target \\
-            --output-dir permit-input \\
-            --max-patch-bytes "$MAX_PATCH_BYTES" \\
-            --max-changed-blob-bytes "$MAX_CHANGED_BLOB_BYTES"
-  permit:
-    steps:
-      - name: {MODULE.PERMIT_KERNEL_STEP}
-        uses: {MODULE.CHECKOUT_ACTION}
-        with:
-          repository: {MODULE.KERNEL_REPOSITORY}
-          ref: {CANDIDATE_KERNEL_SHA}
-          persist-credentials: false
-          path: {MODULE.PERMIT_KERNEL_PATH}
-"""
+def replace_once(source: str, old: str, new: str) -> str:
+    if source.count(old) != 1:
+        raise AssertionError(f"expected exactly one occurrence of {old!r}")
+    return source.replace(old, new, 1)
 
 
-def legacy_lexical_workflow() -> str:
-    return f"""name: permit
-steps:
-  - ref: {CANDIDATE_KERNEL_SHA}
-  - ref: {CANDIDATE_KERNEL_SHA}
-  - ref: {CANDIDATE_KERNEL_SHA}
-  - run: python script.py --authority-manifest policy/config/autonomous-release-authority.json
-"""
+def replace_after(source: str, anchor: str, old: str, new: str) -> str:
+    before, separator, after = source.partition(anchor)
+    if not separator:
+        raise AssertionError(f"missing anchor {anchor!r}")
+    if old not in after:
+        raise AssertionError(f"missing text after anchor {old!r}")
+    return before + separator + after.replace(old, new, 1)
+
+
+def authority_workflow_fixture(kernel_sha: str = CANDIDATE_KERNEL_SHA) -> str:
+    authority = json.loads(
+        (ROOT / "config" / "autonomous-release-authority.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    parent_kernel_sha = authority["kernel_sha"]
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+        encoding="utf-8"
+    )
+    if workflow.count(parent_kernel_sha) != 4:
+        raise AssertionError("authority workflow must expose exactly four Kernel bindings")
+    return workflow.replace(parent_kernel_sha, kernel_sha)
 
 
 def build_candidate(
@@ -129,12 +93,13 @@ def build_candidate(
         encoding="utf-8",
     )
     (repository / ".github" / "workflows" / "ci.yml").write_text(
-        workflow or minimal_semantic_workflow(),
+        workflow or authority_workflow_fixture(),
         encoding="utf-8",
     )
     subprocess.run(["git", "-C", str(repository), "init", "-b", "main"], check=True)
     subprocess.run(
-        ["git", "-C", str(repository), "config", "user.name", "Permit Test"], check=True
+        ["git", "-C", str(repository), "config", "user.name", "Permit Test"],
+        check=True,
     )
     subprocess.run(
         ["git", "-C", str(repository), "config", "user.email", "permit@example.test"],
@@ -290,20 +255,30 @@ class AuthorityPromotionTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 MODULE.PermitInputError, "pinned Kernel rejected"
             ):
-                    MODULE.verify(
-                        verify_args(
-                            repository,
-                            candidate_sha,
-                            permit_path,
-                            build_fake_verifier(root, succeeds=False),
-                        ),
-                    )
+                MODULE.verify(
+                    verify_args(
+                        repository,
+                        candidate_sha,
+                        permit_path,
+                        build_fake_verifier(root, succeeds=False),
+                    ),
+                )
 
 
-class CandidateWorkflowSemanticsTests(unittest.TestCase):
-    def test_valid_minimal_semantic_fixture(self) -> None:
+class CandidateWorkflowContractTests(unittest.TestCase):
+    def assert_rejected(self, workflow: str) -> None:
+        with self.assertRaisesRegex(
+            MODULE.PermitInputError,
+            "(authority contract|machine-approval|triggers|isolated App token)",
+        ):
+            MODULE.validate_candidate_workflow(
+                workflow,
+                kernel_sha=CANDIDATE_KERNEL_SHA,
+            )
+
+    def test_valid_complete_parent_owned_fixture(self) -> None:
         MODULE.validate_candidate_workflow(
-            minimal_semantic_workflow(),
+            authority_workflow_fixture(),
             kernel_sha=CANDIDATE_KERNEL_SHA,
         )
 
@@ -318,217 +293,215 @@ class CandidateWorkflowSemanticsTests(unittest.TestCase):
             kernel_sha=authority["kernel_sha"],
         )
 
-    def test_legacy_lexical_fixture_cannot_satisfy_semantic_validation(self) -> None:
-        with self.assertRaisesRegex(MODULE.PermitInputError, "workflow jobs"):
-            MODULE.validate_candidate_workflow(
-                legacy_lexical_workflow(),
-                kernel_sha=CANDIDATE_KERNEL_SHA,
-            )
-
-    def test_comments_cannot_supply_kernel_pin_evidence(self) -> None:
-        wrong_ref = minimal_semantic_workflow().replace(
-            f"ref: {CANDIDATE_KERNEL_SHA}",
-            f"ref: {'d' * 40}",
+    def test_only_declared_kernel_bindings_may_differ(self) -> None:
+        wrong_kernel = authority_workflow_fixture().replace(
+            CANDIDATE_KERNEL_SHA,
+            "d" * 40,
             1,
         )
-        comment_padded = (
-            wrong_ref
-            + f"# ref: {CANDIDATE_KERNEL_SHA}\n"
-            + f"# ref: {CANDIDATE_KERNEL_SHA}\n"
-        )
-        with self.assertRaisesRegex(
-            MODULE.PermitInputError,
-            "prepare Kernel checkout ref",
-        ):
-            MODULE.validate_candidate_workflow(
-                comment_padded,
-                kernel_sha=CANDIDATE_KERNEL_SHA,
-            )
+        self.assert_rejected(wrong_kernel)
 
-    def test_wrong_kernel_checkout_semantics_fail_closed(self) -> None:
-        cases = (
-            (
-                "action",
-                minimal_semantic_workflow().replace(
-                    f"uses: {MODULE.CHECKOUT_ACTION}",
-                    "uses: actions/checkout@v4",
-                    1,
-                ),
-                "prepare Kernel checkout must use the pinned checkout action",
-            ),
-            (
-                "repository",
-                minimal_semantic_workflow().replace(
-                    f"repository: {MODULE.KERNEL_REPOSITORY}",
-                    "repository: Mindburn-Labs/not-the-kernel",
-                    1,
-                ),
-                "prepare Kernel checkout repository",
-            ),
-            (
-                "ref",
-                minimal_semantic_workflow().replace(
-                    f"ref: {CANDIDATE_KERNEL_SHA}",
-                    f"ref: {'d' * 40}",
-                    1,
-                ),
-                "prepare Kernel checkout ref",
-            ),
-            (
-                "persisted credentials",
-                minimal_semantic_workflow().replace(
-                    "persist-credentials: false",
-                    "persist-credentials: true",
-                    1,
-                ),
-                "prepare Kernel checkout must disable persisted credentials",
-            ),
-            (
-                "path",
-                minimal_semantic_workflow().replace(
-                    f"path: {MODULE.PREPARE_KERNEL_PATH}",
-                    "path: rogue-kernel",
-                    1,
-                ),
-                "prepare Kernel checkout path",
-            ),
-            (
-                "permit path",
-                minimal_semantic_workflow().replace(
-                    f"path: {MODULE.PERMIT_KERNEL_PATH}",
-                    "path: rogue-permit-kernel",
-                    1,
-                ),
-                "permit Kernel checkout path",
-            ),
-            (
-                "sparse paths",
-                minimal_semantic_workflow().replace(
-                    "core/cmd/release-permit-verify",
-                    "core/cmd/not-the-verifier",
-                    1,
-                ),
-                "prepare Kernel checkout sparse checkout paths",
-            ),
-        )
-        for name, workflow, message in cases:
-            with self.subTest(name=name):
-                with self.assertRaisesRegex(MODULE.PermitInputError, message):
-                    MODULE.validate_candidate_workflow(
-                        workflow,
-                        kernel_sha=CANDIDATE_KERNEL_SHA,
-                    )
-
-    def test_prepare_kernel_sha_environment_is_bound_to_authority(self) -> None:
-        workflow = minimal_semantic_workflow().replace(
-            f"KERNEL_SHA: {CANDIDATE_KERNEL_SHA}",
-            f"KERNEL_SHA: {'d' * 40}",
+    def test_comments_cannot_supply_authority_evidence(self) -> None:
+        wrong_kernel = authority_workflow_fixture().replace(
+            CANDIDATE_KERNEL_SHA,
+            "d" * 40,
             1,
         )
-        with self.assertRaisesRegex(
-            MODULE.PermitInputError,
-            "prepare KERNEL_SHA is not the authority Kernel SHA",
-        ):
-            MODULE.validate_candidate_workflow(
-                workflow,
-                kernel_sha=CANDIDATE_KERNEL_SHA,
-            )
+        self.assert_rejected(wrong_kernel + f"# ref: {CANDIDATE_KERNEL_SHA}\n")
 
-    def test_missing_authority_manifest_binding_fails_closed(self) -> None:
-        workflow = minimal_semantic_workflow().replace(
-            "--authority-manifest policy/config/autonomous-release-authority.json",
-            "--missing-authority-manifest",
-            1,
-        )
-        with self.assertRaisesRegex(
-            MODULE.PermitInputError,
-            "prepare command has an unexpected semantic shape",
-        ):
-            MODULE.validate_candidate_workflow(
-                workflow,
-                kernel_sha=CANDIDATE_KERNEL_SHA,
-            )
-
-    def test_duplicate_keys_and_aliases_fail_before_semantic_lookup(self) -> None:
-        duplicate = minimal_semantic_workflow().replace(
+    def test_strict_yaml_rejects_duplicate_keys_aliases_and_tags(self) -> None:
+        workflow = authority_workflow_fixture()
+        duplicate = workflow.replace(
             "  permit:\n",
             "  prepare:\n    steps: []\n  permit:\n",
             1,
         )
-        alias = (
-            "shared: &shared\n"
-            "  ignored: true\n"
-            "alias: *shared\n"
-            + minimal_semantic_workflow()
+        alias = "shared: &shared\n  ignored: true\nalias: *shared\n" + workflow
+        tagged = workflow.replace(
+            "name: HELM Autonomous Release Permit",
+            'name: !unsafe "HELM Autonomous Release Permit"',
+            1,
         )
-        for name, workflow, message in (
+        for name, malformed, message in (
             ("duplicate", duplicate, "duplicate YAML key: prepare"),
             ("alias", alias, "YAML aliases or anchors"),
+            ("tag", tagged, "YAML tags are not allowed"),
         ):
             with self.subTest(name=name):
                 with self.assertRaisesRegex(MODULE.PermitInputError, message):
                     MODULE.validate_candidate_workflow(
-                        workflow,
+                        malformed,
                         kernel_sha=CANDIDATE_KERNEL_SHA,
                     )
 
-    def test_malformed_prepare_command_and_alternate_execution_fail_closed(self) -> None:
-        malformed = minimal_semantic_workflow().replace(
-            "policy/scripts/autonomous_release_permit.py prepare",
-            "policy/scripts/not-the-permit-builder.py prepare",
-            1,
+    def test_yaml_on_key_is_not_coerced_to_boolean(self) -> None:
+        self.assert_rejected(
+            replace_once(authority_workflow_fixture(), "\non:\n", "\ntrue:\n")
         )
-        alternate_kernel = minimal_semantic_workflow().replace(
-            "  permit:\n",
-            f"""      - name: Rogue Kernel checkout
-        uses: {MODULE.CHECKOUT_ACTION}
-        with:
-          repository: {MODULE.KERNEL_REPOSITORY}
-          ref: {CANDIDATE_KERNEL_SHA}
-          persist-credentials: false
-          path: rogue-kernel
-  permit:
-""",
-            1,
-        )
-        alternate_command = minimal_semantic_workflow().replace(
-            "  permit:\n",
-            """      - name: Rogue permit builder
-        run: |
-          bash -c 'python3 policy/scripts/autonomous_release_permit.py prepare'
-  permit:
-""",
-            1,
-        )
-        copy_injection = minimal_semantic_workflow().replace(
-            "  permit:\n",
-            """      - name: Package immutable read-only review runtime
-        run: |
-          cp policy/scripts/autonomous_release_permit.py autonomous-review-runtime/policy/scripts/autonomous_release_permit.py; bash -c 'python3 policy/scripts/autonomous_release_permit.py prepare'
-  permit:
-""",
-            1,
-        )
-        for name, workflow, message in (
-            ("malformed", malformed, "prepare command has an unexpected semantic shape"),
-            ("alternate kernel", alternate_kernel, "alternate Kernel checkout"),
-            (
-                "alternate command",
-                alternate_command,
-                "alternate permit-builder command",
+
+    def test_complete_contract_rejects_reviewed_bypass_mutations(self) -> None:
+        workflow = authority_workflow_fixture()
+        policy_anchor = "      - name: Checkout pinned policy helpers\n"
+        approval_broker_anchor = "      - name: Checkout immutable approval broker\n"
+        permit_anchor = "  permit:\n    name: HELM Autonomous Release Permit\n"
+        machine_anchor = "  machine-approval:\n"
+        approval_step = "      - name: Approve only the exact signed head\n"
+        cases = {
+            "top-level permission escalation": replace_once(
+                workflow,
+                "permissions: {}\n",
+                "permissions:\n  contents: write\n",
             ),
-            (
-                "copy injection",
-                copy_injection,
-                "alternate permit-builder command",
+            "top-level defaults": replace_once(
+                workflow,
+                "permissions: {}\n",
+                "permissions: {}\n"
+                "defaults:\n"
+                "  run:\n"
+                "    shell: /bin/zsh\n",
             ),
-        ):
+            "top-level concurrency": replace_once(
+                workflow,
+                "permissions: {}\n",
+                "permissions: {}\n"
+                "concurrency:\n"
+                "  group: authority-bypass\n",
+            ),
+            "false condition": replace_once(
+                workflow,
+                "needs.model-review.result == 'success'",
+                "false",
+            ),
+            "job graph rebind": replace_after(
+                workflow,
+                machine_anchor,
+                "    needs: permit\n",
+                "    needs: prepare\n",
+            ),
+            "job working directory": replace_after(
+                workflow,
+                permit_anchor,
+                "    runs-on: ubuntu-latest\n",
+                "    runs-on: ubuntu-latest\n"
+                "    defaults:\n"
+                "      run:\n"
+                "        working-directory: /tmp\n",
+            ),
+            "step working directory": replace_after(
+                workflow,
+                "  permit:\n",
+                "        working-directory: kernel/core\n",
+                "        working-directory: /tmp\n",
+            ),
+            "custom shell": replace_after(
+                workflow,
+                "  permit:\n",
+                '        run: go build -trimpath -o "$GITHUB_WORKSPACE/release-permit-verify" ./cmd/release-permit-verify\n',
+                "        shell: /bin/zsh\n"
+                '        run: go build -trimpath -o "$GITHUB_WORKSPACE/release-permit-verify" ./cmd/release-permit-verify\n',
+            ),
+            "continue on error": replace_after(
+                workflow,
+                "      - name: Validate repository contract and workspace truth\n",
+                "        run: REQUIRE_WORKSPACE_CONTEXT=0 make lint test\n",
+                "        continue-on-error: true\n"
+                "        run: REQUIRE_WORKSPACE_CONTEXT=0 make lint test\n",
+            ),
+            "policy checkout repoint": replace_after(
+                workflow,
+                policy_anchor,
+                "          repository: Mindburn-Labs/.github\n",
+                "          repository: Mindburn-Labs/attacker-policy\n",
+            ),
+            "workflow SHA rebind": replace_after(
+                workflow,
+                approval_broker_anchor,
+                "          ref: ${{ github.workflow_sha }}\n",
+                "          ref: ${{ github.sha }}\n",
+            ),
+            "caps rebind": replace_once(
+                workflow,
+                '          MAX_PATCH_BYTES: "524288"\n',
+                '          MAX_PATCH_BYTES: "999999"\n',
+            ),
+            "approval Kernel repoint": replace_after(
+                workflow,
+                machine_anchor,
+                f"          ref: {CANDIDATE_KERNEL_SHA}\n",
+                f"          ref: {'d' * 40}\n",
+            ),
+            "approval verifier build redirect": replace_after(
+                workflow,
+                machine_anchor,
+                "        working-directory: kernel/core\n",
+                "        working-directory: /tmp\n",
+            ),
+            "raw approval after App token": replace_after(
+                workflow,
+                "      - name: Bind exact approval App identity\n",
+                '          test "$INSTALLATION_ID" = "146576964"\n',
+                '          test "$INSTALLATION_ID" = "146576964"\n'
+                '          gh pr review --approve "$GITHUB_REPOSITORY"\n',
+            ),
+            "extra approval step": replace_once(
+                workflow,
+                approval_step,
+                "      - name: Extra approval bypass\n"
+                "        run: echo unexpected\n"
+                + approval_step,
+            ),
+            "extra trigger": replace_once(
+                workflow,
+                "  push:\n",
+                "  workflow_dispatch:\n  push:\n",
+            ),
+            "extra job": workflow
+            + "\n  rogue:\n    runs-on: ubuntu-latest\n    steps: []\n",
+            "git clone": replace_once(
+                workflow,
+                "        run: REQUIRE_WORKSPACE_CONTEXT=0 make lint test\n",
+                "        run: |\n"
+                "          REQUIRE_WORKSPACE_CONTEXT=0 make lint test\n"
+                "          git clone https://example.invalid/rogue.git\n",
+            ),
+            "escaped permit filename": replace_once(
+                workflow,
+                "            --permit approval/release-permit.json \\\n",
+                "            --permit ../approval/release-permit.json \\\n",
+            ),
+            "action SHA rebind": replace_after(
+                workflow,
+                "      - name: Checkout repository\n",
+                f"        uses: {MODULE.CHECKOUT_ACTION}\n",
+                "        uses: actions/checkout@v4\n",
+            ),
+            "environment rebind": replace_once(
+                workflow,
+                '          CI: "true"\n',
+                '          CI: "false"\n',
+            ),
+        }
+        for name, mutated in cases.items():
             with self.subTest(name=name):
-                with self.assertRaisesRegex(MODULE.PermitInputError, message):
-                    MODULE.validate_candidate_workflow(
-                        workflow,
-                        kernel_sha=CANDIDATE_KERNEL_SHA,
-                    )
+                self.assert_rejected(mutated)
+
+    def test_machine_app_token_has_exactly_one_approval_consumer(self) -> None:
+        self.assert_rejected(
+            replace_after(
+                authority_workflow_fixture(),
+                "      - name: Bind exact approval App identity\n",
+                "          APP_SLUG: ${{ steps.approver-token.outputs.app-slug }}\n",
+                "          APP_SLUG: ${{ steps.approver-token.outputs.app-slug }}\n"
+                "          TOKEN: ${{ steps.approver-token.outputs.token }}\n",
+            )
+        )
+
+    def test_minimal_or_lexical_fixture_cannot_satisfy_complete_contract(self) -> None:
+        with self.assertRaisesRegex(MODULE.PermitInputError, "authority contract"):
+            MODULE.validate_candidate_workflow(
+                "name: permit\njobs: {}\n",
+                kernel_sha=CANDIDATE_KERNEL_SHA,
+            )
 
 
 if __name__ == "__main__":

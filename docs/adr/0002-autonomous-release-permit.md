@@ -80,12 +80,22 @@ bootstrap; every later generation must name exactly generation N-1 and cannot
 name its own workflow SHA as its parent.
 
 The parent-generation promotion verifier structurally parses the candidate
-workflow with Ruby/Psych before evaluating it. It rejects malformed YAML,
-duplicate mapping keys, aliases, and merge keys, then requires the exact
-credentialless Kernel checkouts in `prepare` and `permit`, the declared Kernel
-SHA in `prepare`'s environment, and one canonical permit-input invocation.
-Comments, repeated substrings, and alternate Kernel or permit-builder steps do
-not constitute authority evidence.
+workflow with Ruby/Psych into an AST-preserving projection before evaluating
+it. It rejects malformed YAML, duplicate mapping keys, aliases, merge keys,
+and custom tags while preserving scalar spellings, including the `on` trigger
+key that YAML 1.1 loaders can otherwise coerce. The previous immutable
+workflow is the complete parent-owned allowlist: the candidate must match its
+exact top-level keys and triggers, top-level permissions and absence of
+defaults/concurrency, all known job IDs and dependencies, every job execution
+field, and every ordered step, action SHA, input, environment value, shell
+script, and artifact path. The only permitted successor substitutions are the
+three declared Kernel checkout refs and the matching `prepare` `KERNEL_SHA`.
+The machine-approval chain is part of that closed-world profile: the immutable
+approval-broker checkout and source-owned verifier build remain ordered, the
+approval-only App action SHA and step ID remain exact, and its minted token has
+exactly one consumer, the exact-head approval step. Comments, repeated
+substrings, alternate steps, or any new execution surface do not constitute
+authority evidence.
 
 The existing `local-validation` check name and push-to-`main` validation remain
 intact while the permit is evaluated. The permit records GitHub's actual
