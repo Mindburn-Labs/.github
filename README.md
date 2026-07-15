@@ -55,6 +55,11 @@ Both the promoter and independent observer download the exact two raw provider
 review envelopes and require the immutable parent Kernel to reproduce the
 candidate's `ALLOW` or `DENY` permit byte for byte; a candidate-authored summary
 cannot stand in for reduction evidence.
+Successor ratification also structurally parses the candidate workflow with
+Ruby/Psych before it inspects workflow authority semantics. Duplicate keys, aliases,
+merge keys, comments, or repeated text cannot stand in for the exact
+credentialless Kernel checkouts and the canonical permit-input command bound to
+the candidate authority manifest and Kernel SHA.
 Credentialed jobs also bind the pinned token action's live App slug and
 installation ID before use; the approval broker independently checks exact
 repository scope and the persisted GitHub review actor.

@@ -26,6 +26,11 @@ The local credential may execute those inputs but cannot make a DENY acceptable.
   providers.
 - `release-permit-verify` was built from the exact Kernel SHA named by the
   generation-1 authority manifest.
+- The candidate `.github/workflows/ci.yml` passes the parent verifier's
+  Ruby/Psych structural check: it has no duplicate keys, aliases, or merge
+  keys; its `prepare` and `permit` Kernel checkouts are credentialless and
+  pinned to the declared SHA; and `prepare` uses the canonical manifest-bound
+  permit-input command. Comments and repeated text do not satisfy this check.
 - The permit, Sigstore bundle, and trusted context were downloaded from the
   same GitHub Actions run.
 - The output directory does not exist. Evidence directories are immutable.

@@ -79,6 +79,14 @@ the immediately preceding workflow generation. Generation 1 is the explicit
 bootstrap; every later generation must name exactly generation N-1 and cannot
 name its own workflow SHA as its parent.
 
+The parent-generation promotion verifier structurally parses the candidate
+workflow with Ruby/Psych before evaluating it. It rejects malformed YAML,
+duplicate mapping keys, aliases, and merge keys, then requires the exact
+credentialless Kernel checkouts in `prepare` and `permit`, the declared Kernel
+SHA in `prepare`'s environment, and one canonical permit-input invocation.
+Comments, repeated substrings, and alternate Kernel or permit-builder steps do
+not constitute authority evidence.
+
 The existing `local-validation` check name and push-to-`main` validation remain
 intact while the permit is evaluated. The permit records GitHub's actual
 `workflow_ref` and immutable `workflow_sha`; it must not assert a task-branch
