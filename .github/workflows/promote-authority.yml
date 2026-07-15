@@ -24,6 +24,7 @@ permissions: {}
 
 concurrency:
   group: helm-release-authority-promotion
+  queue: max
   cancel-in-progress: false
 
 jobs:
@@ -99,9 +100,11 @@ jobs:
             .github
             helm-ai-kernel
             contracts-autonomous-release-lab
+            contracts-autonomous-release-canary
           permission-actions: read
           permission-attestations: read
           permission-contents: read
+          permission-organization-administration: write
           permission-pull-requests: read
 
       - name: Bind exact observer App identity
@@ -872,7 +875,6 @@ jobs:
           private-key: ${{ secrets.HELM_AUTHORITY_PROMOTER_PRIVATE_KEY }}
           owner: Mindburn-Labs
           repositories: .github
-          permission-contents: read
           permission-organization-administration: write
 
       - name: Bind exact promoter App identity
@@ -1340,7 +1342,6 @@ jobs:
           private-key: ${{ secrets.HELM_AUTHORITY_PROMOTER_PRIVATE_KEY }}
           owner: Mindburn-Labs
           repositories: .github
-          permission-contents: read
           permission-organization-administration: write
 
       - name: Bind exact promoter App identity
@@ -1463,10 +1464,9 @@ jobs:
             --effective-only \
             --output promotion/control-plane-pre-observer.json
 
-      # The observer token deliberately omits organization Administration.
-      # Its code proves the write-gated org-ruleset GET returns HTTP 403, then
-      # observes only effective repository rules and immutable evidence.
-      - name: Mint mechanically read-only observer token
+      # GitHub requires organization Administration write even for ruleset GET.
+      # The immutable observer code exposes GET only and never issues mutations.
+      - name: Mint provider-overgranted token for immutable GET-only observer
         id: observer-token
         # At this exact action SHA, action.yml defines client-id and deprecates app-id.
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
@@ -1478,9 +1478,11 @@ jobs:
             .github
             helm-ai-kernel
             contracts-autonomous-release-lab
+            contracts-autonomous-release-canary
           permission-actions: read
           permission-attestations: read
           permission-contents: read
+          permission-organization-administration: write
           permission-pull-requests: read
 
       - name: Bind exact observer App identity
@@ -1657,7 +1659,7 @@ jobs:
             --arg phase "$EXPECTED_OBSERVER_PHASE" \
             --argjson attempt "$GITHUB_RUN_ATTEMPT" \
             --argjson run "$GITHUB_RUN_ID" \
-            '.schema == "mindburn.release-authority-observer-receipt/v3" and
+            '.schema == "mindburn.release-authority-observer-receipt/v4" and
              .phase == $phase and .decision == "ALLOW" and
              .control_workflow_sha == $control and
              .parent_workflow_sha == $parent and
@@ -1758,10 +1760,9 @@ jobs:
             --effective-only \
             --output promotion/control-plane-final-observer.json
 
-      # The observer token deliberately omits organization Administration.
-      # Its code proves the write-gated org-ruleset GET returns HTTP 403, then
-      # observes only effective repository rules and immutable evidence.
-      - name: Mint mechanically read-only observer token
+      # GitHub requires organization Administration write even for ruleset GET.
+      # The immutable observer code exposes GET only and never issues mutations.
+      - name: Mint provider-overgranted token for immutable GET-only observer
         id: observer-token
         # At this exact action SHA, action.yml defines client-id and deprecates app-id.
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
@@ -1773,9 +1774,11 @@ jobs:
             .github
             helm-ai-kernel
             contracts-autonomous-release-lab
+            contracts-autonomous-release-canary
           permission-actions: read
           permission-attestations: read
           permission-contents: read
+          permission-organization-administration: write
           permission-pull-requests: read
 
       - name: Bind exact observer App identity

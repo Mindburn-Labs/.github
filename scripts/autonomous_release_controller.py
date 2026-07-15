@@ -34,6 +34,24 @@ from authority_ruleset_broker import (
     MAIN_REF,
     STABLE_RULESET_ID,
 )
+from configure_machine_approval_gates import (
+    AUTONOMOUS_REPOSITORIES,
+    ATOMIC_MERGE_SETTINGS,
+    HUMAN_RULESET_ID,
+    KERNEL_QUALITY_RULESET_ID,
+    MACHINE_RULESET_NAME,
+    PROOF_REFS,
+    PROOF_REF_RULESET_NAME,
+    UPDATER_RULESET_NAME,
+    controlled_ruleset,
+    human_ruleset_state,
+    kernel_quality_ruleset_payload,
+    load_contract as load_bootstrap_contract,
+    machine_ruleset_payload,
+    proof_ref_ruleset_payload,
+    updater_ruleset_payload,
+    validate_merger,
+)
 from observe_authority_promotion import (
     PUBLIC_STABLE_REPOSITORIES,
     observe_effective_stable_rules,
@@ -44,7 +62,6 @@ from wait_for_authority_canary import (
     WORKFLOW_PATH,
     GitHubReadClient,
     load_json_file,
-    require_get_forbidden,
     run_sort_key,
     artifact_for_run,
     verify_candidate_permit,
@@ -58,19 +75,20 @@ from wait_for_authority_suite import write_attested_case
 CONTRACT_SCHEMA = "mindburn.autonomous-release-controller/v1"
 STATUS_SCHEMA = "mindburn.autonomous-release-controller-status/v1"
 DISCOVERY_SCHEMA = "mindburn.autonomous-release-controller-discovery/v1"
-PLAN_SCHEMA = "mindburn.autonomous-release-plan/v1"
+PLAN_SCHEMA = "mindburn.autonomous-release-plan/v2"
 APPROVAL_SCHEMA = "mindburn.autonomous-release-approvals/v1"
 MERGE_SCHEMA = "mindburn.autonomous-release-merge/v1"
 PROMOTION_WORKFLOW_NAME = "Promote HELM Release Authority"
 PROMOTION_WORKFLOW_PATH = ".github/workflows/promote-authority.yml"
 PROMOTION_RECEIPT_ARTIFACT = "helm-authority-promotion-receipt"
-PROMOTION_RECEIPT_SCHEMA = "mindburn.release-authority-observer-receipt/v3"
+PROMOTION_RECEIPT_SCHEMA = "mindburn.release-authority-observer-receipt/v4"
 ORGANIZATION = "Mindburn-Labs"
 AUTHORITY_REPOSITORY = "Mindburn-Labs/.github"
 SELECTED_REPOSITORIES = {
     "Mindburn-Labs/.github",
     "Mindburn-Labs/helm-ai-kernel",
     "Mindburn-Labs/contracts-autonomous-release-lab",
+    "Mindburn-Labs/contracts-autonomous-release-canary",
 }
 MERGE_METHODS = {"merge", "squash", "rebase"}
 UPDATE_REFS_MUTATION = """
@@ -193,9 +211,9 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
         raise PermitInputError("disabled controller must not declare merger authority")
 
     repositories = value["repositories"]
-    if not isinstance(repositories, list) or len(repositories) != 3:
+    if not isinstance(repositories, list) or len(repositories) != 4:
         raise PermitInputError(
-            "controller must define exactly three public repositories"
+            "controller must define the exact four-repository public authority matrix"
         )
     observed: set[str] = set()
     for index, repository in enumerate(repositories):
@@ -219,6 +237,7 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
         expected_classification = {
             AUTHORITY_REPOSITORY: "promotion-only",
             "Mindburn-Labs/contracts-autonomous-release-lab": "proof-only",
+            "Mindburn-Labs/contracts-autonomous-release-canary": "interlock-canary-only",
         }.get(name, "not-applicable")
         if repository["authority_changes"] != expected_classification:
             raise PermitInputError("controller authority classification drifted")
@@ -270,6 +289,7 @@ def verify_observer_installation(
             "actions": "read",
             "attestations": "read",
             "contents": "read",
+            "organization_administration": "write",
             "pull_requests": "read",
         }
         or not isinstance(account, dict)
@@ -284,11 +304,9 @@ def verify_observer_installation(
         != SELECTED_REPOSITORIES
     ):
         raise PermitInputError("observer App repository scope is not exact")
-    require_get_forbidden(
-        client,
-        f"/orgs/{ORGANIZATION}/rulesets/{STABLE_RULESET_ID}",
-        label="ordinary controller observer organization-ruleset scope",
-    )
+    stable = client.get_json(f"/orgs/{ORGANIZATION}/rulesets/{STABLE_RULESET_ID}")
+    if stable.get("id") != STABLE_RULESET_ID:
+        raise PermitInputError("observer App read the wrong stable ruleset")
 
 
 def verify_repository_settings(
@@ -298,21 +316,157 @@ def verify_repository_settings(
     merge_method: str,
 ) -> None:
     value = client.get_json(f"/repos/{repository}")
-    expected_flag = {
-        "merge": "allow_merge_commit",
-        "squash": "allow_squash_merge",
-        "rebase": "allow_rebase_merge",
-    }[merge_method]
+    if merge_method != "merge":
+        raise PermitInputError("autonomous controller requires merge commits")
     if (
         value.get("full_name") != repository
         or value.get("default_branch") != "main"
         or value.get("archived") is True
         or value.get("visibility") != "public"
-        or value.get(expected_flag) is not True
+        or {key: value.get(key) for key in ATOMIC_MERGE_SETTINGS}
+        != ATOMIC_MERGE_SETTINGS
     ):
         raise PermitInputError(
             f"{repository} settings are incompatible with atomic {merge_method}"
         )
+
+
+def named_organization_ruleset(
+    client: GitHubReadClient,
+    *,
+    name: str,
+) -> dict[str, Any]:
+    listed = get_json_value(
+        client,
+        f"/orgs/{ORGANIZATION}/rulesets?per_page=100",
+        label="organization rulesets",
+    )
+    if not isinstance(listed, list):
+        raise PermitInputError("organization ruleset list is malformed")
+    matches = [
+        item for item in listed if isinstance(item, dict) and item.get("name") == name
+    ]
+    if len(matches) != 1:
+        raise PermitInputError(f"expected exactly one organization ruleset {name}")
+    ruleset_id = matches[0].get("id")
+    if not isinstance(ruleset_id, int) or isinstance(ruleset_id, bool):
+        raise PermitInputError(f"organization ruleset {name} has no valid ID")
+    ruleset = client.get_json(f"/orgs/{ORGANIZATION}/rulesets/{ruleset_id}")
+    if ruleset.get("id") != ruleset_id or ruleset.get("name") != name:
+        raise PermitInputError(f"organization ruleset {name} identity drifted")
+    return ruleset
+
+
+def observe_merge_interlock(
+    client: GitHubReadClient,
+    *,
+    controller_contract: dict[str, Any],
+    bootstrap_contract_path: Path,
+) -> dict[str, Any]:
+    bootstrap = load_bootstrap_contract(bootstrap_contract_path)
+    bootstrap_merger_id = validate_merger(bootstrap["merger"])
+    controller_merger = controller_contract["apps"]["merger"]
+    if (
+        bootstrap_merger_id is None
+        or bootstrap_merger_id != controller_merger["app_id"]
+        or bootstrap["merger"]["installation_id"]
+        != controller_merger["installation_id"]
+    ):
+        raise PermitInputError("controller and bootstrap merger identities differ")
+
+    machine = named_organization_ruleset(client, name=MACHINE_RULESET_NAME)
+    if controlled_ruleset(machine) != machine_ruleset_payload():
+        raise PermitInputError("machine approval ruleset drifted")
+    updater = named_organization_ruleset(client, name=UPDATER_RULESET_NAME)
+    if controlled_ruleset(updater) != updater_ruleset_payload(bootstrap_merger_id):
+        raise PermitInputError("exclusive updater ruleset drifted")
+    proof_refs = named_organization_ruleset(client, name=PROOF_REF_RULESET_NAME)
+    if controlled_ruleset(proof_refs) != proof_ref_ruleset_payload():
+        raise PermitInputError("immutable proof-ref ruleset drifted")
+    lab = "Mindburn-Labs/contracts-autonomous-release-lab"
+    for ref, expected_sha in PROOF_REFS.items():
+        branch = ref.removeprefix("refs/heads/")
+        live_ref = client.get_json(f"/repos/{lab}/git/ref/heads/{branch}")
+        object_value = live_ref.get("object")
+        if (
+            live_ref.get("ref") != ref
+            or not isinstance(object_value, dict)
+            or object_value.get("sha") != expected_sha
+        ):
+            raise PermitInputError(f"immutable proof fixture {ref} drifted")
+    human = client.get_json(f"/orgs/{ORGANIZATION}/rulesets/{HUMAN_RULESET_ID}")
+    if controlled_ruleset(human) != human_ruleset_state(bootstrap, "after"):
+        raise PermitInputError("human authorization scope was not retired exactly")
+    kernel_quality = client.get_json(
+        f"/repos/Mindburn-Labs/helm-ai-kernel/rulesets/{KERNEL_QUALITY_RULESET_ID}"
+    )
+    if controlled_ruleset(kernel_quality) != kernel_quality_ruleset_payload():
+        raise PermitInputError("Kernel quality ruleset drifted")
+
+    expected_effective: dict[str, list[tuple[int, str, str, str]]] = {}
+    interlock_repositories = set(AUTONOMOUS_REPOSITORIES) | {lab}
+    for repository in sorted(interlock_repositories):
+        if repository in AUTONOMOUS_REPOSITORIES:
+            verify_repository_settings(client, repository=repository, merge_method="merge")
+        rules = get_json_value(
+            client,
+            f"/repos/{repository}/rules/branches/main",
+            label=f"effective merge rules for {repository}",
+        )
+        if not isinstance(rules, list):
+            raise PermitInputError(f"effective merge rules for {repository} malformed")
+        actual = sorted(
+            (
+                rule.get("ruleset_id"),
+                rule.get("type"),
+                rule.get("ruleset_source_type"),
+                rule.get("ruleset_source"),
+            )
+            for rule in rules
+            if isinstance(rule, dict)
+        )
+        expected = [(STABLE_RULESET_ID, "workflows", "Organization", ORGANIZATION)]
+        if repository == lab:
+            expected.extend(
+                (proof_refs["id"], rule_type, "Organization", ORGANIZATION)
+                for rule_type in ("creation", "deletion", "non_fast_forward", "update")
+            )
+        else:
+            expected.extend(
+                [
+                    (machine["id"], "deletion", "Organization", ORGANIZATION),
+                    (machine["id"], "non_fast_forward", "Organization", ORGANIZATION),
+                    (machine["id"], "pull_request", "Organization", ORGANIZATION),
+                    (updater["id"], "update", "Organization", ORGANIZATION),
+                ]
+            )
+        if repository == "Mindburn-Labs/helm-ai-kernel":
+            expected.append(
+                (
+                    KERNEL_QUALITY_RULESET_ID,
+                    "required_status_checks",
+                    "Repository",
+                    "Mindburn-Labs/helm-ai-kernel",
+                )
+            )
+        expected = sorted(expected)
+        if actual != expected:
+            raise PermitInputError(
+                f"{repository} effective merge rules are not the exclusive interlock"
+            )
+        expected_effective[repository] = expected
+    return {
+        "schema": "mindburn.autonomous-release-merge-interlock/v1",
+        "merger_app_id": bootstrap_merger_id,
+        "merger_installation_id": bootstrap["merger"]["installation_id"],
+        "machine_ruleset_id": machine["id"],
+        "updater_ruleset_id": updater["id"],
+        "kernel_quality_ruleset_id": KERNEL_QUALITY_RULESET_ID,
+        "proof_ref_ruleset_id": proof_refs["id"],
+        "proof_refs": PROOF_REFS,
+        "effective_rules": expected_effective,
+        "repository_settings": bootstrap["repository_settings"],
+    }
 
 
 def is_authority_path(path: str) -> bool:
@@ -471,14 +625,21 @@ def open_pull_requests(
     client: GitHubReadClient,
     repository: str,
 ) -> list[dict[str, Any]]:
-    payload = get_json_value(
-        client,
-        f"/repos/{repository}/pulls?state=open&base=main&per_page=100",
-        label="open pull requests",
-    )
-    if not isinstance(payload, list):
-        raise PermitInputError("open pull request response is malformed")
-    return [item for item in payload if isinstance(item, dict)]
+    result: list[dict[str, Any]] = []
+    for page in range(1, 11):
+        payload = get_json_value(
+            client,
+            f"/repos/{repository}/pulls?state=open&base=main&per_page=100&page={page}",
+            label="open pull requests",
+        )
+        if not isinstance(payload, list) or any(
+            not isinstance(item, dict) for item in payload
+        ):
+            raise PermitInputError("open pull request response is malformed")
+        result.extend(payload)
+        if len(payload) < 100:
+            return result
+    raise PermitInputError("open pull request list exceeds controller bound")
 
 
 def pull_requests_for_commit(
@@ -632,6 +793,7 @@ def verified_plan_entry(
         AUTHORITY_REPOSITORY: "github-authority",
         "Mindburn-Labs/helm-ai-kernel": "helm-ai-kernel",
         "Mindburn-Labs/contracts-autonomous-release-lab": "release-lab",
+        "Mindburn-Labs/contracts-autonomous-release-canary": "release-interlock-canary",
     }[repository]
     evidence = args.output_dir / "evidence" / repository_slug / str(pull_request)
     permit_path, bundle_path, context_path, reviews = write_attested_case(
@@ -718,16 +880,30 @@ def has_final_promotion_closure(
     control_sha: str,
     active_workflow_sha: str,
 ) -> bool:
-    query = urllib.parse.urlencode(
-        {"event": "workflow_dispatch", "status": "completed", "per_page": 100}
-    )
-    payload = client.get_json(
-        f"/repos/{AUTHORITY_REPOSITORY}/actions/workflows/"
-        f"promote-authority.yml/runs?{query}"
-    )
-    runs = payload.get("workflow_runs")
-    if not isinstance(runs, list):
-        raise PermitInputError("promotion workflow runs response is malformed")
+    runs: list[dict[str, Any]] = []
+    for page in range(1, 11):
+        query = urllib.parse.urlencode(
+            {
+                "event": "workflow_dispatch",
+                "status": "completed",
+                "per_page": 100,
+                "page": page,
+            }
+        )
+        payload = client.get_json(
+            f"/repos/{AUTHORITY_REPOSITORY}/actions/workflows/"
+            f"promote-authority.yml/runs?{query}"
+        )
+        page_runs = payload.get("workflow_runs")
+        if not isinstance(page_runs, list) or any(
+            not isinstance(run, dict) for run in page_runs
+        ):
+            raise PermitInputError("promotion workflow runs response is malformed")
+        runs.extend(page_runs)
+        if len(page_runs) < 100:
+            break
+    else:
+        raise PermitInputError("promotion workflow run history exceeds recovery bound")
     candidates = [
         run
         for run in runs
@@ -1008,6 +1184,13 @@ def plan(args: argparse.Namespace, client: GitHubReadClient) -> dict[str, Any]:
     if discover_effective_workflow_sha(client) != active_workflow_sha:
         raise PermitInputError("active release authority changed after discovery")
     observe_effective_stable_rules(client, workflow_sha=active_workflow_sha)
+    interlock = observe_merge_interlock(
+        client,
+        controller_contract=contract,
+        bootstrap_contract_path=Path(args.contract).with_name(
+            "autonomous-release-bootstrap-v1.json"
+        ),
+    )
     authority = validate_authority_shape(
         load_json_file(args.authority, label="controller authority"),
         label="controller authority",
@@ -1022,22 +1205,31 @@ def plan(args: argparse.Namespace, client: GitHubReadClient) -> dict[str, Any]:
     blocked: list[dict[str, Any]] = []
     for repository_config in contract["repositories"]:
         repository = repository_config["repository"]
-        verify_repository_settings(
-            client,
-            repository=repository,
-            merge_method=repository_config["merge_method"],
-        )
+        if repository_config["authority_changes"] != "proof-only":
+            verify_repository_settings(
+                client,
+                repository=repository,
+                merge_method=repository_config["merge_method"],
+            )
         pull_requests = sorted(
             open_pull_requests(client, repository),
             key=lambda value: value.get("number", 0),
         )
-        if repository_config["authority_changes"] == "proof-only":
+        if repository_config["authority_changes"] in {
+            "proof-only",
+            "interlock-canary-only",
+        }:
+            reason = (
+                "PERMANENT_PROOF_FIXTURE"
+                if repository_config["authority_changes"] == "proof-only"
+                else "EXPLICIT_INTERLOCK_CANARY_ONLY"
+            )
             for pull_request_value in pull_requests:
                 blocked.append(
                     {
                         "repository": repository,
                         "pull_request": pull_request_value.get("number"),
-                        "reason": "PERMANENT_PROOF_FIXTURE",
+                        "reason": reason,
                     }
                 )
             continue
@@ -1188,6 +1380,7 @@ def plan(args: argparse.Namespace, client: GitHubReadClient) -> dict[str, Any]:
         "controller_sha": control_sha,
         "active_workflow_sha": active_workflow_sha,
         "observed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "merge_interlock": interlock,
         "ordinary": ordinary,
         "promotions": promotions,
         "blocked": blocked,
@@ -1257,6 +1450,7 @@ def validate_plan(value: dict[str, Any], *, control_sha: str) -> dict[str, Any]:
             "controller_sha",
             "active_workflow_sha",
             "observed_at",
+            "merge_interlock",
             "ordinary",
             "promotions",
             "blocked",
@@ -1265,6 +1459,36 @@ def validate_plan(value: dict[str, Any], *, control_sha: str) -> dict[str, Any]:
     )
     if value["schema"] != PLAN_SCHEMA or value["controller_sha"] != control_sha:
         raise PermitInputError("controller plan was not issued by this authority")
+    interlock = value["merge_interlock"]
+    if not isinstance(interlock, dict):
+        raise PermitInputError("controller plan merge interlock is malformed")
+    require_exact_keys(
+        interlock,
+        required={
+            "schema",
+            "merger_app_id",
+            "merger_installation_id",
+            "machine_ruleset_id",
+            "updater_ruleset_id",
+            "kernel_quality_ruleset_id",
+            "proof_ref_ruleset_id",
+            "proof_refs",
+            "effective_rules",
+            "repository_settings",
+        },
+        label="controller plan merge interlock",
+    )
+    if interlock["schema"] != "mindburn.autonomous-release-merge-interlock/v1":
+        raise PermitInputError("controller plan merge interlock schema is unsupported")
+    for field in (
+        "merger_app_id",
+        "merger_installation_id",
+        "machine_ruleset_id",
+        "updater_ruleset_id",
+        "kernel_quality_ruleset_id",
+        "proof_ref_ruleset_id",
+    ):
+        positive_integer(interlock[field], label=f"merge interlock {field}")
     active_workflow_sha = require_sha(
         value["active_workflow_sha"],
         label="plan active_workflow_sha",
@@ -1408,6 +1632,40 @@ def verify_merger_installation(
         raise PermitInputError("merger token repository scope is not exact")
 
 
+def verify_effective_interlock_before_merge(
+    client: GitHubApprovalClient,
+    *,
+    receipt: dict[str, Any],
+    repository: str,
+) -> None:
+    effective = receipt.get("effective_rules")
+    expected = effective.get(repository) if isinstance(effective, dict) else None
+    if not isinstance(expected, list):
+        raise PermitInputError("merge interlock lacks repository effective rules")
+    live = client.request("GET", f"/repos/{repository}/rules/branches/main")
+    if not isinstance(live, list):
+        raise PermitInputError("live effective merge rules are malformed")
+    normalized_live = sorted(
+        [
+            rule.get("ruleset_id"),
+            rule.get("type"),
+            rule.get("ruleset_source_type"),
+            rule.get("ruleset_source"),
+        ]
+        for rule in live
+        if isinstance(rule, dict)
+    )
+    normalized_expected = sorted(
+        list(item)
+        for item in expected
+        if isinstance(item, (list, tuple)) and len(item) == 4
+    )
+    if normalized_live != normalized_expected or len(normalized_expected) != len(
+        expected
+    ):
+        raise PermitInputError("exclusive merge interlock drifted after signed plan")
+
+
 def graphql(
     client: GitHubApprovalClient,
     query: str,
@@ -1456,6 +1714,18 @@ def merge(args: argparse.Namespace) -> dict[str, Any]:
     }
     client = GitHubApprovalClient(os.environ.get("GH_TOKEN", ""))
     verify_merger_installation(client, contract=contract, repository=args.repository)
+    if (
+        plan_value["merge_interlock"]["merger_app_id"]
+        != contract["apps"]["merger"]["app_id"]
+        or plan_value["merge_interlock"]["merger_installation_id"]
+        != contract["apps"]["merger"]["installation_id"]
+    ):
+        raise PermitInputError("signed plan names a different merger App")
+    verify_effective_interlock_before_merge(
+        client,
+        receipt=plan_value["merge_interlock"],
+        repository=args.repository,
+    )
     receipts: list[dict[str, Any]] = []
     for entry in select_entry(plan_value, args.repository):
         approval = by_pr.get(entry["pull_request"])
@@ -1499,6 +1769,10 @@ def merge(args: argparse.Namespace) -> dict[str, Any]:
         )
         if not isinstance(pull_request_value, dict):
             raise PermitInputError("merge pull request response is malformed")
+        if pull_request_value.get("merge_commit_sha") != entry["merge_sha"]:
+            raise PermitInputError(
+                "live pull request no longer names the reviewed merge commit"
+            )
         main_path = f"/repos/{args.repository}/git/ref/heads/main"
         main = client.request("GET", main_path)
         if not isinstance(main, dict):

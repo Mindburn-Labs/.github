@@ -18,7 +18,7 @@
       "block_creations": false,
       "enforce_admins": false,
       "lock_branch": false,
-      "required_conversation_resolution": true,
+      "required_conversation_resolution": false,
       "required_linear_history": false,
       "required_pull_request_reviews": {
         "dismiss_stale_reviews": true,
@@ -31,6 +31,35 @@
       "restrictions": null
     },
     "repository": "Mindburn-Labs/.github"
+  },
+  "exclusive_updater_ruleset": {
+    "bypass_actors": [],
+    "conditions": {
+      "ref_name": {
+        "exclude": [],
+        "include": [
+          "~DEFAULT_BRANCH"
+        ]
+      },
+      "repository_id": {
+        "repository_ids": [
+          1158479649,
+          1159255601,
+          1301786253
+        ]
+      }
+    },
+    "enforcement": "active",
+    "name": "HELM Exclusive Main Updater",
+    "rules": [
+      {
+        "parameters": {
+          "update_allows_fetch_and_merge": false
+        },
+        "type": "update"
+      }
+    ],
+    "target": "branch"
   },
   "human_approval_ruleset": {
     "after_repository_ids": [
@@ -150,6 +179,134 @@
       }
     ]
   },
+  "kernel_quality_ruleset": {
+    "after": {
+      "bypass_actors": [],
+      "conditions": {
+        "ref_name": {
+          "exclude": [],
+          "include": [
+            "refs/heads/main"
+          ]
+        }
+      },
+      "enforcement": "active",
+      "name": "main protection",
+      "rules": [
+        {
+          "parameters": {
+            "do_not_enforce_on_create": false,
+            "required_status_checks": [
+              { "context": "Quality PR profile" },
+              { "context": "hygiene" },
+              { "context": "kernel" },
+              { "context": "python-sdk" },
+              { "context": "ts-sdk" },
+              { "context": "rust-sdk" },
+              { "context": "java-sdk" },
+              { "context": "contract-drift" },
+              { "context": "deployment-smoke" },
+              { "context": "kind-smoke" },
+              { "context": "release-smoke" },
+              { "context": "Coverage and truth" },
+              { "context": "OpenSSF Scorecard" },
+              { "context": "CodeQL (go)" },
+              { "context": "CodeQL (javascript-typescript)" },
+              { "context": "CodeQL (python)" },
+              { "context": "CodeQL (java-kotlin)" },
+              { "context": "Rust audit" }
+            ],
+            "strict_required_status_checks_policy": true
+          },
+          "type": "required_status_checks"
+        }
+      ],
+      "target": "branch"
+    },
+    "id": 16024605,
+    "name": "main protection"
+  },
+  "merger": {
+    "app_id": null,
+    "enabled": false,
+    "installation_id": null,
+    "login": "helm-authority-merger[bot]",
+    "organization": "Mindburn-Labs",
+    "permission": {
+      "contents": "write",
+      "pull_requests": "read"
+    },
+    "slug": "helm-authority-merger"
+  },
+  "proof_ref_ruleset": {
+    "bypass_actors": [],
+    "conditions": {
+      "ref_name": {
+        "exclude": [],
+        "include": [
+          "refs/heads/main",
+          "refs/heads/adversarial/git-lfs-content-substitution",
+          "refs/heads/adversarial/oversized-review-context",
+          "refs/heads/adversarial/patch-boundary-and-json-forgery",
+          "refs/heads/adversarial/self-weakened-makefile",
+          "refs/heads/adversarial/source-instruction-overrides-review",
+          "refs/heads/adversarial/symlink-read-boundary",
+          "refs/heads/adversarial/workflow-token-escalation",
+          "refs/heads/canary/authority-generation"
+        ]
+      },
+      "repository_id": {
+        "repository_ids": [
+          1300498536
+        ]
+      }
+    },
+    "enforcement": "active",
+    "name": "HELM Immutable Proof Fixtures",
+    "rules": [
+      { "type": "creation" },
+      { "type": "deletion" },
+      { "type": "non_fast_forward" },
+      {
+        "parameters": {
+          "update_allows_fetch_and_merge": false
+        },
+        "type": "update"
+      }
+    ],
+    "target": "branch"
+  },
+  "proof_refs": {
+    "refs/heads/adversarial/git-lfs-content-substitution": "627042be00ec9a2eca210caa671ef7f81ba73d39",
+    "refs/heads/adversarial/oversized-review-context": "28078dde81725b24708699f89bc0e5f72cf3e24b",
+    "refs/heads/adversarial/patch-boundary-and-json-forgery": "b4124d6928f2b6f4c2a10e8e4a16bc5359441214",
+    "refs/heads/adversarial/self-weakened-makefile": "a46e2c66222b5e26b98ea00fb35e5bc43d6f7b7a",
+    "refs/heads/adversarial/source-instruction-overrides-review": "b5096f27833cbc853fe780a70052b5f0686005d5",
+    "refs/heads/adversarial/symlink-read-boundary": "89b3050718bc51ccfbc9f528ddcfe1d099a82bcb",
+    "refs/heads/adversarial/workflow-token-escalation": "0573b2dffb10632f0cb38e1eb465c970b82c4a0a",
+    "refs/heads/canary/authority-generation": "2c080470f81d0aaa3235eddf012e2d6d6b770bd1",
+    "refs/heads/main": "e183c28646d3b577b3ce472d98e832e6bc668330"
+  },
+  "repository_settings": {
+    "Mindburn-Labs/.github": {
+      "allow_merge_commit": true,
+      "allow_rebase_merge": false,
+      "allow_squash_merge": false,
+      "delete_branch_on_merge": false
+    },
+    "Mindburn-Labs/contracts-autonomous-release-canary": {
+      "allow_merge_commit": true,
+      "allow_rebase_merge": false,
+      "allow_squash_merge": false,
+      "delete_branch_on_merge": false
+    },
+    "Mindburn-Labs/helm-ai-kernel": {
+      "allow_merge_commit": true,
+      "allow_rebase_merge": false,
+      "allow_squash_merge": false,
+      "delete_branch_on_merge": false
+    }
+  },
   "machine_approval_ruleset": {
     "bypass_actors": [],
     "conditions": {
@@ -163,7 +320,7 @@
         "repository_ids": [
           1158479649,
           1159255601,
-          1300498536
+          1301786253
         ]
       }
     },
@@ -185,7 +342,7 @@
           "require_code_owner_review": false,
           "require_last_push_approval": true,
           "required_approving_review_count": 1,
-          "required_review_thread_resolution": true,
+          "required_review_thread_resolution": false,
           "required_reviewers": []
         },
         "type": "pull_request"
@@ -193,5 +350,5 @@
     ],
     "target": "branch"
   },
-  "schema": "mindburn.release-authority-bootstrap/v2"
+  "schema": "mindburn.release-authority-bootstrap/v3"
 }

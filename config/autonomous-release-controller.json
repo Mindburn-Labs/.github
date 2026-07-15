@@ -32,6 +32,11 @@
       "authority_changes": "proof-only",
       "merge_method": "merge",
       "repository": "Mindburn-Labs/contracts-autonomous-release-lab"
+    },
+    {
+      "authority_changes": "interlock-canary-only",
+      "merge_method": "merge",
+      "repository": "Mindburn-Labs/contracts-autonomous-release-canary"
     }
   ],
   "schema": "mindburn.autonomous-release-controller/v1"

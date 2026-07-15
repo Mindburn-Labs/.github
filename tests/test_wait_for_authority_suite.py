@@ -82,6 +82,7 @@ class AuthoritySuiteTests(unittest.TestCase):
                 mock.patch.object(MODULE, "validate_contract", return_value={}),
                 mock.patch.object(MODULE, "validate_trigger", return_value=trigger),
                 mock.patch.object(MODULE, "load_json_file", return_value={}),
+                mock.patch.object(MODULE, "verify_live_fixture_graph"),
                 mock.patch.object(
                     MODULE,
                     "candidate_runs",
@@ -148,6 +149,7 @@ class AuthoritySuiteTests(unittest.TestCase):
                     return_value=trigger,
                 ),
                 mock.patch.object(MODULE, "load_json_file", return_value={}),
+                mock.patch.object(MODULE, "verify_live_fixture_graph"),
                 mock.patch.object(
                     MODULE,
                     "candidate_runs",

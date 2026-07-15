@@ -23,6 +23,7 @@ from atomic_merge_authority import (
     atomic_merge,
     nested_string,
     validate_pull_request,
+    verify_merger_installation,
 )
 from authority_ruleset_broker import (
     CANDIDATE_RULESET_ID,
@@ -45,6 +46,7 @@ from configure_machine_approval_gates import (
     configure_machine_approval_gates,
     controlled_ruleset,
     require_object,
+    validate_merger,
 )
 from submit_machine_approval import (
     APPROVER_APP_ID,
@@ -78,7 +80,6 @@ from wait_for_authority_canary import (
     extract_attested_permit,
     extract_trusted_context,
     load_json_file,
-    require_get_forbidden,
     verify_attestation,
     verify_candidate_permit,
     wait_for_canary,
@@ -104,6 +105,7 @@ OBSERVER_PERMISSIONS = {
     "attestations": "read",
     "contents": "read",
     "pull_requests": "read",
+    "organization_administration": "write",
 }
 CANDIDATE_ARGUMENT_SOURCE_INPUTS = {
     "candidate_authority": "config/autonomous-release-authority.json",
@@ -369,6 +371,16 @@ def reopen_pull_request(
     if (
         reopened.get("state") != "open"
         or nested(reopened, "head", "sha", label="reopened head SHA") != head_sha
+        or (
+            base_sha is not None
+            and nested(reopened, "base", "sha", label="reopened base SHA")
+            != base_sha
+        )
+        or (
+            head_ref is not None
+            and nested(reopened, "head", "ref", label="reopened head ref")
+            != head_ref
+        )
     ):
         raise PermitInputError(
             f"GitHub did not reopen exact {repository}#{pull_request}"
@@ -385,12 +397,21 @@ def trigger_suite(
     started_at = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(
         seconds=2
     )
+    main_ref = client.get(f"/repos/{LAB_REPOSITORY}/git/ref/heads/main")
+    if (
+        main_ref.get("ref") != "refs/heads/main"
+        or nested(main_ref, "object", "sha", label="lab main SHA")
+        != contract["adversarial_suite"]["cases"][0]["base_sha"]
+    ):
+        raise PermitInputError("proof-lab main drifted before suite trigger")
     for case in contract["adversarial_suite"]["cases"]:
         reopen_pull_request(
             client,
             repository=LAB_REPOSITORY,
             pull_request=case["pull_request"],
             head_sha=case["head_sha"],
+            base_sha=case["base_sha"],
+            head_ref=case["head_ref"],
         )
     return {
         "schema": TRIGGER_SCHEMA,
@@ -588,6 +609,76 @@ def verify_control(
             deployment_disabled=deployment_disabled,
             deployment_transition=deployment_transition,
         ),
+    }
+
+
+def verify_finalization_control_prestate(
+    args: argparse.Namespace,
+    executor_client: GitHubReadClient,
+    observer_client: GitHubReadClient,
+    *,
+    expected_control_sha: str,
+) -> dict[str, Any]:
+    contract = validate_contract(
+        load_json(args.control_contract, label="control contract"),
+        load_json(args.adversarial_corpus, label="adversarial corpus"),
+    )
+    executor_settings = verify_live_repository_settings(contract, executor_client)
+    observer_settings = verify_live_repository_settings(contract, observer_client)
+    if executor_settings != observer_settings:
+        raise PermitInputError("independent repository-setting reads do not match")
+    try:
+        executor_lock = verify_live_control_workflow(
+            contract,
+            executor_client,
+            expected_sha=expected_control_sha,
+            effective_only=True,
+        )
+        observer_lock = verify_live_control_workflow(
+            contract,
+            observer_client,
+            expected_sha=expected_control_sha,
+            effective_only=True,
+        )
+    except ValueError:
+        try:
+            executor_environments = verify_live_environments(
+                contract,
+                executor_client,
+                deployment_disabled=True,
+            )
+            observer_environments = verify_live_environments(
+                contract,
+                observer_client,
+                deployment_disabled=True,
+            )
+        except ValueError as exc:
+            raise PermitInputError(str(exc)) from exc
+        state = "lock-pending-environments-disabled"
+        control_workflow: dict[str, Any] = {}
+    else:
+        if executor_lock != observer_lock:
+            raise PermitInputError("independent immutable-control reads do not match")
+        executor_environments = verify_live_environments(
+            contract,
+            executor_client,
+            deployment_transition=True,
+        )
+        observer_environments = verify_live_environments(
+            contract,
+            observer_client,
+            deployment_transition=True,
+        )
+        state = "lock-proven-environments-transitioning"
+        control_workflow = executor_lock
+    if executor_environments != observer_environments:
+        raise PermitInputError("independent environment reads do not match")
+    return {
+        "contract": contract,
+        "state": state,
+        "repository_settings": executor_settings,
+        "control_workflow": control_workflow,
+        "environments": executor_environments,
     }
 
 
@@ -837,9 +928,9 @@ def ensure_control_environments_disabled(
             label=f"disabled environment {name} branch policies",
         )
         branch_policies = policies.get("branch_policies")
-        if not isinstance(branch_policies, list) or policies.get(
-            "total_count"
-        ) != len(branch_policies):
+        if not isinstance(branch_policies, list) or policies.get("total_count") != len(
+            branch_policies
+        ):
             raise PermitInputError(
                 f"environment {name} returned malformed branch policies"
             )
@@ -858,9 +949,7 @@ def ensure_control_environments_disabled(
                 or isinstance(policy.get("id"), bool)
                 or policy["id"] <= 0
             ):
-                raise PermitInputError(
-                    f"environment {name} admits an unknown branch"
-                )
+                raise PermitInputError(f"environment {name} admits an unknown branch")
             client.request("DELETE", f"{policy_path}/{policy['id']}")
             policies = require_object(
                 client.request("GET", policy_path),
@@ -913,6 +1002,7 @@ def preflight_credentials(
     executor_client: GitHubAdminClient,
     observer_client: GitHubReadClient,
     approval_client: GitHubApprovalClient,
+    merger_client: GitHubMergeClient,
 ) -> dict[str, Any]:
     """Prove all bootstrap identities and read scopes before the first mutation."""
     executor = require_object(
@@ -991,11 +1081,11 @@ def preflight_credentials(
     }
     if observer_names != OBSERVER_REPOSITORIES:
         raise PermitInputError("bootstrap observer repository scope is not exact")
-    require_get_forbidden(
-        observer_client,
-        f"/orgs/Mindburn-Labs/rulesets/{STABLE_RULESET_ID}",
-        label="bootstrap observer organization-ruleset write scope",
+    observer_ruleset = observer_client.get_json(
+        f"/orgs/Mindburn-Labs/rulesets/{STABLE_RULESET_ID}"
     )
+    if observer_ruleset.get("id") != STABLE_RULESET_ID:
+        raise PermitInputError("bootstrap observer read the wrong organization ruleset")
 
     approver_installation = approval_client.request("GET", "/installation")
     approver_account = (
@@ -1018,6 +1108,17 @@ def preflight_credentials(
         app_slug=APPROVER_SLUG,
         installation_id=APPROVER_INSTALLATION_ID,
     )
+    bootstrap_contract = load_json(args.bootstrap_contract, label="bootstrap contract")
+    merger_app_id = validate_merger(bootstrap_contract["merger"])
+    if merger_app_id is None:
+        raise PermitInputError("bootstrap merger App is disabled")
+    merger_installation_id = bootstrap_contract["merger"]["installation_id"]
+    verify_merger_installation(
+        merger_client,
+        app_slug="helm-authority-merger",
+        installation_id=merger_installation_id,
+        app_id=merger_app_id,
+    )
     return {
         "schema": "mindburn.release-authority-bootstrap-credential-preflight/v1",
         "executor": {
@@ -1033,13 +1134,20 @@ def preflight_credentials(
             "installation_id": OBSERVER_INSTALLATION_ID,
             "permissions": OBSERVER_PERMISSIONS,
             "repositories": sorted(observer_names),
-            "ruleset_write_scope": "denied",
+            "ruleset_read_scope": "GET-only client over provider write entitlement",
         },
         "approver": {
             "app_id": approver["app_id"],
             "app_slug": approver["app_slug"],
             "installation_id": approver["id"],
             "permissions": {"pull_requests": "write"},
+            "repositories": [REPOSITORY],
+        },
+        "merger": {
+            "app_id": merger_app_id,
+            "app_slug": "helm-authority-merger",
+            "installation_id": merger_installation_id,
+            "permissions": {"contents": "write", "pull_requests": "read"},
             "repositories": [REPOSITORY],
         },
     }
@@ -1050,6 +1158,7 @@ def prepare(
     token: str,
     observer_token: str,
     approver_token: str,
+    merger_token: str,
 ) -> dict[str, Any]:
     args.candidate_sha = require_sha(
         args.candidate_sha, label="candidate_sha", length=40
@@ -1072,11 +1181,13 @@ def prepare(
     ruleset_client = GitHubRulesetClient(token)
     admin_client = GitHubAdminClient(token)
     approval_client = GitHubApprovalClient(approver_token)
+    merger_client = GitHubMergeClient(merger_token)
     credential_preflight = preflight_credentials(
         args,
         admin_client,
         observer_client,
         approval_client,
+        merger_client,
     )
     args.output_dir.mkdir(parents=True)
     source_input_path = args.output_dir / "source-inputs.json"
@@ -1461,6 +1572,8 @@ def validate_ready(args: argparse.Namespace) -> dict[str, Any]:
 def confirmed_or_atomic_merge(
     ready: dict[str, Any],
     client: GitHubMergeClient,
+    *,
+    merger: dict[str, Any],
 ) -> dict[str, Any]:
     main = client.get(f"/repos/{REPOSITORY}/git/ref/heads/main")
     main_sha = nested_string(main, "object", "sha", label="main SHA")
@@ -1470,6 +1583,11 @@ def confirmed_or_atomic_merge(
         head_sha=ready["candidate_sha"],
         merge_sha=ready["merge_sha"],
         tree_sha=ready["merge_tree_sha"],
+        merger_app_slug=merger["slug"],
+        merger_installation_id=merger["installation_id"],
+        merger_app_id=merger["app_id"],
+        approval_receipt=None,
+        permit=None,
     )
     if main_sha == ready["base_sha"]:
         return atomic_merge(merge_args, client)
@@ -1514,6 +1632,7 @@ def finalize(
     token: str,
     observer_token: str,
     approver_token: str,
+    merger_token: str,
 ) -> dict[str, Any]:
     args.candidate_sha = require_sha(
         args.candidate_sha, label="candidate_sha", length=40
@@ -1540,15 +1659,18 @@ def finalize(
 
     executor_read_client = GitHubReadClient(token)
     read_client = GitHubReadClient(observer_token)
-    merge_client = GitHubMergeClient(token)
+    merge_client = GitHubMergeClient(merger_token)
     ruleset_client = GitHubRulesetClient(token)
     admin_client = GitHubAdminClient(token)
     approval_client = GitHubApprovalClient(approver_token)
+    bootstrap_contract = load_json(args.bootstrap_contract, label="bootstrap contract")
+    validate_merger(bootstrap_contract["merger"])
     current_credential_preflight = preflight_credentials(
         args,
         admin_client,
         read_client,
         approval_client,
+        merge_client,
     )
     ratification, promotion = verify_ratification(
         args,
@@ -1560,10 +1682,11 @@ def finalize(
         raise PermitInputError(
             "ratification tree does not match bootstrap-ready receipt"
         )
-    transition_control = verify_control(
+    transition_control = verify_finalization_control_prestate(
         args,
+        executor_read_client,
         read_client,
-        deployment_transition=True,
+        expected_control_sha=ready["merge_sha"],
     )
 
     liveness_dir = args.ready.parent / "authority-liveness"
@@ -1761,7 +1884,11 @@ def finalize(
     )
     if control != observer_control:
         raise PermitInputError("independent final control-plane reads did not match")
-    merge_receipt = confirmed_or_atomic_merge(ready, merge_client)
+    merge_receipt = confirmed_or_atomic_merge(
+        ready,
+        merge_client,
+        merger=bootstrap_contract["merger"],
+    )
     ruleset_receipt = transition(
         transition_args(
             "bootstrap-finalize",
@@ -1843,6 +1970,7 @@ def main(argv: list[str]) -> int:
         token = os.environ.get("GH_TOKEN", "")
         observer_token = os.environ.get("HELM_AUTHORITY_BOOTSTRAP_OBSERVER_TOKEN", "")
         approver_token = os.environ.get("HELM_AUTHORITY_APPROVER_TOKEN", "")
+        merger_token = os.environ.get("HELM_AUTHORITY_MERGER_TOKEN", "")
         if not token:
             raise PermitInputError("GH_TOKEN is required")
         if not observer_token:
@@ -1851,18 +1979,32 @@ def main(argv: list[str]) -> int:
             )
         if not approver_token:
             raise PermitInputError("HELM_AUTHORITY_APPROVER_TOKEN is required")
-        if len({token, observer_token, approver_token}) != 3:
+        if not merger_token:
+            raise PermitInputError("HELM_AUTHORITY_MERGER_TOKEN is required")
+        if len({token, observer_token, approver_token, merger_token}) != 4:
             raise PermitInputError(
-                "bootstrap executor, observer, and approver tokens must be distinct"
+                "bootstrap executor, observer, approver, and merger tokens must be distinct"
             )
         if not 60 <= args.timeout_seconds <= 3600:
             raise PermitInputError("timeout_seconds must be between 60 and 3600")
         if not 5 <= args.poll_seconds <= 60:
             raise PermitInputError("poll_seconds must be between 5 and 60")
         if args.command == "prepare":
-            result = prepare(args, token, observer_token, approver_token)
+            result = prepare(
+                args,
+                token,
+                observer_token,
+                approver_token,
+                merger_token,
+            )
         else:
-            result = finalize(args, token, observer_token, approver_token)
+            result = finalize(
+                args,
+                token,
+                observer_token,
+                approver_token,
+                merger_token,
+            )
             write_json(args.output, result)
         sys.stdout.buffer.write(canonical_json(result))
     except (KeyError, OSError, PermitInputError, TypeError, ValueError) as exc:

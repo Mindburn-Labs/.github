@@ -43,10 +43,10 @@ class AuthorityPromotionWorkflowTests(unittest.TestCase):
         self.assertEqual(workflow.count('= "146576964"'), 1)
         self.assertEqual(
             workflow.count("permission-organization-administration: write"),
-            5,
+            8,
         )
         self.assertIn(
-            "observer token deliberately omits organization Administration",
+            "GitHub requires organization Administration write even for ruleset GET",
             workflow,
         )
         self.assertIn("permission-actions: read", workflow)
@@ -70,10 +70,7 @@ class AuthorityPromotionWorkflowTests(unittest.TestCase):
                 workflow.index("  observe_final:") : workflow.index("  recover:")
             ]
         )
-        self.assertNotIn(
-            "permission-organization-administration",
-            observer_jobs,
-        )
+        self.assertIn("permission-organization-administration: write", observer_jobs)
         self.assertNotIn("permission-contents: write", observer_jobs)
         stage_job = workflow[workflow.index("  stage:") : workflow.index("  merge:")]
         self.assertIn("pull-requests: read", stage_job)

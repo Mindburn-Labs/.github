@@ -29,6 +29,14 @@ MERGE_SHA = "5" * 40
 TREE_SHA = "6" * 40
 PERMIT_ID = "sha256:" + "7" * 64
 KERNEL = "Mindburn-Labs/helm-ai-kernel"
+EFFECTIVE_KERNEL_RULES = [
+    {
+        "ruleset_id": 7001,
+        "type": "update",
+        "ruleset_source_type": "Organization",
+        "ruleset_source": "Mindburn-Labs",
+    }
+]
 
 
 def enabled_contract() -> dict[str, object]:
@@ -72,6 +80,28 @@ def plan_value(*, ordinary=None, promotions=None) -> dict[str, object]:
         "controller_sha": CONTROL_SHA,
         "active_workflow_sha": ACTIVE_SHA,
         "observed_at": "2026-07-15T00:00:00Z",
+        "merge_interlock": {
+            "schema": "mindburn.autonomous-release-merge-interlock/v1",
+            "merger_app_id": 5000001,
+            "merger_installation_id": 6000001,
+            "machine_ruleset_id": 7000,
+            "updater_ruleset_id": 7001,
+            "kernel_quality_ruleset_id": 7002,
+            "proof_ref_ruleset_id": 7003,
+            "proof_refs": {},
+            "effective_rules": {
+                KERNEL: [
+                    [
+                        rule["ruleset_id"],
+                        rule["type"],
+                        rule["ruleset_source_type"],
+                        rule["ruleset_source"],
+                    ]
+                    for rule in EFFECTIVE_KERNEL_RULES
+                ]
+            },
+            "repository_settings": {},
+        },
         "ordinary": ordinary or [],
         "promotions": promotions or [],
         "blocked": [],
@@ -103,6 +133,8 @@ class MergeClient:
             }
         if path == "/installation/repositories?per_page=100":
             return {"repositories": [{"full_name": KERNEL}]}
+        if path == f"/repos/{KERNEL}/rules/branches/main":
+            return json.loads(json.dumps(EFFECTIVE_KERNEL_RULES))
         if path.endswith("/reviews/101"):
             return {
                 "id": 101,
@@ -252,6 +284,11 @@ class AutonomousReleaseControllerTests(unittest.TestCase):
                     MODULE, "discover_effective_workflow_sha", return_value=ACTIVE_SHA
                 ),
                 mock.patch.object(MODULE, "observe_effective_stable_rules"),
+                mock.patch.object(
+                    MODULE,
+                    "observe_merge_interlock",
+                    return_value=plan_value()["merge_interlock"],
+                ),
                 mock.patch.object(MODULE, "head_authority", side_effect=heads),
                 mock.patch.object(MODULE, "verify_repository_settings"),
                 mock.patch.object(

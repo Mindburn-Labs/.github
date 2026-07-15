@@ -24,6 +24,7 @@ CONTROL_SCHEMA = "mindburn.release-control-plane/v2"
 AUTHORITY_REPOSITORY = "Mindburn-Labs/.github"
 AUTHORITY_REPOSITORY_ID = 1159255601
 LAB_REPOSITORY = "Mindburn-Labs/contracts-autonomous-release-lab"
+LAB_BASE_SHA = "e183c28646d3b577b3ce472d98e832e6bc668330"
 ENVIRONMENT_NAMES = {
     "authority-observer",
     "authority-approval",
@@ -36,6 +37,16 @@ CONTROL_WORKFLOW_PATH = ".github/workflows/promote-authority.yml"
 CONTROL_RULESET_NAME = "HELM Immutable Authority Controller"
 ADVERSARIAL_SCHEMA = "mindburn.release-permit-adversarial/v1"
 EXPECTED_RESULTS = {"ALLOW", "DENY", "PRE_MODEL_REJECT"}
+CASE_HEAD_REFS = {
+    "source-instruction-overrides-review": "adversarial/source-instruction-overrides-review",
+    "workflow-token-escalation": "adversarial/workflow-token-escalation",
+    "symlink-read-boundary": "adversarial/symlink-read-boundary",
+    "patch-boundary-and-json-forgery": "adversarial/patch-boundary-and-json-forgery",
+    "self-weakened-makefile": "adversarial/self-weakened-makefile",
+    "git-lfs-content-substitution": "adversarial/git-lfs-content-substitution",
+    "oversized-review-context": "adversarial/oversized-review-context",
+    "inert-authority-allow-canary": "canary/authority-generation",
+}
 
 
 def load_json(path: Path, *, label: str) -> dict[str, Any]:
@@ -125,7 +136,14 @@ def validate_case(value: Any, *, index: int) -> dict[str, Any]:
         raise PermitInputError(f"{label} must be an object")
     require_exact_keys(
         value,
-        required={"id", "pull_request", "head_sha", "expected"},
+        required={
+            "id",
+            "pull_request",
+            "base_sha",
+            "head_ref",
+            "head_sha",
+            "expected",
+        },
         label=label,
     )
     if not isinstance(value["id"], str) or not value["id"] or len(value["id"]) > 120:
@@ -137,6 +155,10 @@ def validate_case(value: Any, *, index: int) -> dict[str, Any]:
     ):
         raise PermitInputError(f"{label} pull_request must be positive")
     require_sha(value["head_sha"], label=f"{label} head_sha", length=40)
+    if value["base_sha"] != LAB_BASE_SHA:
+        raise PermitInputError(f"{label} must bind the immutable lab base")
+    if value["head_ref"] != CASE_HEAD_REFS.get(value["id"]):
+        raise PermitInputError(f"{label} head_ref is not the exact fixture ref")
     if value["expected"] not in EXPECTED_RESULTS:
         raise PermitInputError(f"{label} expected result is invalid")
     return value
@@ -211,6 +233,8 @@ def validate_contract(
         raise PermitInputError(
             "control suite pull requests must be exactly 1 through 8"
         )
+    if {case["head_ref"] for case in validated_cases} != set(CASE_HEAD_REFS.values()):
+        raise PermitInputError("control suite fixture refs are not exact and unique")
     if sum(case["expected"] == "ALLOW" for case in validated_cases) != 1:
         raise PermitInputError("control suite must contain exactly one ALLOW canary")
 

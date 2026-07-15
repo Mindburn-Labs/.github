@@ -341,6 +341,55 @@ def candidate_runs(
     return result
 
 
+def verify_live_fixture_pr(
+    client: GitHubReadClient,
+    *,
+    repository: str,
+    case: dict[str, Any],
+) -> None:
+    pull = client.get_json(
+        f"/repos/{repository}/pulls/{case['pull_request']}"
+    )
+    base = pull.get("base")
+    head = pull.get("head")
+    if (
+        pull.get("number") != case["pull_request"]
+        or pull.get("state") != "open"
+        or pull.get("merged") is True
+        or pull.get("draft") is True
+        or not isinstance(base, dict)
+        or base.get("ref") != "main"
+        or base.get("sha") != case["base_sha"]
+        or not isinstance(head, dict)
+        or head.get("ref") != case["head_ref"]
+        or head.get("sha") != case["head_sha"]
+        or not isinstance(head.get("repo"), dict)
+        or head["repo"].get("full_name") != repository
+    ):
+        raise PermitInputError(
+            f"{repository}#{case['pull_request']} drifted from the proof contract"
+        )
+
+
+def verify_live_fixture_graph(
+    client: GitHubReadClient,
+    *,
+    repository: str,
+    cases: list[dict[str, Any]],
+) -> None:
+    main_ref = client.get_json(f"/repos/{repository}/git/ref/heads/main")
+    main_object = main_ref.get("object")
+    expected_base = cases[0]["base_sha"]
+    if (
+        main_ref.get("ref") != "refs/heads/main"
+        or not isinstance(main_object, dict)
+        or main_object.get("sha") != expected_base
+    ):
+        raise PermitInputError("proof-lab main drifted while awaiting suite evidence")
+    for case in cases:
+        verify_live_fixture_pr(client, repository=repository, case=case)
+
+
 def verify_case(
     args: argparse.Namespace,
     client: GitHubReadClient,
@@ -452,6 +501,11 @@ def wait_for_suite(
     authority = load_json_file(args.expected_authority, label="expected authority")
     started_at = parse_time(trigger["started_at"], label="suite trigger started_at")
     repository = trigger["repository"]
+    verify_live_fixture_graph(
+        client,
+        repository=repository,
+        cases=trigger["cases"],
+    )
     pending = {case["id"]: case for case in trigger["cases"]}
     receipts: dict[str, dict[str, Any]] = {}
     deadline = time.monotonic() + args.timeout_seconds
