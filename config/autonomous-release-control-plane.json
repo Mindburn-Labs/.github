@@ -120,6 +120,40 @@
         "custom_branch_policies": true,
         "protected_branches": false
       },
+      "name": "authority-approval",
+      "protection_rule_types": [
+        "branch_policy"
+      ]
+    },
+    {
+      "branch_policies": [
+        {
+          "name": "authority/control-v1",
+          "type": "branch"
+        }
+      ],
+      "can_admins_bypass": false,
+      "deployment_branch_policy": {
+        "custom_branch_policies": true,
+        "protected_branches": false
+      },
+      "name": "authority-merge",
+      "protection_rule_types": [
+        "branch_policy"
+      ]
+    },
+    {
+      "branch_policies": [
+        {
+          "name": "authority/control-v1",
+          "type": "branch"
+        }
+      ],
+      "can_admins_bypass": false,
+      "deployment_branch_policy": {
+        "custom_branch_policies": true,
+        "protected_branches": false
+      },
       "name": "authority-promotion",
       "protection_rule_types": [
         "branch_policy"

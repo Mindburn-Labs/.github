@@ -24,7 +24,12 @@ CONTROL_SCHEMA = "mindburn.release-control-plane/v2"
 AUTHORITY_REPOSITORY = "Mindburn-Labs/.github"
 AUTHORITY_REPOSITORY_ID = 1159255601
 LAB_REPOSITORY = "Mindburn-Labs/contracts-autonomous-release-lab"
-ENVIRONMENT_NAMES = {"authority-observer", "authority-promotion"}
+ENVIRONMENT_NAMES = {
+    "authority-observer",
+    "authority-approval",
+    "authority-merge",
+    "authority-promotion",
+}
 CONTROL_BRANCH = "authority/control-v1"
 CONTROL_REF = f"refs/heads/{CONTROL_BRANCH}"
 CONTROL_WORKFLOW_PATH = ".github/workflows/promote-authority.yml"
@@ -173,8 +178,8 @@ def validate_contract(
     validate_control_workflow(contract["control_workflow"])
 
     environments = contract["environments"]
-    if not isinstance(environments, list) or len(environments) != 2:
-        raise PermitInputError("control contract must contain exactly two environments")
+    if not isinstance(environments, list) or len(environments) != len(ENVIRONMENT_NAMES):
+        raise PermitInputError("control contract must contain the exact authority environments")
     validated_environments = [
         validate_environment(environment, index=index)
         for index, environment in enumerate(environments)

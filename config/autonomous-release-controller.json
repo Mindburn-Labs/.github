@@ -1,0 +1,38 @@
+{
+  "apps": {
+    "approver": {
+      "app_id": 4298283,
+      "installation_id": 146576964,
+      "slug": "helm-authority-approver"
+    },
+    "merger": {
+      "app_id": null,
+      "installation_id": null,
+      "slug": "helm-authority-merger"
+    },
+    "observer": {
+      "app_id": 4296957,
+      "installation_id": 146542079,
+      "slug": "helm-authority-observer"
+    }
+  },
+  "enabled": false,
+  "repositories": [
+    {
+      "authority_changes": "promotion-only",
+      "merge_method": "merge",
+      "repository": "Mindburn-Labs/.github"
+    },
+    {
+      "authority_changes": "not-applicable",
+      "merge_method": "merge",
+      "repository": "Mindburn-Labs/helm-ai-kernel"
+    },
+    {
+      "authority_changes": "proof-only",
+      "merge_method": "merge",
+      "repository": "Mindburn-Labs/contracts-autonomous-release-lab"
+    }
+  ],
+  "schema": "mindburn.autonomous-release-controller/v1"
+}

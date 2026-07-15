@@ -603,5 +603,6 @@ jobs:
           gh api --method POST \
             repos/Mindburn-Labs/.github/actions/workflows/promote-authority.yml/dispatches \
             -f ref=authority/control-v1 \
+            -f 'inputs[mode]=promote' \
             -f "inputs[permit_run_id]=$GITHUB_RUN_ID" \
             -f "inputs[permit_run_attempt]=$GITHUB_RUN_ATTEMPT"

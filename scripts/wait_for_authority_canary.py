@@ -323,6 +323,7 @@ def verify_attestation(
     workflow_sha: str,
     source_sha: str,
     github_token: str,
+    signer_workflow: str = SIGNER_WORKFLOW,
 ) -> None:
     environment = sanitized_subprocess_environment(github_token=github_token)
     process = subprocess.run(
@@ -336,7 +337,7 @@ def verify_attestation(
             "--repo",
             repository,
             "--signer-workflow",
-            SIGNER_WORKFLOW,
+            signer_workflow,
             "--signer-digest",
             workflow_sha,
             "--source-digest",
@@ -570,14 +571,13 @@ def run_sort_key(run: dict[str, Any]) -> tuple[int, int, int]:
     )
 
 
-def write_model_reviews(
+def write_raw_model_review_evidence(
     client: GitHubReadClient,
     repository: str,
     run_id: int,
     directory: Path,
-    *,
-    context_path: Path,
-) -> dict[str, Path]:
+) -> None:
+    """Download the exact raw, normalized, and envelope files for both providers."""
     evidence: dict[str, tuple[bytes, bytes, bytes]] = {}
     for provider in MODEL_REVIEW_PROVIDERS:
         artifact_id = artifact_for_run(
@@ -599,7 +599,6 @@ def write_model_reviews(
         )
 
     directory.mkdir(parents=True, exist_ok=True)
-    paths: dict[str, Path] = {}
     for provider in MODEL_REVIEW_PROVIDERS:
         raw, normalized, review = evidence[provider]
         raw_path = directory / f"raw-{provider}.txt"
@@ -608,6 +607,22 @@ def write_model_reviews(
         raw_path.write_bytes(raw)
         normalized_path.write_bytes(normalized)
         review_path.write_bytes(review)
+
+
+def write_model_reviews(
+    client: GitHubReadClient,
+    repository: str,
+    run_id: int,
+    directory: Path,
+    *,
+    context_path: Path,
+) -> dict[str, Path]:
+    write_raw_model_review_evidence(client, repository, run_id, directory)
+    paths: dict[str, Path] = {}
+    for provider in MODEL_REVIEW_PROVIDERS:
+        raw_path = directory / f"raw-{provider}.txt"
+        normalized_path = directory / f"normalized-{provider}.json"
+        review_path = directory / f"review-{provider}.json"
         paths[provider] = rebuild_review_evidence(
             context=context_path,
             raw_transport=raw_path,

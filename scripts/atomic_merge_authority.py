@@ -13,12 +13,37 @@ from typing import Any
 import urllib.error
 import urllib.request
 
-from autonomous_release_permit import PermitInputError, require_sha
+from autonomous_release_permit import (
+    PermitInputError,
+    parse_json_strict,
+    require_exact_keys,
+    require_sha,
+)
 
 
 API_VERSION = "2026-03-10"
 REPOSITORY = "Mindburn-Labs/.github"
 MAIN_REF = "refs/heads/main"
+APPROVER_LOGIN = "helm-authority-approver[bot]"
+APPROVER_APP_ID = 4298283
+APPROVER_INSTALLATION_ID = 146576964
+APPROVAL_SCHEMA = "mindburn.release-authority-machine-approval/v2"
+APPROVAL_KEYS = {
+    "schema",
+    "repository",
+    "pull_request",
+    "head_sha",
+    "workflow_sha",
+    "permit_id",
+    "base_sha",
+    "merge_sha",
+    "merge_tree_sha",
+    "review_id",
+    "review_state",
+    "approver_login",
+    "approver_app_id",
+    "approver_installation_id",
+}
 UPDATE_REFS_MUTATION = """
 mutation($repositoryId: ID!, $beforeOid: GitObjectID!, $afterOid: GitObjectID!) {
   updateRefs(input: {
@@ -120,6 +145,99 @@ def nested_string(value: dict[str, Any], *keys: str, label: str) -> str:
     return current
 
 
+def load_json_object(path: Path, *, label: str) -> dict[str, Any]:
+    try:
+        value = parse_json_strict(path.read_text(encoding="utf-8"), label=label)
+    except UnicodeDecodeError as exc:
+        raise PermitInputError(f"{label} is not UTF-8") from exc
+    if not isinstance(value, dict):
+        raise PermitInputError(f"{label} must be an object")
+    return value
+
+
+def verify_merger_installation(
+    client: GitHubMergeClient,
+    *,
+    app_slug: str,
+    installation_id: int,
+    app_id: int,
+) -> None:
+    if app_slug != "helm-authority-merger" or installation_id <= 0 or app_id <= 0:
+        raise PermitInputError("merger App identity is not source-owned and active")
+    installation = client.get("/installation")
+    account = installation.get("account")
+    if (
+        installation.get("app_id") != app_id
+        or installation.get("id") != installation_id
+        or installation.get("permissions")
+        != {"contents": "write", "pull_requests": "read"}
+        or not isinstance(account, dict)
+        or account.get("login") != "Mindburn-Labs"
+    ):
+        raise PermitInputError("merger App installation identity or permissions drifted")
+    repositories = client.get("/installation/repositories?per_page=100")
+    items = repositories.get("repositories")
+    if not isinstance(items, list):
+        raise PermitInputError("merger App repository scope is malformed")
+    names = {
+        item.get("full_name") for item in items if isinstance(item, dict)
+    }
+    if names != {REPOSITORY}:
+        raise PermitInputError("merger token repository scope is not exact")
+
+
+def verify_machine_approval(
+    client: GitHubMergeClient,
+    *,
+    approval_path: Path,
+    permit_path: Path,
+) -> None:
+    approval = load_json_object(approval_path, label="machine approval receipt")
+    permit = load_json_object(permit_path, label="ratification permit")
+    require_exact_keys(approval, required=APPROVAL_KEYS, label="machine approval")
+    expected = {
+        "schema": APPROVAL_SCHEMA,
+        "repository": REPOSITORY,
+        "pull_request": permit.get("pull_request"),
+        "head_sha": permit.get("head_sha"),
+        "workflow_sha": permit.get("workflow_sha"),
+        "permit_id": permit.get("permit_id"),
+        "base_sha": permit.get("base_sha"),
+        "merge_sha": permit.get("merge_sha"),
+        "merge_tree_sha": permit.get("merge_tree_sha"),
+        "review_state": "APPROVED",
+        "approver_login": APPROVER_LOGIN,
+        "approver_app_id": APPROVER_APP_ID,
+        "approver_installation_id": APPROVER_INSTALLATION_ID,
+    }
+    for field, value in expected.items():
+        if approval.get(field) != value:
+            raise PermitInputError(f"machine approval {field} is not exact")
+    review_id = approval.get("review_id")
+    pull_request = approval.get("pull_request")
+    if (
+        not isinstance(review_id, int)
+        or isinstance(review_id, bool)
+        or review_id <= 0
+        or not isinstance(pull_request, int)
+        or isinstance(pull_request, bool)
+        or pull_request <= 0
+    ):
+        raise PermitInputError("machine approval review identity is invalid")
+    review = client.get(
+        f"/repos/{REPOSITORY}/pulls/{pull_request}/reviews/{review_id}"
+    )
+    author = review.get("user")
+    if (
+        review.get("state") != "APPROVED"
+        or review.get("commit_id") != approval["head_sha"]
+        or review.get("body") != f"HELM signed ALLOW permit {approval['permit_id']}"
+        or not isinstance(author, dict)
+        or author.get("login") != APPROVER_LOGIN
+    ):
+        raise PermitInputError("live App approval does not match the signed permit")
+
+
 def validate_pull_request(
     pull_request: dict[str, Any],
     *,
@@ -176,6 +294,35 @@ def atomic_merge(args: argparse.Namespace, client: GitHubMergeClient) -> dict[st
     tree_sha = require_sha(args.tree_sha, label="tree_sha", length=40)
     if args.pull_request <= 0:
         raise PermitInputError("pull_request must be positive")
+    merger_app_slug = getattr(args, "merger_app_slug", None)
+    merger_installation_id = getattr(args, "merger_installation_id", None)
+    merger_app_id = getattr(args, "merger_app_id", None)
+    if any(
+        value is not None
+        for value in (merger_app_slug, merger_installation_id, merger_app_id)
+    ):
+        if not (
+            isinstance(merger_app_slug, str)
+            and isinstance(merger_installation_id, int)
+            and isinstance(merger_app_id, int)
+        ):
+            raise PermitInputError("merger App identity arguments are incomplete")
+        verify_merger_installation(
+            client,
+            app_slug=merger_app_slug,
+            installation_id=merger_installation_id,
+            app_id=merger_app_id,
+        )
+    approval_path = getattr(args, "approval_receipt", None)
+    permit_path = getattr(args, "permit", None)
+    if (approval_path is None) != (permit_path is None):
+        raise PermitInputError("approval receipt and permit must be supplied together")
+    if isinstance(approval_path, Path) and isinstance(permit_path, Path):
+        verify_machine_approval(
+            client,
+            approval_path=approval_path,
+            permit_path=permit_path,
+        )
 
     main = client.get(f"/repos/{REPOSITORY}/git/ref/heads/main")
     main_sha = nested_string(main, "object", "sha", label="main SHA")
@@ -273,6 +420,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--head-sha", required=True)
     parser.add_argument("--merge-sha", required=True)
     parser.add_argument("--tree-sha", required=True)
+    parser.add_argument("--approval-receipt", type=Path)
+    parser.add_argument("--permit", type=Path)
+    parser.add_argument("--merger-app-slug")
+    parser.add_argument("--merger-installation-id", type=int)
+    parser.add_argument("--merger-app-id", type=int)
     parser.add_argument("--output", type=Path, required=True)
     return parser
 

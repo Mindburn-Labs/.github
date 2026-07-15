@@ -110,14 +110,26 @@ class RepositorySettingsClient:
 class ControlPlaneAdminClient:
     RULESET_ID = 4242
 
-    def __init__(self, *, wrong_ref: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        wrong_ref: bool = False,
+        existing_environments: set[str] | None = None,
+    ) -> None:
         self.ruleset: dict[str, object] | None = None
         self.etag = 'W/"control-1"'
         self.ref_sha = "9" * 40 if wrong_ref else None
         self.environment_policies = {
             "authority-observer": [],
+            "authority-approval": [],
+            "authority-merge": [],
             "authority-promotion": [],
         }
+        self.environments = (
+            set(self.environment_policies)
+            if existing_environments is None
+            else set(existing_environments)
+        )
         self.operations: list[str] = []
 
     def response(self, body, etag=None):
@@ -176,8 +188,34 @@ class ControlPlaneAdminClient:
                 raise AssertionError("wrong immutable control ref payload")
             self.ref_sha = MERGE_SHA
             return self.response({"ref": payload["ref"], "object": {"sha": MERGE_SHA}})
+        if "/deployment-branch-policies/" in path and method == "DELETE":
+            environment = path.split("/environments/", 1)[1].split("/", 1)[0]
+            policy_id = int(path.rsplit("/", 1)[1])
+            policies = self.environment_policies[environment]
+            if [policy.get("id") for policy in policies] != [policy_id]:
+                raise AssertionError("unexpected environment policy deletion")
+            policies.clear()
+            return self.response(None)
+        if "/environments/" in path and "/deployment-branch-policies" not in path:
+            environment = path.split("/environments/", 1)[1]
+            if method != "PUT" or payload != MODULE.DISABLED_ENVIRONMENT_PAYLOAD:
+                raise AssertionError((method, path, payload))
+            self.environments.add(environment)
+            return self.response(
+                {
+                    "name": environment,
+                    "can_admins_bypass": False,
+                    "protection_rules": [{"type": "branch_policy", "id": 1}],
+                    "deployment_branch_policy": {
+                        "protected_branches": False,
+                        "custom_branch_policies": True,
+                    },
+                }
+            )
         if path.endswith("/deployment-branch-policies"):
             environment = path.split("/environments/", 1)[1].split("/", 1)[0]
+            if environment not in self.environments:
+                raise AssertionError(f"environment {environment} is absent")
             policies = self.environment_policies[environment]
             if method == "GET":
                 return self.response(
@@ -222,6 +260,9 @@ class ControlPlaneObserverClient:
             policies = self.admin.environment_policies[environment]
             return {"total_count": len(policies), "branch_policies": policies}
         if "/environments/" in path:
+            environment = path.split("/environments/", 1)[1].split("/", 1)[0]
+            if environment not in self.admin.environments:
+                raise AssertionError(f"environment {environment} is absent")
             return {
                 "can_admins_bypass": False,
                 "protection_rules": [{"type": "branch_policy", "id": 1}],
@@ -363,7 +404,7 @@ class BootstrapAuthorityTests(unittest.TestCase):
             expected_sha=MERGE_SHA,
         )
         self.assertEqual(receipt["sha"], MERGE_SHA)
-        self.assertEqual(len(environments), 2)
+        self.assertEqual(len(environments), 4)
         create_ruleset = admin.operations.index("POST /orgs/Mindburn-Labs/rulesets")
         create_ref = admin.operations.index(
             "POST /repos/Mindburn-Labs/.github/git/refs"
@@ -399,6 +440,70 @@ class BootstrapAuthorityTests(unittest.TestCase):
             if operation.startswith(("POST ", "PUT "))
         ]
         self.assertEqual(retry_mutations, [])
+
+    def test_missing_control_environments_are_created_disabled(self) -> None:
+        contract = self.load_control_contract()
+        admin = ControlPlaneAdminClient(
+            existing_environments={"authority-observer", "authority-promotion"}
+        )
+        observer = ControlPlaneObserverClient(admin)
+        receipts = MODULE.ensure_control_environments_disabled(
+            contract,
+            admin,
+            observer,
+        )
+        self.assertEqual(len(receipts), 4)
+        self.assertEqual(admin.environments, set(admin.environment_policies))
+        self.assertTrue(
+            all(receipt["branch_policies"] == [] for receipt in receipts)
+        )
+        self.assertEqual(
+            [
+                operation
+                for operation in admin.operations
+                if operation.startswith("PUT /repos/Mindburn-Labs/.github/environments/")
+            ],
+            [
+                "PUT /repos/Mindburn-Labs/.github/environments/authority-observer",
+                "PUT /repos/Mindburn-Labs/.github/environments/authority-approval",
+                "PUT /repos/Mindburn-Labs/.github/environments/authority-merge",
+                "PUT /repos/Mindburn-Labs/.github/environments/authority-promotion",
+            ],
+        )
+
+    def test_enabled_control_policies_are_disabled_before_verification(self) -> None:
+        contract = self.load_control_contract()
+        admin = ControlPlaneAdminClient(
+            existing_environments={"authority-observer", "authority-promotion"}
+        )
+        for environment in ("authority-observer", "authority-promotion"):
+            admin.environment_policies[environment] = [
+                {
+                    "id": 51 if environment == "authority-observer" else 52,
+                    "name": "authority/control-v1",
+                    "type": "branch",
+                }
+            ]
+        observer = ControlPlaneObserverClient(admin)
+        receipts = MODULE.ensure_control_environments_disabled(
+            contract,
+            admin,
+            observer,
+        )
+        self.assertTrue(
+            all(receipt["branch_policies"] == [] for receipt in receipts)
+        )
+        self.assertEqual(
+            [
+                operation
+                for operation in admin.operations
+                if operation.startswith("DELETE ")
+            ],
+            [
+                "DELETE /repos/Mindburn-Labs/.github/environments/authority-observer/deployment-branch-policies/51",
+                "DELETE /repos/Mindburn-Labs/.github/environments/authority-promotion/deployment-branch-policies/52",
+            ],
+        )
 
     def test_wrong_control_ref_keeps_environments_disabled(self) -> None:
         contract = self.load_control_contract()
@@ -440,11 +545,13 @@ class BootstrapAuthorityTests(unittest.TestCase):
             for operation in admin.operations[before:]
             if operation.startswith("POST ")
         ]
-        self.assertEqual(len(receipts), 2)
+        self.assertEqual(len(receipts), 4)
         self.assertEqual(
             mutations,
             [
-                "POST /repos/Mindburn-Labs/.github/environments/authority-promotion/deployment-branch-policies"
+                "POST /repos/Mindburn-Labs/.github/environments/authority-approval/deployment-branch-policies",
+                "POST /repos/Mindburn-Labs/.github/environments/authority-merge/deployment-branch-policies",
+                "POST /repos/Mindburn-Labs/.github/environments/authority-promotion/deployment-branch-policies",
             ],
         )
 

@@ -1,0 +1,43 @@
+name: HELM Autonomous Release Clock
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+  workflow_run:
+    workflows:
+      - HELM Autonomous Release Permit
+    types:
+      - completed
+
+permissions:
+  actions: write
+
+concurrency:
+  group: helm-autonomous-release-clock
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    name: Dispatch immutable controller tick
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Dispatch inputless tick only when the controller queue is empty
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          workflow="repos/Mindburn-Labs/.github/actions/workflows/promote-authority.yml"
+          test "$(gh api "$workflow" --jq '.state')" = "active"
+          queued="$(gh api "$workflow/runs?status=queued&per_page=1" --jq '.total_count')"
+          active="$(gh api "$workflow/runs?status=in_progress&per_page=1" --jq '.total_count')"
+          if (( queued + active > 0 )); then
+            echo "Controller already has queued or active work; preserving FIFO promotion order."
+            exit 0
+          fi
+          gh api --method POST \
+            "$workflow/dispatches" \
+            -f ref=authority/control-v1 \
+            -f 'inputs[mode]=tick'

@@ -112,7 +112,12 @@ class ControlPlaneTests(unittest.TestCase):
         contract = MODULE.validate_contract(self.load_contract(), self.load_corpus())
         self.assertEqual(
             {environment["name"] for environment in contract["environments"]},
-            {"authority-observer", "authority-promotion"},
+            {
+                "authority-observer",
+                "authority-approval",
+                "authority-merge",
+                "authority-promotion",
+            },
         )
         self.assertEqual(len(contract["adversarial_suite"]["cases"]), 8)
         self.assertEqual(
@@ -150,7 +155,7 @@ class ControlPlaneTests(unittest.TestCase):
     def test_live_environment_verification_accepts_exact_state(self) -> None:
         contract = MODULE.validate_contract(self.load_contract(), self.load_corpus())
         receipts = MODULE.verify_live_environments(contract, FakeClient())
-        self.assertEqual(len(receipts), 2)
+        self.assertEqual(len(receipts), 4)
 
     def test_disabled_environments_admit_no_branch_during_bootstrap(self) -> None:
         contract = MODULE.validate_contract(self.load_contract(), self.load_corpus())
@@ -171,7 +176,12 @@ class ControlPlaneTests(unittest.TestCase):
         )
         self.assertEqual(
             [receipt["branch_policies"] for receipt in receipts],
-            [[], [{"name": "authority/control-v1", "type": "branch"}]],
+            [
+                [],
+                [{"name": "authority/control-v1", "type": "branch"}],
+                [{"name": "authority/control-v1", "type": "branch"}],
+                [{"name": "authority/control-v1", "type": "branch"}],
+            ],
         )
         with self.assertRaisesRegex(MODULE.PermitInputError, "branch policies drifted"):
             MODULE.verify_live_environments(contract, client)

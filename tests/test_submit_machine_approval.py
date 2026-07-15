@@ -32,6 +32,13 @@ class FakeClient:
         self.merged = False
 
     def request(self, method: str, path: str, *, payload=None):
+        if path == "/installation":
+            return {
+                "app_id": MODULE.APPROVER_APP_ID,
+                "id": MODULE.APPROVER_INSTALLATION_ID,
+                "permissions": {"pull_requests": "write"},
+                "account": {"login": "Mindburn-Labs"},
+            }
         if path.startswith("/installation/repositories"):
             return {"repositories": [{"full_name": REPOSITORY}]}
         if path == "/repos/Mindburn-Labs/.github/pulls/36":
@@ -222,6 +229,29 @@ class SubmitMachineApprovalTests(unittest.TestCase):
         with (
             mock.patch.object(MODULE, "verify_permit", return_value=self.permit()),
             self.assertRaisesRegex(MODULE.PermitInputError, "scope is not exact"),
+        ):
+            MODULE.submit_machine_approval(
+                arguments(),
+                client,
+                attestation_token="observer",
+                metadata_client=client,
+            )
+        self.assertEqual(client.posts, 0)
+
+    def test_wrong_live_app_with_the_same_repository_scope_fails_closed(self) -> None:
+        client = FakeClient()
+        original = client.request
+
+        def request(method: str, path: str, *, payload=None):
+            value = original(method, path, payload=payload)
+            if path == "/installation":
+                value["app_id"] = 999999
+            return value
+
+        client.request = request  # type: ignore[method-assign]
+        with (
+            mock.patch.object(MODULE, "verify_permit", return_value=self.permit()),
+            self.assertRaisesRegex(MODULE.PermitInputError, "identity or permissions"),
         ):
             MODULE.submit_machine_approval(
                 arguments(),

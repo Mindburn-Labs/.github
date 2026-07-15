@@ -54,7 +54,11 @@ from submit_machine_approval import (
     submit_machine_approval,
     verify_installation,
 )
-from verify_authority_promotion import git_blob, verify as verify_promotion
+from verify_authority_promotion import (
+    REVIEW_EVIDENCE_FILENAMES,
+    git_blob,
+    verify as verify_promotion,
+)
 from verify_control_plane import (
     AUTHORITY_REPOSITORY,
     CONTROL_BRANCH,
@@ -67,29 +71,38 @@ from verify_control_plane import (
     verify_live_repository_settings,
 )
 from wait_for_authority_canary import (
+    WORKFLOW_NAME,
+    WORKFLOW_PATH,
     GitHubReadClient,
+    artifact_for_run,
+    extract_attested_permit,
+    extract_trusted_context,
     load_json_file,
     require_get_forbidden,
     verify_attestation,
     verify_candidate_permit,
     wait_for_canary,
+    write_raw_model_review_evidence,
 )
 from wait_for_authority_suite import wait_for_suite
 
 
-READY_SCHEMA = "mindburn.release-authority-bootstrap-ready/v2"
-FINAL_SCHEMA = "mindburn.release-authority-bootstrap/v2"
+READY_SCHEMA = "mindburn.release-authority-bootstrap-ready/v3"
+FINAL_SCHEMA = "mindburn.release-authority-bootstrap/v3"
 TRIGGER_SCHEMA = "mindburn.release-authority-suite-trigger/v1"
 LAB_REPOSITORY = "Mindburn-Labs/contracts-autonomous-release-lab"
 OBSERVER_APP_ID = 4296957
 OBSERVER_INSTALLATION_ID = 146542079
 OBSERVER_SLUG = "helm-authority-observer"
-OBSERVER_REPOSITORIES = {REPOSITORY, LAB_REPOSITORY}
+OBSERVER_REPOSITORIES = {
+    REPOSITORY,
+    "Mindburn-Labs/helm-ai-kernel",
+    LAB_REPOSITORY,
+}
 OBSERVER_PERMISSIONS = {
     "actions": "read",
     "attestations": "read",
     "contents": "read",
-    "organization_administration": "write",
     "pull_requests": "read",
 }
 CANDIDATE_ARGUMENT_SOURCE_INPUTS = {
@@ -112,6 +125,39 @@ CANDIDATE_LOCAL_SOURCE_INPUTS = (
     "scripts/wait_for_authority_canary.py",
     "scripts/wait_for_authority_suite.py",
 )
+DISABLED_ENVIRONMENT_PAYLOAD = {
+    "wait_timer": 0,
+    "prevent_self_review": False,
+    "reviewers": [],
+    "deployment_branch_policy": {
+        "protected_branches": False,
+        "custom_branch_policies": True,
+    },
+}
+READY_EVIDENCE_NAMES = {
+    "authority_suite",
+    "authority_suite_observer",
+    "suite_evidence",
+    "suite_evidence_observer",
+    "credential_preflight",
+    "source_inputs",
+    "parent_verifier",
+    "control_plane",
+    "control_plane_observer",
+    "control_environments_disabled",
+    "repository_settings",
+    "machine_approval",
+    "machine_gates",
+    "liveness_bundle",
+    "liveness_context",
+    "liveness_permit",
+    "liveness_evidence",
+    "ratification_bundle",
+    "ratification_context",
+    "ratification_permit",
+    "ratification_evidence",
+    "suite_trigger",
+}
 
 
 def canonical_json(value: dict[str, Any]) -> bytes:
@@ -125,6 +171,33 @@ def write_json(path: Path, value: dict[str, Any]) -> None:
 
 def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def evidence_tree_receipt(root: Path) -> dict[str, Any]:
+    """Bind every regular evidence file without trusting directory metadata."""
+    if not root.is_dir() or root.is_symlink():
+        raise PermitInputError(f"evidence tree is not a regular directory: {root}")
+    entries: list[dict[str, Any]] = []
+    for path in sorted(root.rglob("*")):
+        if path.is_symlink():
+            raise PermitInputError(f"evidence tree contains a symlink: {path}")
+        if path.is_dir():
+            continue
+        if not path.is_file():
+            raise PermitInputError(f"evidence tree contains a special file: {path}")
+        entries.append(
+            {
+                "path": path.relative_to(root).as_posix(),
+                "sha256": sha256_file(path),
+                "size": path.stat().st_size,
+            }
+        )
+    if not entries:
+        raise PermitInputError(f"evidence tree is empty: {root}")
+    return {
+        "schema": "mindburn.release-authority-evidence-tree/v1",
+        "entries": entries,
+    }
 
 
 def verify_candidate_source_inputs(args: argparse.Namespace) -> dict[str, str]:
@@ -389,12 +462,87 @@ def verify_ratification(
         source_sha=ratified_merge_sha,
         github_token=attestation_token,
     )
+    observer = GitHubReadClient(attestation_token)
+    run_id = permit.get("run_id")
+    run_attempt = permit.get("run_attempt")
+    if any(
+        not isinstance(value, int) or isinstance(value, bool) or value <= 0
+        for value in (run_id, run_attempt)
+    ):
+        raise PermitInputError("bootstrap ratification run identity is invalid")
+    run = observer.get_json(f"/repos/{REPOSITORY}/actions/runs/{run_id}")
+    if (
+        run.get("name") != WORKFLOW_NAME
+        or run.get("path") != WORKFLOW_PATH
+        or run.get("event") != "pull_request"
+        or run.get("head_sha") != args.candidate_sha
+        or run.get("run_attempt") != run_attempt
+        or run.get("status") != "completed"
+        or run.get("conclusion") != "success"
+    ):
+        raise PermitInputError(
+            "bootstrap ratification is not the exact successful parent workflow run"
+        )
+    permit_artifact_id = artifact_for_run(observer, REPOSITORY, run_id)
+    context_artifact_id = artifact_for_run(
+        observer,
+        REPOSITORY,
+        run_id,
+        "release-permit-input",
+    )
+    if permit_artifact_id is None or context_artifact_id is None:
+        raise PermitInputError(
+            "bootstrap ratification run lacks permit or context evidence"
+        )
+    live_permit, live_bundle = extract_attested_permit(
+        observer.get_bytes(
+            f"/repos/{REPOSITORY}/actions/artifacts/{permit_artifact_id}/zip",
+            accept="application/vnd.github+json",
+        )
+    )
+    live_context = extract_trusted_context(
+        observer.get_bytes(
+            f"/repos/{REPOSITORY}/actions/artifacts/{context_artifact_id}/zip",
+            accept="application/vnd.github+json",
+        )
+    )
+    if (
+        live_permit != args.permit.read_bytes()
+        or live_bundle != args.permit_bundle.read_bytes()
+        or live_context != args.trusted_context.read_bytes()
+    ):
+        raise PermitInputError(
+            "bootstrap ratification inputs are not the exact run artifacts"
+        )
+    live_reviews = replay_dir / "live-review-evidence"
+    write_raw_model_review_evidence(
+        observer,
+        REPOSITORY,
+        run_id,
+        live_reviews,
+    )
+    supplied_reviews = args.review_evidence_dir.resolve()
+    try:
+        supplied_entries = list(supplied_reviews.iterdir())
+    except OSError as exc:
+        raise PermitInputError(f"cannot read supplied review evidence: {exc}") from exc
+    if (
+        {entry.name for entry in supplied_entries} != REVIEW_EVIDENCE_FILENAMES
+        or any(not entry.is_file() or entry.is_symlink() for entry in supplied_entries)
+        or any(
+            (supplied_reviews / name).read_bytes() != (live_reviews / name).read_bytes()
+            for name in REVIEW_EVIDENCE_FILENAMES
+        )
+    ):
+        raise PermitInputError(
+            "supplied raw review evidence is not the exact ratification-run artifact"
+        )
     promotion = verify_promotion(
         argparse.Namespace(
             permit_verifier=kernel_verifier,
             permit=args.permit,
             trusted_context=args.trusted_context,
-            review_evidence_dir=args.review_evidence_dir,
+            review_evidence_dir=live_reviews,
             recomputed_permit=replay_dir / "parent-recomputed-permit.json",
             candidate_repository=args.candidate_repository,
             candidate_sha=args.candidate_sha,
@@ -640,6 +788,96 @@ def enable_control_environments(
     return verify_live_environments(contract, observer_client)
 
 
+def ensure_control_environments_disabled(
+    contract: dict[str, Any],
+    client: GitHubAdminClient,
+    observer_client: GitHubReadClient,
+) -> list[dict[str, Any]]:
+    """Create or normalize every control environment before its first read.
+
+    A missing environment is a normal first-install state.  The environment is
+    deliberately left with no admitted branch until the immutable control ref
+    and its creation lock have both been independently observed.
+    """
+    for expected in contract["environments"]:
+        name = expected["name"]
+        path = f"/repos/{AUTHORITY_REPOSITORY}/environments/{name}"
+        configured = require_object(
+            client.request(
+                "PUT",
+                path,
+                payload=DISABLED_ENVIRONMENT_PAYLOAD,
+            ),
+            label=f"disabled environment {name}",
+        )
+        rule_types = sorted(
+            rule.get("type")
+            for rule in configured.get("protection_rules", [])
+            if isinstance(rule, dict) and isinstance(rule.get("type"), str)
+        )
+        if rule_types != expected["protection_rule_types"]:
+            raise PermitInputError(
+                f"environment {name} retained a deployment protection rule"
+            )
+        if configured.get("can_admins_bypass") is not False:
+            raise PermitInputError(
+                f"environment {name} still permits administrator bypass"
+            )
+        if (
+            configured.get("deployment_branch_policy")
+            != expected["deployment_branch_policy"]
+        ):
+            raise PermitInputError(
+                f"environment {name} did not accept the disabled branch policy"
+            )
+
+        policy_path = f"{path}/deployment-branch-policies"
+        policies = require_object(
+            client.request("GET", policy_path),
+            label=f"disabled environment {name} branch policies",
+        )
+        branch_policies = policies.get("branch_policies")
+        if not isinstance(branch_policies, list) or policies.get(
+            "total_count"
+        ) != len(branch_policies):
+            raise PermitInputError(
+                f"environment {name} returned malformed branch policies"
+            )
+        if branch_policies:
+            expected_policy = expected["branch_policies"][0]
+            if len(branch_policies) != 1:
+                raise PermitInputError(
+                    f"environment {name} has multiple admitted branches"
+                )
+            policy = branch_policies[0]
+            if (
+                not isinstance(policy, dict)
+                or {"name": policy.get("name"), "type": policy.get("type")}
+                != expected_policy
+                or not isinstance(policy.get("id"), int)
+                or isinstance(policy.get("id"), bool)
+                or policy["id"] <= 0
+            ):
+                raise PermitInputError(
+                    f"environment {name} admits an unknown branch"
+                )
+            client.request("DELETE", f"{policy_path}/{policy['id']}")
+            policies = require_object(
+                client.request("GET", policy_path),
+                label=f"disabled environment {name} branch policies after disable",
+            )
+        if policies.get("total_count") != 0 or policies.get("branch_policies") != []:
+            raise PermitInputError(
+                f"environment {name} was not empty before controller lock"
+            )
+
+    return verify_live_environments(
+        contract,
+        observer_client,
+        deployment_disabled=True,
+    )
+
+
 def ensure_recovery_head_ref_policy(client: GitHubMergeClient) -> dict[str, Any]:
     path = f"/repos/{REPOSITORY}"
     before = client.get(path).get("delete_branch_on_merge")
@@ -866,6 +1104,18 @@ def prepare(
             args.output_dir / "repository-settings.json",
             repository_settings,
         )
+        control_environments_disabled = ensure_control_environments_disabled(
+            validate_contract(
+                load_json(args.control_contract, label="control contract"),
+                load_json(args.adversarial_corpus, label="adversarial corpus"),
+            ),
+            admin_client,
+            observer_client,
+        )
+        write_json(
+            args.output_dir / "control-environments-disabled.json",
+            {"environments": control_environments_disabled},
+        )
         control = verify_control(args, read_client, deployment_disabled=True)
         observer_control = verify_control(
             args,
@@ -921,7 +1171,7 @@ def prepare(
             staged = True
         else:
             stage_receipt = {
-                "schema": "mindburn.release-authority-ruleset-transition/v1",
+                "schema": "mindburn.release-authority-bootstrap-resume/v1",
                 "operation": "bootstrap-stage-resumed-after-enforcement",
                 "candidate_workflow_sha": args.candidate_sha,
                 "candidate_workflow_ref": args.candidate_ref,
@@ -959,10 +1209,22 @@ def prepare(
         write_json(observer_path, observer_suite)
         if promoter_path.read_bytes() != observer_path.read_bytes():
             raise PermitInputError("independent suite reverification did not match")
+        promoter_evidence_path = args.output_dir / "suite-promoter-evidence.json"
+        observer_evidence_path = args.output_dir / "suite-observer-evidence.json"
+        write_json(
+            promoter_evidence_path,
+            evidence_tree_receipt(args.output_dir / "suite-promoter"),
+        )
+        write_json(
+            observer_evidence_path,
+            evidence_tree_receipt(args.output_dir / "suite-observer"),
+        )
+        if promoter_evidence_path.read_bytes() != observer_evidence_path.read_bytes():
+            raise PermitInputError("independent detailed suite evidence did not match")
 
         if enforced:
             enforce_receipt = {
-                "schema": "mindburn.release-authority-ruleset-transition/v1",
+                "schema": "mindburn.release-authority-bootstrap-resume/v1",
                 "operation": "bootstrap-enforce-resumed",
                 "candidate_workflow_sha": args.candidate_sha,
                 "candidate_workflow_ref": args.candidate_ref,
@@ -1009,6 +1271,14 @@ def prepare(
         )
         liveness = wait_for_canary(liveness_args, observer_client)
         write_json(liveness_dir / "receipt.json", liveness)
+        liveness_evidence_path = args.output_dir / "liveness-evidence.json"
+        write_json(liveness_evidence_path, evidence_tree_receipt(liveness_dir))
+
+        ratification_evidence_path = args.output_dir / "ratification-evidence.json"
+        write_json(
+            ratification_evidence_path,
+            evidence_tree_receipt(args.output_dir / "ratification-replay"),
+        )
 
         approval_path = args.output_dir / "machine-approval.json"
         approval_receipt = submit_machine_approval(
@@ -1060,6 +1330,9 @@ def prepare(
             "merge_tree_sha": liveness["merge_tree_sha"],
             "evidence_sha256": {
                 "authority_suite": sha256_file(promoter_path),
+                "authority_suite_observer": sha256_file(observer_path),
+                "suite_evidence": sha256_file(promoter_evidence_path),
+                "suite_evidence_observer": sha256_file(observer_evidence_path),
                 "credential_preflight": sha256_file(credential_preflight_path),
                 "source_inputs": sha256_file(source_input_path),
                 "parent_verifier": sha256_file(
@@ -1071,6 +1344,9 @@ def prepare(
                 "control_plane_observer": sha256_file(
                     args.output_dir / "control-plane-observer.json",
                 ),
+                "control_environments_disabled": sha256_file(
+                    args.output_dir / "control-environments-disabled.json",
+                ),
                 "repository_settings": sha256_file(
                     args.output_dir / "repository-settings.json",
                 ),
@@ -1079,9 +1355,11 @@ def prepare(
                 "liveness_bundle": sha256_file(liveness_args.bundle),
                 "liveness_context": sha256_file(liveness_args.context),
                 "liveness_permit": sha256_file(liveness_args.output),
+                "liveness_evidence": sha256_file(liveness_evidence_path),
                 "ratification_bundle": sha256_file(args.permit_bundle),
                 "ratification_context": sha256_file(args.trusted_context),
                 "ratification_permit": sha256_file(args.permit),
+                "ratification_evidence": sha256_file(ratification_evidence_path),
                 "suite_trigger": sha256_file(trigger_path),
             },
         }
@@ -1144,6 +1422,39 @@ def validate_ready(args: argparse.Namespace) -> dict[str, Any]:
         or ready["pull_request"] != args.candidate_pr
     ):
         raise PermitInputError("bootstrap-ready receipt names the wrong candidate")
+    validate_ref(ready["candidate_ref"], label="bootstrap-ready candidate_ref")
+    for field in (
+        "pull_request",
+        "ratification_run_id",
+        "liveness_run_id",
+        "liveness_run_attempt",
+    ):
+        value = ready[field]
+        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+            raise PermitInputError(f"bootstrap-ready {field} must be positive")
+    for field in ("ratification_permit_id", "liveness_permit_id"):
+        value = ready[field]
+        if not isinstance(value, str) or not value.startswith("sha256:"):
+            raise PermitInputError(f"bootstrap-ready {field} is invalid")
+        require_sha(
+            value.removeprefix("sha256:"),
+            label=f"bootstrap-ready {field}",
+            length=64,
+        )
+    evidence = ready["evidence_sha256"]
+    if not isinstance(evidence, dict):
+        raise PermitInputError("bootstrap-ready evidence_sha256 must be an object")
+    require_exact_keys(
+        evidence,
+        required=READY_EVIDENCE_NAMES,
+        label="bootstrap-ready evidence_sha256",
+    )
+    for name, digest in evidence.items():
+        require_sha(
+            digest,
+            label=f"bootstrap-ready evidence_sha256.{name}",
+            length=64,
+        )
     return ready
 
 
@@ -1261,20 +1572,28 @@ def finalize(
     liveness_context_path = liveness_dir / "context.json"
     paths = {
         "authority_suite": args.ready.parent / "authority-suite.json",
+        "authority_suite_observer": args.ready.parent / "authority-suite-observer.json",
+        "suite_evidence": args.ready.parent / "suite-promoter-evidence.json",
+        "suite_evidence_observer": args.ready.parent / "suite-observer-evidence.json",
         "credential_preflight": args.ready.parent / "credential-preflight.json",
         "source_inputs": args.ready.parent / "source-inputs.json",
         "parent_verifier": args.ready.parent / "verifiers/parent/receipt.json",
         "control_plane": args.ready.parent / "control-plane-before.json",
         "control_plane_observer": args.ready.parent / "control-plane-observer.json",
+        "control_environments_disabled": (
+            args.ready.parent / "control-environments-disabled.json"
+        ),
         "repository_settings": args.ready.parent / "repository-settings.json",
         "machine_approval": args.ready.parent / "machine-approval.json",
         "machine_gates": args.ready.parent / "machine-gates.json",
         "liveness_bundle": liveness_bundle_path,
         "liveness_context": liveness_context_path,
         "liveness_permit": liveness_permit_path,
+        "liveness_evidence": args.ready.parent / "liveness-evidence.json",
         "ratification_bundle": args.permit_bundle,
         "ratification_context": args.trusted_context,
         "ratification_permit": args.permit,
+        "ratification_evidence": args.ready.parent / "ratification-evidence.json",
         "suite_trigger": args.ready.parent / "suite-trigger.json",
     }
     if {name: sha256_file(path) for name, path in paths.items()} != ready[
@@ -1300,6 +1619,29 @@ def finalize(
         != parent_verifier["receipt"]
     ):
         raise PermitInputError("bootstrap source or verifier build changed")
+
+    final_suite_dir = verifier_root / "suite-final-observer"
+    final_suite = wait_for_suite(
+        suite_args(
+            args,
+            trigger=paths["suite_trigger"],
+            output_dir=final_suite_dir,
+            kernel_verifier=parent_verifier["binary"],
+        ),
+        read_client,
+    )
+    recorded_suite = paths["authority_suite"].read_bytes()
+    if (
+        canonical_json(final_suite) != recorded_suite
+        or paths["authority_suite_observer"].read_bytes() != recorded_suite
+        or canonical_json(evidence_tree_receipt(final_suite_dir))
+        != paths["suite_evidence"].read_bytes()
+        or paths["suite_evidence_observer"].read_bytes()
+        != paths["suite_evidence"].read_bytes()
+    ):
+        raise PermitInputError(
+            "final observer replay does not reproduce the complete bootstrap suite"
+        )
 
     liveness_run = read_client.get_json(
         f"/repos/{REPOSITORY}/actions/runs/{ready['liveness_run_id']}",
@@ -1490,6 +1832,8 @@ def build_parser() -> argparse.ArgumentParser:
     add_common(finalize_parser)
     finalize_parser.add_argument("--ready", type=Path, required=True)
     finalize_parser.add_argument("--output", type=Path, required=True)
+    finalize_parser.add_argument("--timeout-seconds", type=int, default=1800)
+    finalize_parser.add_argument("--poll-seconds", type=int, default=15)
     return parser
 
 
@@ -1511,11 +1855,11 @@ def main(argv: list[str]) -> int:
             raise PermitInputError(
                 "bootstrap executor, observer, and approver tokens must be distinct"
             )
+        if not 60 <= args.timeout_seconds <= 3600:
+            raise PermitInputError("timeout_seconds must be between 60 and 3600")
+        if not 5 <= args.poll_seconds <= 60:
+            raise PermitInputError("poll_seconds must be between 5 and 60")
         if args.command == "prepare":
-            if not 60 <= args.timeout_seconds <= 3600:
-                raise PermitInputError("timeout_seconds must be between 60 and 3600")
-            if not 5 <= args.poll_seconds <= 60:
-                raise PermitInputError("poll_seconds must be between 5 and 60")
             result = prepare(args, token, observer_token, approver_token)
         else:
             result = finalize(args, token, observer_token, approver_token)
