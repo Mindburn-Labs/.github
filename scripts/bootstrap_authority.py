@@ -352,6 +352,43 @@ def ensure_evidence_ledger_seed(
     expected_sha = require_sha(
         expected_sha, label="evidence ledger seed SHA", length=40
     )
+    commit = client.get(f"/repos/{REPOSITORY}/git/commits/{expected_sha}")
+    root_tree_sha = require_sha(
+        nested(commit, "tree", "sha", label="candidate root tree SHA"),
+        label="candidate root tree SHA",
+        length=40,
+    )
+    root_tree = client.get(f"/repos/{REPOSITORY}/git/trees/{root_tree_sha}")
+    root_entries = root_tree.get("tree")
+    if root_tree.get("truncated") is True or not isinstance(root_entries, list):
+        raise PermitInputError("candidate root tree cannot be checked for ledger paths")
+    helm_entries = [
+        entry
+        for entry in root_entries
+        if isinstance(entry, dict) and entry.get("path") == ".helm"
+    ]
+    if len(helm_entries) > 1:
+        raise PermitInputError("candidate root tree contains duplicate .helm entries")
+    if helm_entries:
+        helm_entry = helm_entries[0]
+        if helm_entry.get("type") != "tree":
+            raise PermitInputError("candidate reserves .helm as a non-directory")
+        helm_tree_sha = require_sha(
+            helm_entry.get("sha"), label="candidate .helm tree SHA", length=40
+        )
+        helm_tree = client.get(f"/repos/{REPOSITORY}/git/trees/{helm_tree_sha}")
+        helm_children = helm_tree.get("tree")
+        if helm_tree.get("truncated") is True or not isinstance(helm_children, list):
+            raise PermitInputError(
+                "candidate .helm tree cannot be checked for ledger paths"
+            )
+        if any(
+            isinstance(entry, dict) and entry.get("path") == "evidence"
+            for entry in helm_children
+        ):
+            raise PermitInputError(
+                "reviewed candidate must not pre-seed the reserved .helm/evidence tree"
+            )
     ref_path = LEDGER_REF.removeprefix("refs/")
     path = f"/repos/{REPOSITORY}/git/ref/{ref_path}"
     try:
@@ -403,9 +440,7 @@ def verify_evidence_ledger_descendant(
     )
     advanced = head_sha != seed_sha
     if advanced:
-        comparison = client.get(
-            f"/repos/{REPOSITORY}/compare/{seed_sha}...{head_sha}"
-        )
+        comparison = client.get(f"/repos/{REPOSITORY}/compare/{seed_sha}...{head_sha}")
         if (
             comparison.get("status") != "ahead"
             or not isinstance(comparison.get("merge_base_commit"), dict)
@@ -455,7 +490,9 @@ def verify_controller_baselines(
     )
     kernel_main = nested_string(kernel_ref, "object", "sha", label="Kernel main SHA")
     if kernel_main != baseline:
-        raise PermitInputError("Kernel main moved beyond the controller ledger baseline")
+        raise PermitInputError(
+            "Kernel main moved beyond the controller ledger baseline"
+        )
     if contract["evidence_ledger"]["bootstrap_pr"] != args.candidate_pr:
         raise PermitInputError("controller bootstrap PR identity drifted")
     return {
@@ -514,13 +551,11 @@ def reopen_pull_request(
         or nested(reopened, "head", "sha", label="reopened head SHA") != head_sha
         or (
             base_sha is not None
-            and nested(reopened, "base", "sha", label="reopened base SHA")
-            != base_sha
+            and nested(reopened, "base", "sha", label="reopened base SHA") != base_sha
         )
         or (
             head_ref is not None
-            and nested(reopened, "head", "ref", label="reopened head ref")
-            != head_ref
+            and nested(reopened, "head", "ref", label="reopened head ref") != head_ref
         )
     ):
         raise PermitInputError(
@@ -2072,12 +2107,9 @@ def finalize(
     if verify_controller_baselines(args, read_client) != current_controller_baselines:
         raise PermitInputError("controller repository baselines moved before intent")
     intent_inputs = {
-        f"prepare/{name}/{path.name}": path.read_bytes()
-        for name, path in paths.items()
+        f"prepare/{name}/{path.name}": path.read_bytes() for name, path in paths.items()
     }
-    intent_inputs.update(
-        evidence_tree_inputs(liveness_dir, prefix="liveness")
-    )
+    intent_inputs.update(evidence_tree_inputs(liveness_dir, prefix="liveness"))
     intent_inputs.update(
         evidence_tree_inputs(args.review_evidence_dir, prefix="ratification/reviews")
     )
@@ -2103,9 +2135,7 @@ def finalize(
         merger_token,
         api_url=os.environ.get("GITHUB_API_URL", "https://api.github.com"),
     )
-    ledger_namespace = (
-        f"bootstrap/pr-{ready['pull_request']}/{ready['merge_sha']}"
-    )
+    ledger_namespace = f"bootstrap/pr-{ready['pull_request']}/{ready['merge_sha']}"
     intent_receipt = append_record(
         ledger_client,
         namespace=f"{ledger_namespace}/intent",
@@ -2115,6 +2145,7 @@ def finalize(
         run_id=ready["liveness_run_id"],
         run_attempt=ready["liveness_run_attempt"],
         inputs=intent_inputs,
+        expected_parent_sha=ledger_state["head_sha"],
     )
     write_json(args.ready.parent / "evidence-ledger-intent.json", intent_receipt)
     merge_receipt = confirmed_or_atomic_merge(
@@ -2138,6 +2169,7 @@ def finalize(
             "final-control-plane.json": canonical_json(control),
             "final-control-plane-observer.json": canonical_json(observer_control),
         },
+        expected_parent_sha=intent_receipt["ledger_head_sha"],
     )
     write_json(args.ready.parent / "evidence-ledger-closure.json", closure_receipt)
     ruleset_receipt = transition(
@@ -2177,6 +2209,7 @@ def finalize(
             "final-control-plane.json": canonical_json(control),
             "final-control-plane-observer.json": canonical_json(observer_control),
         },
+        expected_parent_sha=closure_receipt["ledger_head_sha"],
     )
     write_json(
         args.ready.parent / "evidence-ledger-final.json",

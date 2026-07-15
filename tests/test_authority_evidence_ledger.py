@@ -181,6 +181,22 @@ class AuthorityEvidenceLedgerTests(unittest.TestCase):
         with self.assertRaisesRegex(MODULE.PermitInputError, "manifest"):
             self.append(client, changed)
 
+    def test_new_intent_requires_the_signed_ledger_parent(self) -> None:
+        client = FakeClient()
+        with self.assertRaisesRegex(MODULE.PermitInputError, "signed plan"):
+            MODULE.append_record(
+                client,
+                namespace="bootstrap/pr-36/" + "a" * 40 + "/intent",
+                record_type="bootstrap",
+                phase="intent",
+                workflow_sha="b" * 40,
+                run_id=42,
+                run_attempt=1,
+                inputs=self.inputs(),
+                expected_parent_sha="f" * 40,
+            )
+        self.assertEqual(client.patches, 0)
+
     def test_append_ignores_a_truncated_whole_ledger_tree(self) -> None:
         client = FakeClient(recursive_tree_truncated=True)
         receipt = self.append(client)
@@ -233,6 +249,48 @@ class AuthorityEvidenceLedgerTests(unittest.TestCase):
         self.assertIsNotNone(record)
         self.assertEqual(record["inputs"], self.inputs())
         self.assertEqual(record["descriptor"], MODULE.stable_record_descriptor(receipt))
+
+    def test_promotion_namespace_is_source_discoverable_without_run_history(
+        self,
+    ) -> None:
+        client = FakeClient()
+        namespace = "promotions/generation-12/" + "a" * 40 + "/intent"
+        receipt = MODULE.append_record(
+            client,
+            namespace=namespace,
+            record_type="authority-promotion",
+            phase="intent",
+            workflow_sha="b" * 40,
+            run_id=9001,
+            run_attempt=2,
+            inputs=self.inputs(),
+        )
+        self.assertEqual(receipt["namespace"], namespace)
+        with self.assertRaisesRegex(MODULE.PermitInputError, "record grammar"):
+            MODULE.validate_record_namespace(
+                "promotions/run-9001/generation-12/" + "a" * 40 + "/intent",
+                record_type="authority-promotion",
+                phase="intent",
+            )
+
+    def test_materialization_is_exact_and_refuses_overwrite(self) -> None:
+        client = FakeClient()
+        receipt = self.append(client)
+        record = MODULE.read_record(
+            client,
+            namespace=receipt["namespace"],
+            record_type="bootstrap",
+            phase="intent",
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            destination = Path(tmpdir) / "materialized"
+            MODULE.materialize_record(record, destination)
+            self.assertEqual(
+                (destination / "release-permit.json").read_bytes(),
+                self.inputs()["release-permit.json"],
+            )
+            with self.assertRaisesRegex(MODULE.PermitInputError, "already exists"):
+                MODULE.materialize_record(record, destination)
 
     def test_input_collection_rejects_symlinks(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

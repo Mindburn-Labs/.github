@@ -122,11 +122,28 @@ class RepositorySettingsClient:
 
 
 class LedgerSeedClient:
-    def __init__(self) -> None:
+    def __init__(self, *, reserved_evidence: bool = False) -> None:
         self.sha: str | None = None
         self.posts = 0
+        self.reserved_evidence = reserved_evidence
 
     def get(self, path: str):
+        if path.endswith(f"/git/commits/{CANDIDATE_SHA}"):
+            return {"tree": {"sha": "a" * 40}}
+        if path.endswith(f"/git/trees/{'a' * 40}"):
+            return {
+                "truncated": False,
+                "tree": (
+                    [{"path": ".helm", "type": "tree", "sha": "b" * 40}]
+                    if self.reserved_evidence
+                    else []
+                ),
+            }
+        if path.endswith(f"/git/trees/{'b' * 40}"):
+            return {
+                "truncated": False,
+                "tree": [{"path": "evidence", "type": "tree", "sha": "c" * 40}],
+            }
         if not path.endswith("/git/ref/heads/authority/evidence-v1"):
             raise AssertionError(path)
         if self.sha is None:
@@ -161,6 +178,7 @@ class LedgerStateClient:
                 "merge_base_commit": {"sha": CANDIDATE_SHA},
             }
         raise AssertionError(path)
+
 
 class ControlPlaneAdminClient:
     RULESET_ID = 4242
@@ -392,6 +410,13 @@ class BootstrapAuthorityTests(unittest.TestCase):
         self.assertTrue(first["created"])
         self.assertFalse(second["created"])
         self.assertEqual(client.posts, 1)
+
+    def test_evidence_ledger_seed_rejects_candidate_reserved_tree(self) -> None:
+        with self.assertRaisesRegex(MODULE.PermitInputError, "must not pre-seed"):
+            MODULE.ensure_evidence_ledger_seed(
+                LedgerSeedClient(reserved_evidence=True),
+                expected_sha=CANDIDATE_SHA,
+            )
 
     def test_evidence_ledger_resume_requires_seed_descendant(self) -> None:
         exact = MODULE.verify_evidence_ledger_descendant(
