@@ -318,6 +318,7 @@ class AutonomousReleaseControllerTests(unittest.TestCase):
             repository=MODULE.AUTHORITY_REPOSITORY,
             workflow_sha=ACTIVE_SHA,
         )
+        promotion_entry["base_sha"] = ACTIVE_SHA
         promotion_entry["evidence"] = "promotion"
         approval = {
             "schema": "mindburn.release-authority-machine-approval/v2",
@@ -399,6 +400,7 @@ class AutonomousReleaseControllerTests(unittest.TestCase):
             repository=MODULE.AUTHORITY_REPOSITORY,
             workflow_sha=ACTIVE_SHA,
         )
+        promotion_entry["base_sha"] = ACTIVE_SHA
         promotion_entry["evidence"] = "promotion"
         authority = {"generation": 3}
         intent = {
@@ -417,7 +419,9 @@ class AutonomousReleaseControllerTests(unittest.TestCase):
             "parent_workflow_sha": ACTIVE_SHA,
             "candidate_workflow_sha": HEAD_SHA,
             "merged_workflow_sha": MERGE_SHA,
-            "candidate_generation": 3,
+            "merged_tree_sha": TREE_SHA,
+            "ratification_permit_id": PERMIT_ID,
+            "authority_suite_sha256": "8" * 64,
             "promotion_run_id": 9100,
             "promotion_run_attempt": 1,
         }
@@ -425,11 +429,22 @@ class AutonomousReleaseControllerTests(unittest.TestCase):
             "schema": "mindburn.release-authority-promotion-execution/v2",
             "parent_generation": 2,
             "candidate_generation": 3,
+            "parent_base_sha": ACTIVE_SHA,
             "parent_workflow_sha": ACTIVE_SHA,
+            "control_workflow_sha": CONTROL_SHA,
             "candidate_workflow_sha": HEAD_SHA,
+            "candidate_workflow_ref": "refs/heads/codex/successor",
+            "candidate_tree_sha": TREE_SHA,
+            "candidate_pull_request": 42,
             "merged_workflow_sha": MERGE_SHA,
+            "merged_tree_sha": TREE_SHA,
+            "ratification_permit_id": PERMIT_ID,
             "ratification_run_id": 9001,
             "ratification_run_attempt": 1,
+            "canary_run_id": 9200,
+            "canary_run_attempt": 1,
+            "canary_permit_id": "sha256:" + "9" * 64,
+            "authority_suite_sha256": "8" * 64,
         }
         activation = {
             "schema": "mindburn.release-authority-ruleset-transition/v1",
@@ -483,6 +498,46 @@ class AutonomousReleaseControllerTests(unittest.TestCase):
                     control_sha=CONTROL_SHA,
                     materialization_label="deny",
                 )
+
+        observer["decision"] = "ALLOW"
+        observer["ratification_permit_id"] = "sha256:" + "a" * 64
+        final["inputs"]["final-observer-receipt.json"] = json.dumps(observer).encode()
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(MODULE.PermitInputError, "observer receipt"):
+                MODULE.verify_promotion_final(
+                    argparse.Namespace(output_dir=Path(temporary)),
+                    mock.Mock(token="token"),
+                    intent=intent,
+                    merged=merged,
+                    final=final,
+                    entry=promotion_entry,
+                    authority=authority,
+                    control_sha=CONTROL_SHA,
+                    materialization_label="spliced-permit",
+                )
+
+        observer["ratification_permit_id"] = PERMIT_ID
+        final["inputs"]["final-observer-receipt.json"] = json.dumps(observer).encode()
+        execution["candidate_pull_request"] = 43
+        final["inputs"]["authority-promotion-execution.json"] = json.dumps(
+            execution
+        ).encode()
+        with tempfile.TemporaryDirectory() as temporary:
+            with mock.patch.object(MODULE, "verify_attestation"):
+                with self.assertRaisesRegex(
+                    MODULE.PermitInputError, "promotion execution identity"
+                ):
+                    MODULE.verify_promotion_final(
+                        argparse.Namespace(output_dir=Path(temporary)),
+                        mock.Mock(token="token"),
+                        intent=intent,
+                        merged=merged,
+                        final=final,
+                        entry=promotion_entry,
+                        authority=authority,
+                        control_sha=CONTROL_SHA,
+                        materialization_label="spliced-execution",
+                    )
 
     def test_renames_bind_both_old_and_new_authority_paths(self) -> None:
         client = JsonBytesClient(

@@ -65,6 +65,7 @@ from configure_machine_approval_gates import (
 from observe_authority_promotion import (
     PUBLIC_STABLE_REPOSITORIES,
     observe_effective_stable_rules,
+    validate_execution,
 )
 from verify_authority_promotion import validate_authority_shape, validate_permit
 from wait_for_authority_canary import (
@@ -1716,7 +1717,8 @@ def verify_promotion_final(
         or receipt.get("parent_workflow_sha") != entry["workflow_sha"]
         or receipt.get("candidate_workflow_sha") != entry["head_sha"]
         or receipt.get("merged_workflow_sha") != entry["merge_sha"]
-        or receipt.get("candidate_generation") != authority["generation"]
+        or receipt.get("merged_tree_sha") != entry["merge_tree_sha"]
+        or receipt.get("ratification_permit_id") != entry["permit_id"]
     ):
         raise PermitInputError("ledger final observer receipt identity drifted")
     positive_integer(
@@ -1735,19 +1737,28 @@ def verify_promotion_final(
         github_token=client.token,
         signer_workflow=f"Mindburn-Labs/.github/{PROMOTION_WORKFLOW_PATH}",
     )
-    execution = load_json_file(
-        materialized / "authority-promotion-execution.json",
-        label="ledger promotion execution",
+    execution = validate_execution(
+        load_json_file(
+            materialized / "authority-promotion-execution.json",
+            label="ledger promotion execution",
+        )
     )
     if (
-        execution.get("schema") != "mindburn.release-authority-promotion-execution/v2"
-        or execution.get("parent_generation") != authority["generation"] - 1
+        execution.get("parent_generation") != authority["generation"] - 1
         or execution.get("candidate_generation") != authority["generation"]
+        or execution.get("parent_base_sha") != entry["base_sha"]
         or execution.get("parent_workflow_sha") != entry["workflow_sha"]
+        or execution.get("control_workflow_sha") != control_sha
         or execution.get("candidate_workflow_sha") != entry["head_sha"]
+        or execution.get("candidate_tree_sha") != entry["merge_tree_sha"]
+        or execution.get("candidate_pull_request") != entry["pull_request"]
         or execution.get("merged_workflow_sha") != entry["merge_sha"]
+        or execution.get("merged_tree_sha") != entry["merge_tree_sha"]
+        or execution.get("ratification_permit_id") != entry["permit_id"]
         or execution.get("ratification_run_id") != entry["run_id"]
         or execution.get("ratification_run_attempt") != entry["run_attempt"]
+        or execution.get("authority_suite_sha256")
+        != receipt.get("authority_suite_sha256")
     ):
         raise PermitInputError("ledger promotion execution identity drifted")
     activation = load_json_file(
