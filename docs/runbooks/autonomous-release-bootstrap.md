@@ -8,8 +8,37 @@ The bootstrap is not a human approval. The only approval inputs are the exact
 generation-1 signed 2-of-2 permit and the fresh generation-2 proof receipts.
 The local credential may execute those inputs but cannot make a DENY acceptable.
 
+## P0 stop: external containment required
+
+Do not run `prepare` or `finalize` while any candidate-controlled
+`pull_request` or `workflow_run` path can reach a repository secret,
+write-capable App token, or protected environment capability. This runbook does
+not close that condition and does not activate authority. In the current state,
+the repository-wide docs token is passed to candidate-controlled local reusable
+workflow source, and the legacy promotion path remains outside the new
+read-only shadow broker.
+
+The shadow broker is diagnostic evidence only. Its bare-Git workflow-tree
+comparison does not make candidate CI, candidate scripts, artifacts, or
+configuration trusted; it cannot approve, merge, alter rulesets, deploy, or
+start this runbook. A PR success, signed `ALLOW`, or shadow artifact is never
+an automatic invocation.
+
 ## Preconditions
 
+- A separately operated GitHub administration incident path has paused and
+  investigated legacy authority execution, inspected prior runs and artifacts,
+  and revoked or rotated `MINDBURN_ORG_READ_TOKEN` away from candidate workflow
+  access.
+- Any future App key, installation scope, environment, ruleset, and
+  required-workflow entitlement is provisioned outside candidate code. A
+  controlled negative run has proven candidate branches cannot request the
+  protected environment capability; an undeclared environment reference is not
+  accepted as proof either way.
+- Independent live readback records the exact GitHub settings above, and
+  private/internal human gates remain intact. The shadow broker has no
+  authorization consumer until a later, separately reviewed migration binds
+  these receipts.
 - `GH_TOKEN` belongs to the intended `Mindburn-Labs` administrator and has the
   existing organization-ruleset and repository-administration permissions.
 - `HELM_AUTHORITY_BOOTSTRAP_OBSERVER_TOKEN` is a distinct short-lived token for
@@ -81,9 +110,10 @@ Before machine enforcement, failure restores the staged candidate pin. After
 machine enforcement begins, failure leaves the machine rule active; rerun
 `prepare` into a new evidence directory. Never disable that rule to recover.
 
-## Finalize without a human decision
+## Finalize by explicit external-admin invocation (not automatic)
 
-Run immediately after `prepare` succeeds:
+Only after the P0 containment evidence, `prepare` evidence, and a deliberate
+external administrator invocation are all present, run:
 
 ```bash
 python3 scripts/bootstrap_authority.py finalize \
@@ -103,7 +133,9 @@ python3 scripts/bootstrap_authority.py finalize \
   --output "$EVIDENCE/bootstrap/bootstrap-final.json"
 ```
 
-`finalize` re-verifies every bound digest, signed permit, and exact-head App
+"Not automatic" does not make the permit a human approval: it distinguishes a
+deliberate incident/bootstrap invocation from an unsafe side effect of a PR,
+`ALLOW`, or shadow run. `finalize` re-verifies every bound digest, signed permit, and exact-head App
 approval; confirms the public approval cutover remains protected by both the
 workflow and machine-review interlocks; atomically moves
 `main` from the exact base SHA to the live PR's current GitHub-generated,

@@ -36,13 +36,43 @@ Repository inventory does not prove production readiness. When there is a confli
 
 ## Autonomous Release Permit
 
-`.github/workflows/ci.yml` is the public, centrally bindable workflow for a
-fail-closed machine quorum. It requires the exact
+### Current status: P0 hold; shadow evidence only
+
+No machine merge, ruleset activation, deployment, or credentialed promotion is
+currently authorized from this repository. Same-repository pull requests still
+execute candidate workflow code before any later `workflow_run` broker. In
+particular, `.github/workflows/docs-truth.yml` passes
+`MINDBURN_ORG_READ_TOKEN` to a local reusable workflow resolved from that
+candidate commit. That is a credential-boundary P0, not a safe automation
+path. The legacy promotion workflow also still triggers from the same completed
+candidate run and must not be treated as an active authority path.
+
+`.github/workflows/authority-broker.yml` is deliberately a read-only, default-
+branch **shadow** experiment. It fetches exact Git objects into a bare store,
+does not check out or execute candidate content, and compares the complete
+candidate workflow tree with the immutable parent. Its short-retention artifact
+is diagnostic only: it cannot approve, merge, alter rulesets, deploy, mint an
+App token, or activate authority. It also does not prove that candidate
+Makefiles, scripts, dependencies, configurations, artifacts, or the legacy CI
+lane are safe. No workflow consumes its artifact as a promotion predicate.
+
+Before any future transition, a separately operated GitHub administration
+incident path must pause and investigate legacy promotion, revoke or rotate the
+repository-wide docs token, prove candidate paths cannot request protected
+environment capabilities with a controlled negative run, and preserve
+private/internal human gates. A PR success, signed `ALLOW`, or shadow artifact
+has no automatic effect.
+
+### Target design (not current release authority)
+
+`.github/workflows/ci.yml` contains the proposed public, centrally bindable
+workflow for a fail-closed machine quorum. The design requires the exact
 GitHub merge tree, deterministic repository gates, separately executed Claude
 Fable 5 and GPT-5.6 Sol provider reviews, and the source-owned HELM Kernel
 reducer. GitHub Copilot remains the shared control plane for both model jobs.
 Every repository has an explicit digest-locked gate profile; no target-owned
-fallback can weaken the required commands. Promotion requires previous-
+fallback can weaken the required commands. The proposed promotion protocol would
+require previous-
 generation ratification, all seven permanent attacks plus one inert ALLOW
 canary, independent evidence replay, an exact compare-and-swap merge, and final
 ruleset readback. A separate approval-only GitHub App converts the signed ALLOW

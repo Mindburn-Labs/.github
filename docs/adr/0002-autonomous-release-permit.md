@@ -2,12 +2,13 @@
 
 ## Status
 
-Accepted for controlled public-repository code-merge authority. Runtime
-enforcement remains a GitHub ruleset fact, not a documentation claim. Private
-and internal repositories retain their human approval gate until GitHub
-restores the paid required-workflow entitlement that the organization is
-already billed for. This decision does not authorize customer production,
-deployment, billing, data migration, or other external effects.
+Accepted as a target design; P0-held and non-enforcing. Runtime enforcement
+remains a GitHub ruleset fact, not a documentation claim. Current candidate
+workflow/credential isolation is not live-proven, so this ADR does not
+authorize code merge, ruleset activation, customer production, deployment,
+billing, data migration, or any other external effect. Private and internal
+repositories retain their human approval gate until GitHub restores the paid
+required-workflow entitlement that the organization is already billed for.
 
 ## Decision
 
@@ -107,6 +108,44 @@ parameters, not independent cryptographic attestations from Anthropic and
 OpenAI. Activation therefore requires treating Copilot or Actions outage,
 misrouting, malformed output, and missing-provider evidence as fail-closed
 conditions rather than claiming infrastructure independence.
+
+## Candidate workflow and credential-boundary hold
+
+The current repository does not satisfy the target credential boundary. A
+same-repository `pull_request` runs candidate workflow source before a later
+`workflow_run` can inspect it. `docs-truth.yml` currently passes
+`MINDBURN_ORG_READ_TOKEN` into a local reusable workflow, and a local reusable
+workflow is resolved from the caller's commit. That direct repository-secret
+path must be revoked, rotated, or relocated by a separately controlled GitHub
+administration operation before any candidate workflow can be called
+unprivileged.
+
+The source also references the approval App's private key from `ci.yml`, but
+the job does not itself declare the corresponding environment. That is neither
+proof of secret exposure nor proof of isolation: the environment's branch
+policy behavior requires a controlled negative run. Existing
+`promote-authority.yml` is a legacy `workflow_run` path and remains outside the
+shadow broker; it is not evidence that automatic authority is safe.
+
+`authority-broker.yml` is intentionally diagnostic only. It executes the
+default-branch broker with read-only permissions. It uses no environment,
+repository secret, separately minted App installation token,
+OIDC/attestation-write capability, candidate checkout, candidate artifact,
+cache, or executable candidate payload; its only credential is the job-scoped
+read-only `GITHUB_TOKEN`. It records a bare-Git, exact-workflow-tree comparison.
+Its result cannot approve a pull request, merge code, rebind a ruleset, deploy,
+or activate authority. Exact workflow tree equality also does not attest to
+candidate scripts, Makefiles, dependencies, configurations, or the legacy
+candidate CI execution.
+
+The required external containment sequence is: pause and investigate legacy
+authority execution; rotate or revoke the repository-wide docs token; inspect
+past runs and artifacts for possible exposure; provision and scope any future
+Apps and environments outside candidate code; prove protected environment
+denial with a controlled negative run; then obtain independent live readback.
+Until source-owned evidence for that sequence exists, every signed permit,
+shadow artifact, and PR result is non-authoritative and private/internal human
+gates remain unchanged.
 
 ## No-human target architecture
 

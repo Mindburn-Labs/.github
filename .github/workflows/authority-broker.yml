@@ -1,0 +1,153 @@
+name: HELM Authority Broker Shadow
+
+on:
+  workflow_run:
+    workflows:
+      - HELM Autonomous Release Permit
+    types:
+      - completed
+
+permissions: {}
+
+concurrency:
+  group: helm-authority-shadow-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  shadow-admission:
+    name: Shadow static authority admission
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.repository.full_name == 'Mindburn-Labs/.github' &&
+      github.event.workflow_run.head_repository.full_name == 'Mindburn-Labs/.github'
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout immutable default-branch broker
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: Mindburn-Labs/.github
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          path: broker
+
+      - name: Bind trigger, current main, and exact pull request
+        id: metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRIGGER_RUN_ID: ${{ github.event.workflow_run.id }}
+          TRIGGER_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          TRIGGER_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git -C broker rev-parse HEAD)" = "$GITHUB_SHA"
+          current_main="$(gh api repos/Mindburn-Labs/.github/git/ref/heads/main --jq '.object.sha')"
+          test "$current_main" = "$GITHUB_SHA"
+          gh api "repos/Mindburn-Labs/.github/actions/runs/$TRIGGER_RUN_ID" > triggering-run.json
+          test "$(jq -er '.id | tostring' triggering-run.json)" = "$TRIGGER_RUN_ID"
+          test "$(jq -er '.conclusion' triggering-run.json)" = "success"
+          test "$(jq -er '.event' triggering-run.json)" = "pull_request"
+          test "$(jq -er '.path' triggering-run.json)" = ".github/workflows/ci.yml"
+          test "$(jq -er '.run_attempt | tostring' triggering-run.json)" = "$TRIGGER_RUN_ATTEMPT"
+          test "$(jq -er '.repository.full_name' triggering-run.json)" = "Mindburn-Labs/.github"
+          test "$(jq -er '.head_repository.full_name' triggering-run.json)" = "Mindburn-Labs/.github"
+          test "$(jq -er '.head_sha' triggering-run.json)" = "$TRIGGER_HEAD_SHA"
+          pull_request="$(jq -er '.pull_requests | if length == 1 then .[0].number else error("expected one pull request") end' triggering-run.json)"
+          [[ "$pull_request" =~ ^[1-9][0-9]*$ ]]
+          gh api "repos/Mindburn-Labs/.github/pulls/$pull_request" > pull-request.json
+          test "$(jq -er '.state' pull-request.json)" = "open"
+          test "$(jq -er '.draft' pull-request.json)" = "false"
+          test "$(jq -er '.base.ref' pull-request.json)" = "main"
+          base_sha="$(jq -er '.base.sha' pull-request.json)"
+          head_sha="$(jq -er '.head.sha' pull-request.json)"
+          merge_sha="$(jq -er '.merge_commit_sha' pull-request.json)"
+          test "$base_sha" = "$GITHUB_SHA"
+          test "$head_sha" = "$TRIGGER_HEAD_SHA"
+          test "$(jq -er '.head.repo.full_name' pull-request.json)" = "Mindburn-Labs/.github"
+          [[ "$base_sha" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$merge_sha" =~ ^[0-9a-f]{40}$ ]]
+          {
+            echo "pull_request=$pull_request"
+            echo "trigger_run_id=$TRIGGER_RUN_ID"
+            echo "trigger_run_attempt=$TRIGGER_RUN_ATTEMPT"
+            echo "base_sha=$base_sha"
+            echo "head_sha=$head_sha"
+            echo "merge_sha=$merge_sha"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Fetch candidate Git objects without checkout
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/fetch_pull_request_git_objects.py \
+            --repository Mindburn-Labs/.github \
+            --base-sha "${{ steps.metadata.outputs.base_sha }}" \
+            --head-sha "${{ steps.metadata.outputs.head_sha }}" \
+            --merge-sha "${{ steps.metadata.outputs.merge_sha }}" \
+            --output "$RUNNER_TEMP/candidate.git" \
+            --receipt "$RUNNER_TEMP/bare-git-input.json"
+
+      - name: Verify complete candidate workflow tree before shadow evidence
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/verify_workflow_tree.py \
+            --parent-repository broker \
+            --parent-sha "$GITHUB_SHA" \
+            --candidate-repository "$RUNNER_TEMP/candidate.git" \
+            --candidate-sha "${{ steps.metadata.outputs.head_sha }}" \
+            --output "$RUNNER_TEMP/workflow-tree-admission.json"
+          test "$(jq -er '.mode' "$RUNNER_TEMP/workflow-tree-admission.json")" = "shadow-exact-tree"
+          test "$(jq -er '.parent_sha' "$RUNNER_TEMP/workflow-tree-admission.json")" = "$GITHUB_SHA"
+          test "$(jq -er '.candidate_sha' "$RUNNER_TEMP/workflow-tree-admission.json")" = \
+            "${{ steps.metadata.outputs.head_sha }}"
+          test "$(jq -er '.base_sha' "$RUNNER_TEMP/bare-git-input.json")" = \
+            "${{ steps.metadata.outputs.base_sha }}"
+          test "$(jq -er '.head_sha' "$RUNNER_TEMP/bare-git-input.json")" = \
+            "${{ steps.metadata.outputs.head_sha }}"
+          test "$(jq -er '.merge_sha' "$RUNNER_TEMP/bare-git-input.json")" = \
+            "${{ steps.metadata.outputs.merge_sha }}"
+          jq -n \
+            --arg base_sha "${{ steps.metadata.outputs.base_sha }}" \
+            --arg broker_sha "$GITHUB_SHA" \
+            --arg candidate_sha "${{ steps.metadata.outputs.head_sha }}" \
+            --arg merge_sha "${{ steps.metadata.outputs.merge_sha }}" \
+            --argjson pull_request "${{ steps.metadata.outputs.pull_request }}" \
+            --argjson trigger_run_id "${{ steps.metadata.outputs.trigger_run_id }}" \
+            --argjson trigger_run_attempt "${{ steps.metadata.outputs.trigger_run_attempt }}" \
+            --argjson broker_run_id "$GITHUB_RUN_ID" \
+            --argjson broker_run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --slurpfile bare_git "$RUNNER_TEMP/bare-git-input.json" \
+            --slurpfile workflow_tree "$RUNNER_TEMP/workflow-tree-admission.json" \
+            '{
+              schema: "mindburn.authority-shadow-admission/v1",
+              mode: "shadow-only",
+              broker_sha: $broker_sha,
+              base_sha: $base_sha,
+              candidate_sha: $candidate_sha,
+              merge_sha: $merge_sha,
+              pull_request: $pull_request,
+              trigger_run_id: $trigger_run_id,
+              trigger_run_attempt: $trigger_run_attempt,
+              broker_run_id: $broker_run_id,
+              broker_run_attempt: $broker_run_attempt,
+              bare_git: $bare_git[0],
+              workflow_tree: $workflow_tree[0]
+            }' > "$RUNNER_TEMP/authority-shadow-admission.json"
+
+      - name: Retain non-authoritative shadow admission evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: authority-shadow-admission
+          path: |
+            ${{ runner.temp }}/bare-git-input.json
+            ${{ runner.temp }}/workflow-tree-admission.json
+            ${{ runner.temp }}/authority-shadow-admission.json
+          if-no-files-found: error
+          retention-days: 14
