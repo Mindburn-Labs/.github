@@ -44,8 +44,10 @@ execute candidate workflow code before any later `workflow_run` broker. In
 particular, `.github/workflows/docs-truth.yml` passes
 `MINDBURN_ORG_READ_TOKEN` to a local reusable workflow resolved from that
 candidate commit. That is a credential-boundary P0, not a safe automation
-path. The legacy promotion workflow also still triggers from the same completed
-candidate run and must not be treated as an active authority path.
+path. The source routes credentialed promotion through an explicit
+`workflow_dispatch` controller on `authority/control-v1`, rather than a
+`workflow_run`; its live controller lock and environment policy are still
+unverified and must not be treated as active authority.
 
 `.github/workflows/authority-broker.yml` is deliberately a read-only, default-
 branch **shadow** experiment. It fetches exact Git objects into a bare store,
@@ -55,13 +57,22 @@ is diagnostic only: it cannot approve, merge, alter rulesets, deploy, mint an
 App token, or activate authority. It also does not prove that candidate
 Makefiles, scripts, dependencies, configurations, artifacts, or the legacy CI
 lane are safe. No workflow consumes its artifact as a promotion predicate.
+Because the controller is dispatched during the permit workflow while this
+broker starts only after that workflow completes, shadow evidence may arrive
+after controller work. If the pull request closes or `main` advances first, the
+broker deliberately withholds trusted shadow evidence rather than treating a
+default-branch run whose source may include the candidate as trusted. It is not
+a sequencing, hold, cancel, or authorization control.
 
 Before any future transition, a separately operated GitHub administration
-incident path must pause and investigate legacy promotion, revoke or rotate the
-repository-wide docs token, prove candidate paths cannot request protected
+incident path must pause and investigate candidate and authority-controller
+execution, revoke or rotate the repository-wide docs token, prove candidate
+paths cannot request protected
 environment capabilities with a controlled negative run, and preserve
-private/internal human gates. A PR success, signed `ALLOW`, or shadow artifact
-has no automatic effect.
+private/internal human gates. A successful next-generation permit can
+automatically request a dispatch of the immutable controller; that request is
+not proof of credential isolation, merge authority, ruleset activation,
+deployment, or P0 closure. A shadow artifact has no authorization effect.
 
 ### Target design (not current release authority)
 

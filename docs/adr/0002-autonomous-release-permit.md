@@ -132,12 +132,13 @@ path must be revoked, rotated, or relocated by a separately controlled GitHub
 administration operation before any candidate workflow can be called
 unprivileged.
 
-The source also references the approval App's private key from `ci.yml`, but
-the job does not itself declare the corresponding environment. That is neither
-proof of secret exposure nor proof of isolation: the environment's branch
-policy behavior requires a controlled negative run. Existing
-`promote-authority.yml` is a legacy `workflow_run` path and remains outside the
-shadow broker; it is not evidence that automatic authority is safe.
+The source now keeps App private-key references in the explicit
+`authority/control-v1` `workflow_dispatch` controller rather than in `ci.yml`.
+The successful candidate permit job automatically requests that dispatch but
+contains no App key. This is a design boundary, not live proof of isolation:
+the controller lock and environment branch-policy behavior require independent
+readback and a controlled negative run. `promote-authority.yml` remains outside
+the shadow broker and is not evidence that automatic authority is safe.
 
 `authority-broker.yml` is intentionally diagnostic only. It executes the
 default-branch broker with read-only permissions. It uses no environment,
@@ -148,16 +149,21 @@ read-only `GITHUB_TOKEN`. It records a bare-Git, exact-workflow-tree comparison.
 Its result cannot approve a pull request, merge code, rebind a ruleset, deploy,
 or activate authority. Exact workflow tree equality also does not attest to
 candidate scripts, Makefiles, dependencies, configurations, or the legacy
-candidate CI execution.
+candidate CI execution. The controller is dispatched during the permit workflow
+but the shadow broker starts after that workflow completes. If the controller
+closes the pull request or advances `main` first, the shadow broker withholds
+trusted evidence rather than treating a default-branch run whose source may
+include the candidate as trusted. It is not a sequencing, hold, cancel, or
+authorization control.
 
-The required external containment sequence is: pause and investigate legacy
-authority execution; rotate or revoke the repository-wide docs token; inspect
-past runs and artifacts for possible exposure; provision and scope any future
-Apps and environments outside candidate code; prove protected environment
-denial with a controlled negative run; then obtain independent live readback.
-Until source-owned evidence for that sequence exists, every signed permit,
-shadow artifact, and PR result is non-authoritative and private/internal human
-gates remain unchanged.
+The required external containment sequence is: pause and investigate candidate
+and authority-controller execution; rotate or revoke the repository-wide docs
+token; inspect past runs and artifacts for possible exposure; provision and
+scope any future Apps and environments outside candidate code; prove protected
+environment denial with a controlled negative run; then obtain independent live
+readback. Until source-owned evidence for that sequence exists, every signed
+permit, shadow artifact, and PR result is non-authoritative and private/internal
+human gates remain unchanged.
 
 ## No-human target architecture
 

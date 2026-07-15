@@ -47,7 +47,6 @@ jobs:
           set -euo pipefail
           test "$(git -C broker rev-parse HEAD)" = "$GITHUB_SHA"
           current_main="$(gh api repos/Mindburn-Labs/.github/git/ref/heads/main --jq '.object.sha')"
-          test "$current_main" = "$GITHUB_SHA"
           gh api "repos/Mindburn-Labs/.github/actions/runs/$TRIGGER_RUN_ID" > triggering-run.json
           test "$(jq -er '.id | tostring' triggering-run.json)" = "$TRIGGER_RUN_ID"
           test "$(jq -er '.conclusion' triggering-run.json)" = "success"
@@ -60,13 +59,23 @@ jobs:
           pull_request="$(jq -er '.pull_requests | if length == 1 then .[0].number else error("expected one pull request") end' triggering-run.json)"
           [[ "$pull_request" =~ ^[1-9][0-9]*$ ]]
           gh api "repos/Mindburn-Labs/.github/pulls/$pull_request" > pull-request.json
-          test "$(jq -er '.state' pull-request.json)" = "open"
+          if [[ "$(jq -er '.state' pull-request.json)" != "open" ]]; then
+            echo "::error::Shadow evidence withheld: pull request is no longer open."
+            exit 1
+          fi
           test "$(jq -er '.draft' pull-request.json)" = "false"
           test "$(jq -er '.base.ref' pull-request.json)" = "main"
           base_sha="$(jq -er '.base.sha' pull-request.json)"
           head_sha="$(jq -er '.head.sha' pull-request.json)"
           merge_sha="$(jq -er '.merge_commit_sha' pull-request.json)"
-          test "$base_sha" = "$GITHUB_SHA"
+          if [[ "$current_main" != "$GITHUB_SHA" ]]; then
+            echo "::error::Shadow evidence withheld: default branch advanced before broker admission."
+            exit 1
+          fi
+          if [[ "$base_sha" != "$GITHUB_SHA" ]]; then
+            echo "::error::Shadow evidence withheld: pull-request base differs from immutable broker source."
+            exit 1
+          fi
           test "$head_sha" = "$TRIGGER_HEAD_SHA"
           test "$(jq -er '.head.repo.full_name' pull-request.json)" = "Mindburn-Labs/.github"
           [[ "$base_sha" =~ ^[0-9a-f]{40}$ ]]

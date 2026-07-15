@@ -17,21 +17,28 @@ Do not run `prepare` or `finalize` while any candidate-controlled
 write-capable App token, or protected environment capability. This runbook does
 not close that condition and does not activate authority. In the current state,
 the repository-wide docs token is passed to candidate-controlled local reusable
-workflow source, and the legacy promotion path remains outside the new
-read-only shadow broker.
+workflow source. The credentialed promotion controller is explicitly dispatched
+from `authority/control-v1` and remains outside the new read-only shadow broker.
 
 The shadow broker is diagnostic evidence only. Its bare-Git workflow-tree
 comparison does not make candidate CI, candidate scripts, artifacts, or
 configuration trusted; it cannot approve, merge, alter rulesets, deploy, or
-start this runbook. A PR success, signed `ALLOW`, or shadow artifact is never
-an automatic invocation.
+start this runbook. A successful next-generation permit can automatically
+request a `workflow_dispatch` of the immutable controller, but that request is
+not proof of credential isolation or authorization to perform this runbook's
+merge/ruleset effects. A shadow artifact has no authorization effect.
+The controller is dispatched during the permit workflow, while shadow evidence
+starts only after that workflow completes. If the controller closes the pull
+request or advances `main` first, the shadow broker withholds evidence rather
+than treating a default-branch run whose source may include the candidate as
+trusted. It is not a sequencing, hold, cancel, or authorization control.
 
 ## Preconditions
 
 - A separately operated GitHub administration incident path has paused and
-  investigated legacy authority execution, inspected prior runs and artifacts,
-  and revoked or rotated `MINDBURN_ORG_READ_TOKEN` away from candidate workflow
-  access.
+  investigated candidate and authority-controller execution, inspected prior
+  runs and artifacts, and revoked or rotated `MINDBURN_ORG_READ_TOKEN` away
+  from candidate workflow access.
 - Any future App key, installation scope, environment, ruleset, and
   required-workflow entitlement is provisioned outside candidate code. A
   controlled negative run has proven candidate branches cannot request the

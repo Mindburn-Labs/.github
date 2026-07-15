@@ -23,7 +23,19 @@ class AuthorityBrokerWorkflowTests(unittest.TestCase):
             "test \"$(jq -er '.run_attempt | tostring' triggering-run.json)\" = \"$TRIGGER_RUN_ATTEMPT\"",
             workflow,
         )
+        self.assertIn("if [[ \"$(jq -er '.state' pull-request.json)\" != \"open\" ]]; then", workflow)
+        self.assertIn("::error::Shadow evidence withheld: pull request is no longer open.", workflow)
         self.assertIn("test \"$(jq -er '.base.ref' pull-request.json)\" = \"main\"", workflow)
+        self.assertIn('if [[ "$current_main" != "$GITHUB_SHA" ]]; then', workflow)
+        self.assertIn(
+            "::error::Shadow evidence withheld: default branch advanced before broker admission.",
+            workflow,
+        )
+        self.assertIn('if [[ "$base_sha" != "$GITHUB_SHA" ]]; then', workflow)
+        self.assertIn(
+            "::error::Shadow evidence withheld: pull-request base differs from immutable broker source.",
+            workflow,
+        )
         self.assertIn(
             "test \"$(jq -er '.head.repo.full_name' pull-request.json)\" = \"Mindburn-Labs/.github\"",
             workflow,
