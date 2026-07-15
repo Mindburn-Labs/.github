@@ -29,6 +29,11 @@ The local credential may execute those inputs but cannot make a DENY acceptable.
 - The permit, Sigstore bundle, and trusted context were downloaded from the
   same GitHub Actions run.
 - The output directory does not exist. Evidence directories are immutable.
+- The bootstrap administrator may change `.github` repository settings. After
+  ratification, `prepare` sets `delete_branch_on_merge=false`, verifies the
+  setting through both executor and observer reads, and records the transition.
+  This preserves the exact candidate ref until post-merge observation and makes
+  a parent-permit recovery rerun possible without human intervention.
 
 ## Prepare the exact transition
 
@@ -64,6 +69,13 @@ GitHub-Sigstore marker bound to the exact candidate workflow SHA, proof head,
 merge commit, run ID, and attempt. `prepare` rejects a pre-model failure without
 that candidate-signed marker, including a same-head failure emitted by the
 still-enforcing parent workflow.
+
+Every model-executed proof case must also retain exactly
+`release-review-anthropic` and `release-review-openai`. `prepare` and its
+independent observer extract the bounded envelopes and require the exact parent
+Kernel to regenerate the signed permit bytes and matching `ALLOW`/`DENY` exit
+status. A missing envelope, a substituted archive entry, or any reduction
+difference fails the bootstrap.
 
 Before machine enforcement, failure restores the staged candidate pin. After
 machine enforcement begins, failure leaves the machine rule active; rerun

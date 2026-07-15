@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 from typing import Any
 import urllib.error
@@ -112,6 +113,14 @@ def validate_ref(value: str, *, label: str) -> str:
         or any(ord(character) < 32 or ord(character) == 127 for character in value)
     ):
         raise PermitInputError(f"{label} must be a bounded branch ref")
+    check = subprocess.run(
+        ["git", "check-ref-format", value],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    if check.returncode != 0:
+        raise PermitInputError(f"{label} is not a valid Git branch ref")
     return value
 
 

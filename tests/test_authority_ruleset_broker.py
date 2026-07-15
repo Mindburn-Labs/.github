@@ -122,6 +122,13 @@ def args(operation: str, *, merge_sha: str | None = None) -> argparse.Namespace:
 
 
 class AuthorityRulesetBrokerTests(unittest.TestCase):
+    def test_candidate_ref_requires_full_git_ref_validation(self) -> None:
+        with self.assertRaisesRegex(MODULE.PermitInputError, "valid Git branch ref"):
+            MODULE.validate_ref(
+                "refs/heads/codex/authority..next",
+                label="candidate_ref",
+            )
+
     def test_stable_machine_coverage_is_public_only(self) -> None:
         conditions = MODULE.expected_conditions("stable")
         self.assertEqual(

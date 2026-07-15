@@ -57,8 +57,13 @@ When the target is the workflow authority repository itself, both the input
 builder and Kernel reject a context whose workflow SHA equals the target head
 or merge SHA. Version N may evaluate N+1; N+1 cannot evaluate itself.
 Oversized or unsupported work must use a dedicated review lane. Each model
-executes in a separate ephemeral job. Only the strict JSON envelope and content
-digests flow to the Kernel reducer.
+executes in a separate ephemeral job. Each strict JSON envelope is retained as
+a bounded, exact-name run artifact. Promotion and its independent observer
+download both raw provider envelopes and invoke the immutable parent Kernel's
+reduction path over the trusted context. The recomputed output, exit status,
+and decision must match the candidate permit byte for byte for both `ALLOW` and
+`DENY`; shape-valid summaries or candidate-authored reducer output are not
+proof.
 
 Every admitted repository has an explicit source-owned gate profile. There is
 no command-discovery or Makefile fallback. The profile names an exact command
@@ -218,10 +223,23 @@ promotion restores both rulesets to version N. After `main` advances, the exact
 merge SHA is admitted only as a recovery input proving that state transition;
 it is never a forward recovery target. The merged code may remain ahead while
 enforcing authority stays at the last fully observed generation. Any automated
-repair must obtain a fresh N-issued permit; recovery evidence cannot authorize
-activation and no human approval is introduced. This deliberately favors
-safety over liveness. The executor therefore cannot mint its own success
-receipt.
+repair must obtain a fresh N-issued permit by rerunning the exact parent
+workflow on the original, now-merged pull request after the parent bindings are
+restored. The next promoter run admits that recovery only when live `main`
+equals the newly attested permit's merge SHA, GitHub still records the pull
+request as merged at that SHA, the merge has the exact ratified base, head, and
+tree, the candidate head branch still resolves to the ratified head, and the
+signed permit's authority exactly matches the manifest checked out from the
+permit-named immutable parent SHA. The source-owned control contract requires
+`.github` to keep `delete_branch_on_merge` disabled so GitHub cannot erase that
+recovery ref between merge and final observation. The atomic merge broker then
+emits the same receipt without moving `main`, and the complete suite, observer,
+and activation sequence runs again. Recovery evidence cannot
+authorize activation, a different merge cannot enter this path, and no human
+approval is introduced. If the exact head ref or merged-PR evidence is gone,
+recovery fails closed and requires a new source-owned bootstrap. This
+deliberately favors safety over liveness. The executor therefore cannot mint
+its own success receipt.
 
 GitHub's organization-ruleset API has two provider constraints that the broker
 must not conceal. Organization-ruleset `GET` requires the same organization

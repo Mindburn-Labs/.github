@@ -60,7 +60,7 @@ class GitHubMergeClient:
         )
         headers = {
             "Accept": "application/vnd.github+json",
-                "Authorization": " ".join(("Bearer", self.token)),
+            "Authorization": " ".join(("Bearer", self.token)),
             "X-GitHub-Api-Version": API_VERSION,
         }
         if content is not None:
@@ -79,7 +79,12 @@ class GitHubMergeClient:
             raise PermitInputError(
                 f"GitHub {method} {path} failed with HTTP {exc.code}: {detail}",
             ) from exc
-        except (urllib.error.URLError, TimeoutError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        except (
+            urllib.error.URLError,
+            TimeoutError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+        ) as exc:
             raise PermitInputError(f"GitHub {method} {path} failed: {exc}") from exc
         if not isinstance(value, dict):
             raise PermitInputError(f"GitHub {method} {path} returned a non-object")
@@ -95,7 +100,9 @@ class GitHubMergeClient:
             payload={"query": query, "variables": variables},
         )
         if response.get("errors"):
-            raise PermitInputError(f"GitHub GraphQL rejected atomic ref update: {response['errors']}")
+            raise PermitInputError(
+                f"GitHub GraphQL rejected atomic ref update: {response['errors']}"
+            )
         data = response.get("data")
         if not isinstance(data, dict):
             raise PermitInputError("GitHub GraphQL response has no data object")
@@ -127,9 +134,12 @@ def validate_pull_request(
         pull_request.get("number") != number
         or pull_request.get("state") != expected_state
         or pull_request.get("draft") is True
-        or nested_string(pull_request, "base", "ref", label="pull request base ref") != "main"
-        or nested_string(pull_request, "base", "sha", label="pull request base SHA") != base_sha
-        or nested_string(pull_request, "head", "sha", label="pull request head SHA") != head_sha
+        or nested_string(pull_request, "base", "ref", label="pull request base ref")
+        != "main"
+        or nested_string(pull_request, "base", "sha", label="pull request base SHA")
+        != base_sha
+        or nested_string(pull_request, "head", "sha", label="pull request head SHA")
+        != head_sha
         or nested_string(
             pull_request,
             "head",
@@ -139,10 +149,17 @@ def validate_pull_request(
         )
         != REPOSITORY
     ):
-        raise PermitInputError("pull request does not match the exact ratified candidate")
+        raise PermitInputError(
+            "pull request does not match the exact ratified candidate"
+        )
     if merged:
-        if pull_request.get("merged") is not True or pull_request.get("merge_commit_sha") != merge_sha:
-            raise PermitInputError("pull request is not marked merged at the exact reviewed commit")
+        if (
+            pull_request.get("merged") is not True
+            or pull_request.get("merge_commit_sha") != merge_sha
+        ):
+            raise PermitInputError(
+                "pull request is not marked merged at the exact reviewed commit"
+            )
     else:
         if pull_request.get("merged") is True:
             raise PermitInputError("candidate pull request was already merged")
@@ -161,15 +178,18 @@ def atomic_merge(args: argparse.Namespace, client: GitHubMergeClient) -> dict[st
         raise PermitInputError("pull_request must be positive")
 
     main = client.get(f"/repos/{REPOSITORY}/git/ref/heads/main")
-    if nested_string(main, "object", "sha", label="main SHA") != base_sha:
-        raise PermitInputError("authority main moved before the atomic merge")
+    main_sha = nested_string(main, "object", "sha", label="main SHA")
+    if main_sha not in {base_sha, merge_sha}:
+        raise PermitInputError(
+            "authority main moved outside the resumable merge states"
+        )
     pull_request = client.get(f"/repos/{REPOSITORY}/pulls/{args.pull_request}")
     validate_pull_request(
         pull_request,
         number=args.pull_request,
         base_sha=base_sha,
         head_sha=head_sha,
-        merged=False,
+        merged=main_sha == merge_sha,
         merge_sha=merge_sha,
     )
     merge_commit = client.get(f"/repos/{REPOSITORY}/git/commits/{merge_sha}")
@@ -179,9 +199,26 @@ def atomic_merge(args: argparse.Namespace, client: GitHubMergeClient) -> dict[st
         or len(parents) != 2
         or [parent.get("sha") for parent in parents if isinstance(parent, dict)]
         != [base_sha, head_sha]
-        or nested_string(merge_commit, "tree", "sha", label="merge tree SHA") != tree_sha
+        or nested_string(merge_commit, "tree", "sha", label="merge tree SHA")
+        != tree_sha
     ):
-        raise PermitInputError("reviewed merge commit does not have the exact base, head, and tree")
+        raise PermitInputError(
+            "reviewed merge commit does not have the exact base, head, and tree"
+        )
+
+    receipt = {
+        "schema": "mindburn.release-authority-atomic-merge/v1",
+        "repository": REPOSITORY,
+        "pull_request": args.pull_request,
+        "base_sha": base_sha,
+        "head_sha": head_sha,
+        "merge_sha": merge_sha,
+        "merge_tree_sha": tree_sha,
+        "ref": MAIN_REF,
+        "force": False,
+    }
+    if main_sha == merge_sha:
+        return receipt
 
     # GitHub permits a protected-branch update when it exactly matches the
     # merge GitHub generated for the approved pull request. The live PR check
@@ -205,7 +242,9 @@ def atomic_merge(args: argparse.Namespace, client: GitHubMergeClient) -> dict[st
 
     main_after = client.get(f"/repos/{REPOSITORY}/git/ref/heads/main")
     if nested_string(main_after, "object", "sha", label="main SHA") != merge_sha:
-        raise PermitInputError("authority main does not equal the exact reviewed merge commit")
+        raise PermitInputError(
+            "authority main does not equal the exact reviewed merge commit"
+        )
     for _ in range(10):
         pull_request = client.get(f"/repos/{REPOSITORY}/pulls/{args.pull_request}")
         try:
@@ -221,18 +260,10 @@ def atomic_merge(args: argparse.Namespace, client: GitHubMergeClient) -> dict[st
         except PermitInputError:
             time.sleep(1)
     else:
-        raise PermitInputError("GitHub did not mark the exact candidate pull request merged")
-    return {
-        "schema": "mindburn.release-authority-atomic-merge/v1",
-        "repository": REPOSITORY,
-        "pull_request": args.pull_request,
-        "base_sha": base_sha,
-        "head_sha": head_sha,
-        "merge_sha": merge_sha,
-        "merge_tree_sha": tree_sha,
-        "ref": MAIN_REF,
-        "force": False,
-    }
+        raise PermitInputError(
+            "GitHub did not mark the exact candidate pull request merged"
+        )
+    return receipt
 
 
 def build_parser() -> argparse.ArgumentParser:

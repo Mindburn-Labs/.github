@@ -39,23 +39,6 @@ jobs:
       parent_generation: ${{ steps.metadata.outputs.parent_generation }}
       parent_sha: ${{ steps.metadata.outputs.parent_sha }}
     steps:
-      - name: Checkout immutable parent authority broker
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-          path: broker
-
-      - name: Verify source-owned live control-plane contract
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          python3 broker/scripts/verify_control_plane.py \
-            --contract broker/config/autonomous-release-control-plane.json \
-            --adversarial-corpus broker/tests/fixtures/autonomous-release-adversarial.json \
-            --output control-plane-parent.json
-
       - name: Download triggering permit artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
@@ -89,35 +72,54 @@ jobs:
           # Generation 1 is admitted exactly once by bootstrap_authority.py.
           # This on-main workflow is authoritative only from generation 2 onward.
           test "$parent_generation" -ge 2
-          test "$parent_sha" = "$GITHUB_SHA"
           test "$(jq -er '.repository' "$permit")" = "Mindburn-Labs/.github"
           test "$(jq -er '.head_sha' "$permit")" = "$TRIGGER_HEAD_SHA"
           test "$(jq -er '.run_id | tostring' "$permit")" = "$TRIGGER_RUN_ID"
           test "$(jq -er '.run_attempt | tostring' "$permit")" = "$TRIGGER_RUN_ATTEMPT"
           candidate_sha="$(jq -er '.head_sha' "$permit")"
           base_sha="$(jq -er '.base_sha' "$permit")"
+          merge_sha="$(jq -er '.merge_sha' "$permit")"
+          merge_tree_sha="$(jq -er '.merge_tree_sha' "$permit")"
           candidate_pr="$(jq -er '.pull_request' "$permit")"
           kernel_sha="$(jq -er '.authority.kernel_sha' "$permit")"
           [[ "$candidate_sha" =~ ^[0-9a-f]{40}$ ]]
           [[ "$base_sha" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$merge_sha" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$merge_tree_sha" =~ ^[0-9a-f]{40}$ ]]
           [[ "$kernel_sha" =~ ^[0-9a-f]{40}$ ]]
           [[ "$candidate_pr" =~ ^[1-9][0-9]*$ ]]
           current_main="$(gh api repos/Mindburn-Labs/.github/git/ref/heads/main --jq '.object.sha')"
           test "$current_main" = "$GITHUB_SHA"
-          test "$base_sha" = "$current_main"
           gh api "repos/Mindburn-Labs/.github/pulls/$candidate_pr" > promotion/pull-request.json
-          test "$(jq -er '.state' promotion/pull-request.json)" = "open"
           test "$(jq -er '.draft' promotion/pull-request.json)" = "false"
           test "$(jq -er '.base.ref' promotion/pull-request.json)" = "main"
           test "$(jq -er '.base.sha' promotion/pull-request.json)" = "$base_sha"
           test "$(jq -er '.head.sha' promotion/pull-request.json)" = "$candidate_sha"
           test "$(jq -er '.head.repo.full_name' promotion/pull-request.json)" = "Mindburn-Labs/.github"
+          if [[ "$current_main" = "$base_sha" ]]; then
+            test "$parent_sha" = "$current_main"
+            test "$(jq -er '.state' promotion/pull-request.json)" = "open"
+            test "$(jq -er '.merged' promotion/pull-request.json)" = "false"
+            test "$(jq -er '.merge_commit_sha' promotion/pull-request.json)" = "$merge_sha"
+          elif [[ "$current_main" = "$merge_sha" ]]; then
+            test "$(jq -er '.state' promotion/pull-request.json)" = "closed"
+            test "$(jq -er '.merged' promotion/pull-request.json)" = "true"
+            test "$(jq -er '.merge_commit_sha' promotion/pull-request.json)" = "$merge_sha"
+            gh api "repos/Mindburn-Labs/.github/git/commits/$merge_sha" \
+              > promotion/merge-commit.json
+            test "$(jq -er '.parents | length' promotion/merge-commit.json)" = "2"
+            test "$(jq -er '.parents[0].sha' promotion/merge-commit.json)" = "$base_sha"
+            test "$(jq -er '.parents[1].sha' promotion/merge-commit.json)" = "$candidate_sha"
+            test "$(jq -er '.tree.sha' promotion/merge-commit.json)" = "$merge_tree_sha"
+          else
+            echo "::error::Main is outside the exact parent/ratified-merge states"
+            exit 1
+          fi
           candidate_branch="$(jq -er '.head.ref' promotion/pull-request.json)"
           candidate_ref="refs/heads/$candidate_branch"
           [[ "$candidate_ref" =~ ^refs/heads/[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$ ]]
           git check-ref-format "$candidate_ref"
-          candidate_generation="$(jq -er '.generation' broker/config/autonomous-release-authority.json)"
-          test "$candidate_generation" = "$parent_generation"
+          test "$(gh api "repos/Mindburn-Labs/.github/git/ref/heads/$candidate_branch" --jq '.object.sha')" = "$candidate_sha"
           {
             echo "base_sha=$base_sha"
             echo "candidate_generation=$((parent_generation + 1))"
@@ -142,6 +144,35 @@ jobs:
             --signer-digest "${{ steps.metadata.outputs.parent_sha }}" \
             --source-digest "$merge_sha" \
             --deny-self-hosted-runners
+
+      - name: Checkout permit-named immutable parent authority broker
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ steps.metadata.outputs.parent_sha }}
+          persist-credentials: false
+          path: broker
+
+      - name: Bind permit authority to the immutable parent manifest
+        run: |
+          set -euo pipefail
+          test "$(git -C broker rev-parse HEAD)" = "${{ steps.metadata.outputs.parent_sha }}"
+          jq -S . broker/config/autonomous-release-authority.json \
+            > promotion/parent-authority.json
+          jq -S '.authority' promotion/ratification-input/context.json \
+            > promotion/permit-authority.json
+          cmp --silent promotion/parent-authority.json promotion/permit-authority.json
+          test "$(jq -er '.generation' promotion/parent-authority.json)" = "${{ steps.metadata.outputs.parent_generation }}"
+          test "$(jq -er '.kernel_sha' promotion/parent-authority.json)" = "${{ steps.metadata.outputs.kernel_sha }}"
+
+      - name: Verify source-owned live control-plane contract
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/verify_control_plane.py \
+            --contract broker/config/autonomous-release-control-plane.json \
+            --adversarial-corpus broker/tests/fixtures/autonomous-release-adversarial.json \
+            --output control-plane-parent.json
 
       - name: Checkout exact candidate authority tree
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -213,6 +244,8 @@ jobs:
             promotion/ratification-input/context.json
             promotion/authority-promotion.json
             promotion/candidate-authority.json
+            promotion/parent-authority.json
+            promotion/permit-authority.json
             promotion/pull-request.json
             control-plane-parent.json
           if-no-files-found: error

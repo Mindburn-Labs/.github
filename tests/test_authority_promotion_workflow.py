@@ -119,6 +119,41 @@ class AuthorityPromotionWorkflowTests(unittest.TestCase):
         self.assertIn(
             "broker always restores both rulesets to the parent authority", workflow
         )
+        self.assertIn('elif [[ "$current_main" = "$merge_sha" ]]', workflow)
+        self.assertIn(
+            'test "$(jq -er \'.merge_commit_sha\' promotion/pull-request.json)" = "$merge_sha"',
+            workflow,
+        )
+        self.assertIn(
+            'test "$(jq -er \'.parents[0].sha\' promotion/merge-commit.json)" = "$base_sha"',
+            workflow,
+        )
+        self.assertIn(
+            'test "$(jq -er \'.parents[1].sha\' promotion/merge-commit.json)" = "$candidate_sha"',
+            workflow,
+        )
+        self.assertNotIn('test "$parent_sha" = "$GITHUB_SHA"', workflow)
+        self.assertNotIn("ref: ${{ github.sha }}", workflow)
+        self.assertIn(
+            "ref: ${{ steps.metadata.outputs.parent_sha }}",
+            workflow,
+        )
+        self.assertIn(
+            "cmp --silent promotion/parent-authority.json promotion/permit-authority.json",
+            workflow,
+        )
+        self.assertLess(
+            workflow.index("Download triggering permit artifact"),
+            workflow.index("Checkout permit-named immutable parent authority broker"),
+        )
+        self.assertLess(
+            workflow.index("Verify GitHub-signed parent-workflow provenance"),
+            workflow.index("Checkout permit-named immutable parent authority broker"),
+        )
+        self.assertIn(
+            "Main is outside the exact parent/ratified-merge states",
+            workflow,
+        )
         self.assertNotIn("path: candidate-kernel", workflow)
         self.assertNotIn("candidate-permit-verify", workflow)
 
