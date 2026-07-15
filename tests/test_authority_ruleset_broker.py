@@ -349,6 +349,7 @@ class AuthorityRulesetBrokerTests(unittest.TestCase):
                 "candidate",
                 MODULE.LEGACY_PARENT_WORKFLOW_SHA,
                 MODULE.LEGACY_WORKFLOW_REF,
+                conditions=MODULE.legacy_candidate_conditions(),
             ),
         )
         bootstrap_args = argparse.Namespace(
@@ -360,6 +361,10 @@ class AuthorityRulesetBrokerTests(unittest.TestCase):
         )
         MODULE.transition(bootstrap_args, client)
         self.assertEqual(client.puts, [MODULE.CANDIDATE_RULESET_ID])
+        self.assertEqual(
+            client.current[MODULE.CANDIDATE_RULESET_ID]["conditions"],
+            MODULE.expected_conditions("candidate"),
+        )
 
         bootstrap_args.operation = "bootstrap-enforce"
         MODULE.transition(bootstrap_args, client)

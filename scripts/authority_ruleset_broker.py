@@ -26,7 +26,7 @@ STABLE_RULESET_NAME = "HELM Autonomous Release Permit"
 CANDIDATE_RULESET_NAME = "HELM Autonomous Release Permit Candidate Shadow"
 WORKFLOW_PATH = ".github/workflows/ci.yml"
 MAIN_REF = "refs/heads/main"
-CANDIDATE_REPOSITORY_IDS = (
+LEGACY_CANDIDATE_REPOSITORY_IDS = (
     1158479649,
     1159255601,
     1250514808,
@@ -34,6 +34,9 @@ CANDIDATE_REPOSITORY_IDS = (
     1283905989,
     1286471668,
     1300498536,
+)
+CANDIDATE_REPOSITORY_IDS = (
+    *LEGACY_CANDIDATE_REPOSITORY_IDS,
     1301786253,
 )
 PUBLIC_AUTONOMOUS_REPOSITORY_IDS = (
@@ -161,6 +164,15 @@ def legacy_stable_conditions() -> dict[str, Any]:
     return {
         "ref_name": {"exclude": [], "include": ["~DEFAULT_BRANCH"]},
         "repository_name": {"exclude": [], "include": ["~ALL"]},
+    }
+
+
+def legacy_candidate_conditions() -> dict[str, Any]:
+    return {
+        "ref_name": {"exclude": [], "include": ["~DEFAULT_BRANCH"]},
+        "repository_id": {
+            "repository_ids": list(LEGACY_CANDIDATE_REPOSITORY_IDS),
+        },
     }
 
 
@@ -457,6 +469,7 @@ def transition(args: argparse.Namespace, client: GitHubRulesetClient) -> dict[st
                     kind="candidate",
                     expected_sha=LEGACY_PARENT_WORKFLOW_SHA,
                     expected_ref=LEGACY_WORKFLOW_REF,
+                    expected_coverage=legacy_candidate_conditions(),
                 )
             else:
                 return receipt(
@@ -467,6 +480,7 @@ def transition(args: argparse.Namespace, client: GitHubRulesetClient) -> dict[st
                 candidate,
                 workflow_sha=candidate_sha,
                 workflow_ref=candidate_ref,
+                conditions=expected_conditions("candidate"),
             )
             validate_ruleset(
                 updated.body,
