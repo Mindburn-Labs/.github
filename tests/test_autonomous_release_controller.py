@@ -588,6 +588,8 @@ class AutonomousReleaseControllerTests(unittest.TestCase):
                 kernel_verifier=directory / "verifier",
                 control_sha=CONTROL_SHA,
                 active_workflow_sha=CONTROL_SHA,
+                observer_app_slug="helm-authority-observer",
+                observer_installation_id=146542079,
                 output_dir=directory / "plan",
             )
 
@@ -677,6 +679,8 @@ class AutonomousReleaseControllerTests(unittest.TestCase):
             approvals=approvals,
             control_sha=CONTROL_SHA,
             repository=KERNEL,
+            merger_app_slug="helm-authority-merger",
+            merger_installation_id=6000001,
         )
 
     def test_merge_uses_atomic_before_oid_and_exact_reviewed_merge(self) -> None:

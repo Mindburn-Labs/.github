@@ -221,11 +221,9 @@ class AuthorityPromotionWorkflowTests(unittest.TestCase):
         self.assertIn("--phase final", final)
         recover = workflow[workflow.index("  recover:") :]
         self.assertNotIn("persist_promotion_final.result", recover)
-        self.assertEqual(
-            workflow.count(
-                "test \"$(gh api /installation | jq -cS '.permissions')\" = "
-                '\'{"contents":"write"}\''
-            ),
+        self.assertNotIn("gh api /installation |", workflow)
+        self.assertGreaterEqual(
+            workflow.count("gh api /installation/repositories?per_page=100"),
             5,
         )
 

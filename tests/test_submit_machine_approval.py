@@ -238,28 +238,24 @@ class SubmitMachineApprovalTests(unittest.TestCase):
             )
         self.assertEqual(client.posts, 0)
 
-    def test_wrong_live_app_with_the_same_repository_scope_fails_closed(self) -> None:
+    def test_does_not_call_unsupported_installation_introspection(self) -> None:
         client = FakeClient()
         original = client.request
 
         def request(method: str, path: str, *, payload=None):
-            value = original(method, path, payload=payload)
             if path == "/installation":
-                value["app_id"] = 999999
-            return value
+                raise AssertionError("unsupported installation-token endpoint")
+            return original(method, path, payload=payload)
 
         client.request = request  # type: ignore[method-assign]
-        with (
-            mock.patch.object(MODULE, "verify_permit", return_value=self.permit()),
-            self.assertRaisesRegex(MODULE.PermitInputError, "identity or permissions"),
-        ):
+        with mock.patch.object(MODULE, "verify_permit", return_value=self.permit()):
             MODULE.submit_machine_approval(
                 arguments(),
                 client,
                 attestation_token="observer",
                 metadata_client=client,
             )
-        self.assertEqual(client.posts, 0)
+        self.assertEqual(client.posts, 1)
 
     def test_wrong_action_identity_fails_closed_before_review(self) -> None:
         client = FakeClient()

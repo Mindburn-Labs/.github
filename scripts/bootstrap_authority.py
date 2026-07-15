@@ -58,7 +58,6 @@ from configure_machine_approval_gates import (
     validate_merger,
 )
 from submit_machine_approval import (
-    APPROVER_APP_ID,
     APPROVER_INSTALLATION_ID,
     APPROVER_SLUG,
     GitHubApprovalClient,
@@ -1236,16 +1235,6 @@ def preflight_credentials(
                 "bootstrap executor read the wrong organization ruleset"
             )
 
-    observer_installation = observer_client.get_json("/installation")
-    observer_account = observer_installation.get("account")
-    if (
-        observer_installation.get("app_id") != OBSERVER_APP_ID
-        or observer_installation.get("id") != OBSERVER_INSTALLATION_ID
-        or not isinstance(observer_account, dict)
-        or observer_account.get("login") != "Mindburn-Labs"
-        or observer_installation.get("permissions") != OBSERVER_PERMISSIONS
-    ):
-        raise PermitInputError("bootstrap observer App identity or permissions drifted")
     observer_repositories = observer_client.get_json(
         "/installation/repositories?per_page=100"
     )
@@ -1263,21 +1252,6 @@ def preflight_credentials(
     if observer_ruleset.get("id") != STABLE_RULESET_ID:
         raise PermitInputError("bootstrap observer read the wrong organization ruleset")
 
-    approver_installation = approval_client.request("GET", "/installation")
-    approver_account = (
-        approver_installation.get("account")
-        if isinstance(approver_installation, dict)
-        else None
-    )
-    if (
-        not isinstance(approver_installation, dict)
-        or approver_installation.get("app_id") != APPROVER_APP_ID
-        or approver_installation.get("id") != APPROVER_INSTALLATION_ID
-        or not isinstance(approver_account, dict)
-        or approver_account.get("login") != "Mindburn-Labs"
-        or approver_installation.get("permissions") != {"pull_requests": "write"}
-    ):
-        raise PermitInputError("bootstrap approver App identity or permissions drifted")
     approver = verify_installation(
         approval_client,
         repository=REPOSITORY,

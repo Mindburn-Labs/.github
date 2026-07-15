@@ -443,25 +443,15 @@ def verify_observer_installation(
     client: GitHubReadClient,
     *,
     contract: dict[str, Any],
+    app_slug: str,
+    installation_id: int,
 ) -> None:
     expected = contract["apps"]["observer"]
-    installation = client.get_json("/installation")
-    account = installation.get("account")
     if (
-        installation.get("app_id") != expected["app_id"]
-        or installation.get("id") != expected["installation_id"]
-        or installation.get("permissions")
-        != {
-            "actions": "read",
-            "attestations": "read",
-            "contents": "read",
-            "organization_administration": "write",
-            "pull_requests": "read",
-        }
-        or not isinstance(account, dict)
-        or account.get("login") != ORGANIZATION
+        app_slug != expected["slug"]
+        or installation_id != expected["installation_id"]
     ):
-        raise PermitInputError("observer App identity or permissions drifted")
+        raise PermitInputError("observer token action identity drifted")
     repositories = client.get_json("/installation/repositories?per_page=100")
     items = repositories.get("repositories")
     if (
@@ -807,7 +797,12 @@ def discover(args: argparse.Namespace, client: GitHubReadClient) -> dict[str, An
     )
     require_enabled(contract)
     control_sha = require_sha(args.control_sha, label="control_sha", length=40)
-    verify_observer_installation(client, contract=contract)
+    verify_observer_installation(
+        client,
+        contract=contract,
+        app_slug=args.observer_app_slug,
+        installation_id=args.observer_installation_id,
+    )
     active_workflow_sha = discover_effective_workflow_sha(client)
     observe_effective_stable_rules(client, workflow_sha=active_workflow_sha)
     authority = head_authority(client, head_sha=active_workflow_sha)
@@ -1970,7 +1965,12 @@ def plan(args: argparse.Namespace, client: GitHubReadClient) -> dict[str, Any]:
         label="active_workflow_sha",
         length=40,
     )
-    verify_observer_installation(client, contract=contract)
+    verify_observer_installation(
+        client,
+        contract=contract,
+        app_slug=args.observer_app_slug,
+        installation_id=args.observer_installation_id,
+    )
     if discover_effective_workflow_sha(client) != active_workflow_sha:
         raise PermitInputError("active release authority changed after discovery")
     observe_effective_stable_rules(client, workflow_sha=active_workflow_sha)
@@ -2493,20 +2493,15 @@ def verify_merger_installation(
     *,
     contract: dict[str, Any],
     repository: str,
+    app_slug: str,
+    installation_id: int,
 ) -> None:
     merger = contract["apps"]["merger"]
-    installation = client.request("GET", "/installation")
-    account = installation.get("account") if isinstance(installation, dict) else None
     if (
-        not isinstance(installation, dict)
-        or installation.get("app_id") != merger["app_id"]
-        or installation.get("id") != merger["installation_id"]
-        or installation.get("permissions")
-        != {"contents": "write", "pull_requests": "read"}
-        or not isinstance(account, dict)
-        or account.get("login") != ORGANIZATION
+        app_slug != merger["slug"]
+        or installation_id != merger["installation_id"]
     ):
-        raise PermitInputError("merger App identity or permissions drifted")
+        raise PermitInputError("merger token action identity drifted")
     repositories = client.request("GET", "/installation/repositories?per_page=100")
     items = repositories.get("repositories") if isinstance(repositories, dict) else None
     if not isinstance(items, list) or {
@@ -2596,7 +2591,13 @@ def merge(args: argparse.Namespace) -> dict[str, Any]:
         if isinstance(item, dict)
     }
     client = GitHubApprovalClient(os.environ.get("GH_TOKEN", ""))
-    verify_merger_installation(client, contract=contract, repository=args.repository)
+    verify_merger_installation(
+        client,
+        contract=contract,
+        repository=args.repository,
+        app_slug=args.merger_app_slug,
+        installation_id=args.merger_installation_id,
+    )
     if (
         plan_value["merge_interlock"]["merger_app_id"]
         != contract["apps"]["merger"]["app_id"]
@@ -2816,6 +2817,8 @@ def build_parser() -> argparse.ArgumentParser:
     discover_parser = subparsers.add_parser("discover")
     discover_parser.add_argument("--contract", type=Path, required=True)
     discover_parser.add_argument("--control-sha", required=True)
+    discover_parser.add_argument("--observer-app-slug", required=True)
+    discover_parser.add_argument("--observer-installation-id", type=int, required=True)
     discover_parser.add_argument("--output", type=Path, required=True)
     plan_parser = subparsers.add_parser("plan")
     plan_parser.add_argument("--contract", type=Path, required=True)
@@ -2823,6 +2826,8 @@ def build_parser() -> argparse.ArgumentParser:
     plan_parser.add_argument("--kernel-verifier", type=Path, required=True)
     plan_parser.add_argument("--control-sha", required=True)
     plan_parser.add_argument("--active-workflow-sha", required=True)
+    plan_parser.add_argument("--observer-app-slug", required=True)
+    plan_parser.add_argument("--observer-installation-id", type=int, required=True)
     plan_parser.add_argument("--output-dir", type=Path, required=True)
     plan_parser.add_argument("--output", type=Path, required=True)
     approve_parser = subparsers.add_parser("approve")
@@ -2841,6 +2846,8 @@ def build_parser() -> argparse.ArgumentParser:
     merge_parser.add_argument("--approvals", type=Path, required=True)
     merge_parser.add_argument("--control-sha", required=True)
     merge_parser.add_argument("--repository", required=True)
+    merge_parser.add_argument("--merger-app-slug", required=True)
+    merge_parser.add_argument("--merger-installation-id", type=int, required=True)
     merge_parser.add_argument("--output", type=Path, required=True)
     return parser
 

@@ -32,7 +32,6 @@ permissions: {}
 
 concurrency:
   group: helm-release-authority-promotion
-  queue: max
   cancel-in-progress: false
 
 jobs:
@@ -142,6 +141,8 @@ jobs:
           python3 broker/scripts/autonomous_release_controller.py discover \
             --contract broker/config/autonomous-release-controller.json \
             --control-sha "$GITHUB_WORKFLOW_SHA" \
+            --observer-app-slug "${{ steps.observer-token.outputs.app-slug }}" \
+            --observer-installation-id "${{ steps.observer-token.outputs.installation-id }}" \
             --output controller-discovery.json
           active_workflow_sha="$(jq -er '.active_workflow_sha' controller-discovery.json)"
           kernel_sha="$(jq -er '.kernel_sha' controller-discovery.json)"
@@ -186,6 +187,8 @@ jobs:
             --kernel-verifier "$GITHUB_WORKSPACE/active-permit-verify" \
             --control-sha "$GITHUB_WORKFLOW_SHA" \
             --active-workflow-sha "${{ steps.discovery.outputs.active_workflow_sha }}" \
+            --observer-app-slug "${{ steps.observer-token.outputs.app-slug }}" \
+            --observer-installation-id "${{ steps.observer-token.outputs.installation-id }}" \
             --output-dir controller-plan \
             --output controller-plan/controller-plan.json
           for pair in \
@@ -552,7 +555,6 @@ jobs:
           set -euo pipefail
           test "$APP_SLUG" = "helm-authority-merger"
           test "$INSTALLATION_ID" = "$(jq -er '.apps.merger.installation_id' broker/config/autonomous-release-controller.json)"
-          test "$(gh api /installation | jq -cS '.permissions')" = '{"contents":"write"}'
           test "$(gh api /installation/repositories?per_page=100 --jq '.repositories | map(.full_name) | sort | join(",")')" = "Mindburn-Labs/.github"
 
       - name: Append intent before any main-ref mutation
@@ -712,6 +714,8 @@ jobs:
             --approvals approval/ordinary-approval.json \
             --control-sha "$GITHUB_WORKFLOW_SHA" \
             --repository "${{ matrix.repository }}" \
+            --merger-app-slug "${{ steps.merger-token.outputs.app-slug }}" \
+            --merger-installation-id "${{ steps.merger-token.outputs.installation-id }}" \
             --output ordinary-merge.json
 
       - name: Set up pinned attestation runtime
@@ -857,7 +861,6 @@ jobs:
           set -euo pipefail
           test "$APP_SLUG" = "helm-authority-merger"
           test "$INSTALLATION_ID" = "$(jq -er '.apps.merger.installation_id' broker/config/autonomous-release-controller.json)"
-          test "$(gh api /installation | jq -cS '.permissions')" = '{"contents":"write"}'
           test "$(gh api /installation/repositories?per_page=100 --jq '.repositories | map(.full_name) | sort | join(",")')" = "Mindburn-Labs/.github"
 
       - name: Append closure after exact GitHub reconciliation
@@ -1667,7 +1670,6 @@ jobs:
           set -euo pipefail
           test "$APP_SLUG" = "helm-authority-merger"
           test "$INSTALLATION_ID" = "$(jq -er '.apps.merger.installation_id' broker/config/autonomous-release-controller.json)"
-          test "$(gh api /installation | jq -cS '.permissions')" = '{"contents":"write"}'
           test "$(gh api /installation/repositories?per_page=100 --jq '.repositories | map(.full_name) | sort | join(",")')" = "Mindburn-Labs/.github"
 
       - name: Append forward intent before any main-ref mutation
@@ -1900,7 +1902,6 @@ jobs:
           set -euo pipefail
           test "$APP_SLUG" = "helm-authority-merger"
           test "$INSTALLATION_ID" = "$(jq -er '.apps.merger.installation_id' broker/config/autonomous-release-controller.json)"
-          test "$(gh api /installation | jq -cS '.permissions')" = '{"contents":"write"}'
           test "$(gh api /installation/repositories?per_page=100 --jq '.repositories | map(.full_name) | sort | join(",")')" = "Mindburn-Labs/.github"
 
       - name: Append merged phase after exact GitHub reconciliation
@@ -2623,7 +2624,6 @@ jobs:
           set -euo pipefail
           test "$APP_SLUG" = "helm-authority-merger"
           test "$INSTALLATION_ID" = "$(jq -er '.apps.merger.installation_id' broker/config/autonomous-release-controller.json)"
-          test "$(gh api /installation | jq -cS '.permissions')" = '{"contents":"write"}'
           test "$(gh api /installation/repositories?per_page=100 --jq '.repositories | map(.full_name) | sort | join(",")')" = "Mindburn-Labs/.github"
 
       - name: Append final closure after independent observer ALLOW

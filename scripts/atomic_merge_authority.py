@@ -164,17 +164,6 @@ def verify_merger_installation(
 ) -> None:
     if app_slug != "helm-authority-merger" or installation_id <= 0 or app_id <= 0:
         raise PermitInputError("merger App identity is not source-owned and active")
-    installation = client.get("/installation")
-    account = installation.get("account")
-    if (
-        installation.get("app_id") != app_id
-        or installation.get("id") != installation_id
-        or installation.get("permissions")
-        != {"contents": "write", "pull_requests": "read"}
-        or not isinstance(account, dict)
-        or account.get("login") != "Mindburn-Labs"
-    ):
-        raise PermitInputError("merger App installation identity or permissions drifted")
     repositories = client.get("/installation/repositories?per_page=100")
     items = repositories.get("repositories")
     if not isinstance(items, list):
