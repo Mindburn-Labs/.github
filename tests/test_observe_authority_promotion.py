@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import inspect
+import json
 from pathlib import Path
 import sys
 import unittest
@@ -26,6 +27,7 @@ def execution() -> dict[str, object]:
         "candidate_generation": 2,
         "parent_base_sha": "1" * 40,
         "parent_workflow_sha": "1" * 40,
+        "control_workflow_sha": "8" * 40,
         "candidate_workflow_sha": "2" * 40,
         "candidate_workflow_ref": "refs/heads/authority-next",
         "candidate_tree_sha": "3" * 40,
@@ -43,6 +45,53 @@ def execution() -> dict[str, object]:
 
 
 class ObserveAuthorityPromotionTests(unittest.TestCase):
+    def test_read_only_observer_requires_exact_effective_stable_rule(self) -> None:
+        workflow_sha = "a" * 40
+        expected_rule = {
+            "ruleset_id": MODULE.STABLE_RULESET_ID,
+            "ruleset_source_type": "Organization",
+            "ruleset_source": "Mindburn-Labs",
+            "type": "workflows",
+            "parameters": {
+                "do_not_enforce_on_create": False,
+                "workflows": [
+                    {
+                        "path": ".github/workflows/ci.yml",
+                        "ref": MODULE.MAIN_REF,
+                        "repository_id": MODULE.AUTHORITY_REPOSITORY_ID,
+                        "sha": workflow_sha,
+                    },
+                ],
+            },
+        }
+
+        class Client:
+            def __init__(self, rule):
+                self.rule = rule
+
+            def get_bytes(self, _path):
+                return json.dumps([self.rule]).encode()
+
+        observed = MODULE.observe_effective_stable_rules(
+            Client(expected_rule),
+            workflow_sha=workflow_sha,
+        )
+        self.assertEqual(
+            [item["repository"] for item in observed],
+            list(MODULE.PUBLIC_STABLE_REPOSITORIES),
+        )
+
+        drifted = json.loads(json.dumps(expected_rule))
+        drifted["parameters"]["workflows"][0]["sha"] = "b" * 40
+        with self.assertRaisesRegex(
+            MODULE.PermitInputError,
+            "binding drifted",
+        ):
+            MODULE.observe_effective_stable_rules(
+                Client(drifted),
+                workflow_sha=workflow_sha,
+            )
+
     def test_observer_explicitly_threads_attestation_token_to_both_permits(
         self,
     ) -> None:

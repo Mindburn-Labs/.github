@@ -11,7 +11,9 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = ROOT / "scripts" / "configure_machine_approval_gates.py"
-SPEC = importlib.util.spec_from_file_location("configure_machine_approval_gates", MODULE_PATH)
+SPEC = importlib.util.spec_from_file_location(
+    "configure_machine_approval_gates", MODULE_PATH
+)
 assert SPEC is not None and SPEC.loader is not None
 MODULE = importlib.util.module_from_spec(SPEC)
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -20,6 +22,10 @@ SPEC.loader.exec_module(MODULE)
 
 CANDIDATE_SHA = "2" * 40
 CANDIDATE_REF = "refs/heads/codex/autonomous-release-gen2-bootstrap"
+BASE_SHA = "1" * 40
+MERGE_SHA = "3" * 40
+TREE_SHA = "4" * 40
+PERMIT_ID = "sha256:" + "5" * 64
 
 
 def machine_workflow_ruleset() -> dict[str, object]:
@@ -65,7 +71,11 @@ def raw_protection(normalized: dict[str, object]) -> dict[str, object]:
     result: dict[str, object] = {
         field: {"enabled": normalized[field]} for field in boolean_fields
     }
-    for field in ("required_pull_request_reviews", "required_status_checks", "restrictions"):
+    for field in (
+        "required_pull_request_reviews",
+        "required_status_checks",
+        "restrictions",
+    ):
         if normalized[field] is not None:
             result[field] = normalized[field]
     return result
@@ -79,8 +89,11 @@ class FakeClient:
             "id": MODULE.HUMAN_RULESET_ID,
             **MODULE.human_ruleset_state(contract, "before"),
         }
-        self.protection = raw_protection(contract["classic_branch_protection"]["expected"])
+        self.protection = raw_protection(
+            contract["classic_branch_protection"]["expected"]
+        )
         self.review_state = "APPROVED"
+        self.merged = False
         self.puts = 0
         self.posts = 0
         self.etag = 'W/"human-v1"'
@@ -93,6 +106,7 @@ class FakeClient:
                     "id": 42,
                     "state": self.review_state,
                     "commit_id": CANDIDATE_SHA,
+                    "body": f"HELM signed ALLOW permit {PERMIT_ID}",
                     "user": {"login": MODULE.APPROVER_LOGIN},
                 },
                 None,
@@ -101,17 +115,34 @@ class FakeClient:
             return response(
                 {
                     "number": 36,
-                    "state": "open",
+                    "state": "closed" if self.merged else "open",
                     "draft": False,
-                    "merged": False,
-                    "head": {"sha": CANDIDATE_SHA},
+                    "merged": self.merged,
+                    "merge_commit_sha": MERGE_SHA,
+                    "base": {"ref": "main", "sha": BASE_SHA},
+                    "head": {
+                        "sha": CANDIDATE_SHA,
+                        "repo": {"full_name": "Mindburn-Labs/.github"},
+                    },
+                },
+                None,
+            )
+        if path.endswith(f"/git/commits/{MERGE_SHA}"):
+            return response(
+                {
+                    "parents": [{"sha": BASE_SHA}, {"sha": CANDIDATE_SHA}],
+                    "tree": {"sha": TREE_SHA},
                 },
                 None,
             )
         if path.endswith(f"rulesets/{MODULE.STABLE_RULESET_ID}"):
             return response(json.loads(json.dumps(self.workflow)), 'W/"workflow"')
         if path.endswith("rulesets?per_page=100"):
-            values = [] if self.machine is None else [{"id": self.machine["id"], "name": MODULE.MACHINE_RULESET_NAME}]
+            values = (
+                []
+                if self.machine is None
+                else [{"id": self.machine["id"], "name": MODULE.MACHINE_RULESET_NAME}]
+            )
             return response(values, None)
         if path.endswith("/rulesets") and method == "POST":
             self.posts += 1
@@ -126,7 +157,10 @@ class FakeClient:
                 if if_match != self.etag:
                     raise MODULE.PermitInputError("stale")
                 self.puts += 1
-                self.human = {"id": MODULE.HUMAN_RULESET_ID, **json.loads(json.dumps(payload))}
+                self.human = {
+                    "id": MODULE.HUMAN_RULESET_ID,
+                    **json.loads(json.dumps(payload)),
+                }
                 self.etag = 'W/"human-v2"'
                 return response(json.loads(json.dumps(self.human)), self.etag)
         if path.endswith("/branches/main/protection"):
@@ -148,6 +182,11 @@ class ConfigureMachineApprovalGatesTests(unittest.TestCase):
                     "repository": "Mindburn-Labs/.github",
                     "pull_request": 36,
                     "head_sha": CANDIDATE_SHA,
+                    "workflow_sha": CANDIDATE_SHA,
+                    "permit_id": PERMIT_ID,
+                    "base_sha": BASE_SHA,
+                    "merge_sha": MERGE_SHA,
+                    "merge_tree_sha": TREE_SHA,
                     "review_state": "APPROVED",
                     "approver_login": MODULE.APPROVER_LOGIN,
                     "approver_app_id": MODULE.APPROVER_APP_ID,
@@ -163,6 +202,7 @@ class ConfigureMachineApprovalGatesTests(unittest.TestCase):
             pull_request=36,
             approval_receipt=self.approval_path,
             contract=self.contract_path,
+            allow_merged_resume=False,
         )
 
     def test_installs_machine_interlock_before_retiring_codeowner_scope(self) -> None:
@@ -188,6 +228,14 @@ class ConfigureMachineApprovalGatesTests(unittest.TestCase):
         MODULE.configure_machine_approval_gates(self.args, client)
         self.assertEqual(client.posts, 0)
         self.assertEqual(client.puts, 0)
+
+    def test_post_merge_retry_revalidates_exact_graph(self) -> None:
+        client = FakeClient(self.contract)
+        MODULE.configure_machine_approval_gates(self.args, client)
+        client.merged = True
+        self.args.allow_merged_resume = True
+        receipt = MODULE.configure_machine_approval_gates(self.args, client)
+        self.assertEqual(receipt["machine_approval_head_sha"], CANDIDATE_SHA)
 
     def test_missing_etag_fails_before_human_rule_mutation(self) -> None:
         client = FakeClient(self.contract)

@@ -12,29 +12,39 @@ class AuthorityPromotionWorkflowTests(unittest.TestCase):
         workflow = (ROOT / ".github" / "workflows" / "promote-authority.yml").read_text(
             encoding="utf-8",
         )
-        self.assertIn("workflow_run:", workflow)
+        self.assertIn("workflow_dispatch:", workflow)
+        self.assertNotIn("workflow_run:", workflow)
         self.assertNotIn("\n  pull_request:\n", workflow)
+        self.assertIn("refs/heads/authority/control-v1", workflow)
+        self.assertIn('test "$GITHUB_SHA" = "$GITHUB_WORKFLOW_SHA"', workflow)
         self.assertIn("environment: authority-promotion", workflow)
         self.assertIn("environment: authority-observer", workflow)
         self.assertIn("HELM_AUTHORITY_PROMOTER_PRIVATE_KEY", workflow)
-        self.assertEqual(workflow.count("HELM_AUTHORITY_PROMOTER_PRIVATE_KEY"), 4)
+        self.assertEqual(workflow.count("HELM_AUTHORITY_PROMOTER_PRIVATE_KEY"), 5)
         self.assertIn("HELM_AUTHORITY_OBSERVER_PRIVATE_KEY", workflow)
         self.assertEqual(workflow.count("HELM_AUTHORITY_OBSERVER_PRIVATE_KEY"), 2)
-        self.assertEqual(workflow.count("Bind exact promoter App identity"), 4)
+        self.assertIn("HELM_AUTHORITY_APPROVER_PRIVATE_KEY", workflow)
+        self.assertEqual(workflow.count("HELM_AUTHORITY_APPROVER_PRIVATE_KEY"), 1)
+        self.assertEqual(workflow.count("Bind exact promoter App identity"), 5)
         self.assertEqual(workflow.count("Bind exact observer App identity"), 2)
+        self.assertEqual(workflow.count("Bind exact approval App identity"), 1)
         self.assertEqual(
             workflow.count("action.yml defines client-id and deprecates app-id"),
-            6,
+            8,
         )
-        self.assertEqual(workflow.count("client-id:"), 6)
+        self.assertEqual(workflow.count("client-id:"), 8)
         self.assertNotIn("app-id:", workflow)
-        self.assertEqual(workflow.count('= "helm-authority-promoter"'), 4)
+        self.assertEqual(workflow.count('= "helm-authority-promoter"'), 5)
         self.assertEqual(workflow.count('= "helm-authority-observer"'), 2)
-        self.assertEqual(workflow.count('= "146541790"'), 4)
+        self.assertEqual(workflow.count('= "146541790"'), 5)
         self.assertEqual(workflow.count('= "146542079"'), 2)
-        self.assertIn("permission-organization-administration: write", workflow)
+        self.assertEqual(workflow.count('= "146576964"'), 1)
+        self.assertEqual(
+            workflow.count("permission-organization-administration: write"),
+            5,
+        )
         self.assertIn(
-            "separate App token is consumed only by the observer's GET-only client",
+            "observer token deliberately omits organization Administration",
             workflow,
         )
         self.assertIn("permission-actions: read", workflow)
@@ -48,6 +58,17 @@ class AuthorityPromotionWorkflowTests(unittest.TestCase):
         observer = (ROOT / "scripts" / "observe_authority_promotion.py").read_text(
             encoding="utf-8",
         )
+        observer_jobs = workflow[
+            workflow.index("  observe_pre_activation:") : workflow.index("  activate:")
+        ] + workflow[
+            workflow.index("  observe_final:") : workflow.index("  recover:")
+        ]
+        self.assertNotIn(
+            "permission-organization-administration",
+            observer_jobs,
+        )
+        stage_job = workflow[workflow.index("  stage:") : workflow.index("  merge:")]
+        self.assertIn("pull-requests: read", stage_job)
         self.assertNotIn('"PUT"', observer)
         self.assertNotIn('"PATCH"', observer)
         self.assertNotIn('"DELETE"', observer)
@@ -66,6 +87,8 @@ class AuthorityPromotionWorkflowTests(unittest.TestCase):
         self.assertIn(
             "Generation 1 is admitted exactly once by bootstrap_authority.py", workflow
         )
+        self.assertIn("control_workflow_sha", workflow)
+        self.assertIn('--signer-digest "$CONTROL_SHA"', workflow)
         self.assertGreaterEqual(workflow.count("--bundle "), 2)
         self.assertGreaterEqual(workflow.count("offline-attest/attest.mjs"), 2)
         self.assertIn("verify_authority_promotion.py", workflow)
@@ -89,7 +112,8 @@ class AuthorityPromotionWorkflowTests(unittest.TestCase):
         self.assertIn("authority_ruleset_broker.py advance", workflow)
         self.assertIn("authority_ruleset_broker.py rebind", workflow)
         self.assertIn("observe_authority_promotion.py", workflow)
-        self.assertIn("--phase pre-activation", workflow)
+        self.assertIn('--phase "$OBSERVATION_PHASE"', workflow)
+        self.assertIn("EXPECTED_OBSERVER_PHASE", workflow)
         self.assertIn("--phase final", workflow)
         self.assertIn("authority_ruleset_broker.py activate", workflow)
         self.assertIn("authority_ruleset_broker.py restore", workflow)
@@ -101,7 +125,7 @@ class AuthorityPromotionWorkflowTests(unittest.TestCase):
         )
         self.assertIn('git check-ref-format "$candidate_ref"', workflow)
         self.assertNotIn('--candidate-ref "${{', workflow)
-        self.assertEqual(workflow.count('--candidate-ref "$CANDIDATE_REF"'), 5)
+        self.assertEqual(workflow.count('--candidate-ref "$CANDIDATE_REF"'), 6)
         self.assertIn(
             '--tree-sha "${{ needs.verify-candidate.outputs.candidate_tree_sha }}"',
             workflow,

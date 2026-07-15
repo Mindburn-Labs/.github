@@ -92,7 +92,9 @@ class GitHubAdminClient:
         except urllib.error.HTTPError as exc:
             detail = exc.read(4096).decode("utf-8", errors="replace").strip()
             if exc.code == 412:
-                raise PermitInputError(f"GitHub rejected stale state for {path}") from exc
+                raise PermitInputError(
+                    f"GitHub rejected stale state for {path}"
+                ) from exc
             raise PermitInputError(
                 f"GitHub {method} {path} failed with HTTP {exc.code}: {detail}",
             ) from exc
@@ -103,7 +105,9 @@ class GitHubAdminClient:
         try:
             value = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise PermitInputError(f"GitHub {method} {path} returned invalid JSON") from exc
+            raise PermitInputError(
+                f"GitHub {method} {path} returned invalid JSON"
+            ) from exc
         return AdminResponse(value, etag)
 
 
@@ -177,17 +181,26 @@ def load_contract(path: Path) -> dict[str, Any]:
     for ids, label in ((before, "before"), (after, "after"), (remove, "remove")):
         if (
             not isinstance(ids, list)
-            or any(not isinstance(item, int) or isinstance(item, bool) or item <= 0 for item in ids)
+            or any(
+                not isinstance(item, int) or isinstance(item, bool) or item <= 0
+                for item in ids
+            )
             or ids != sorted(set(ids))
         ):
             raise PermitInputError(f"bootstrap {label} repository IDs are invalid")
     if human["id"] != HUMAN_RULESET_ID or human["name"] != HUMAN_RULESET_NAME:
         raise PermitInputError("bootstrap contract names the wrong human ruleset")
     if set(remove) != {AUTHORITY_REPOSITORY_ID, KERNEL_REPOSITORY_ID}:
-        raise PermitInputError("bootstrap retires the wrong CODEOWNER-gated repositories")
+        raise PermitInputError(
+            "bootstrap retires the wrong CODEOWNER-gated repositories"
+        )
     if set(remove) - set(PUBLIC_AUTONOMOUS_REPOSITORY_IDS):
-        raise PermitInputError("bootstrap retirement is outside public machine coverage")
-    if after != [repository_id for repository_id in before if repository_id not in remove]:
+        raise PermitInputError(
+            "bootstrap retirement is outside public machine coverage"
+        )
+    if after != [
+        repository_id for repository_id in before if repository_id not in remove
+    ]:
         raise PermitInputError("bootstrap post-retirement repository IDs are not exact")
     if not isinstance(human["rules"], list) or not human["rules"]:
         raise PermitInputError("bootstrap human rules must be a non-empty list")
@@ -203,7 +216,10 @@ def load_contract(path: Path) -> dict[str, Any]:
     if classic["repository"] != "Mindburn-Labs/.github" or classic["branch"] != "main":
         raise PermitInputError("bootstrap contract names the wrong protected branch")
     reviews = classic["expected"].get("required_pull_request_reviews")
-    if not isinstance(reviews, dict) or reviews.get("required_approving_review_count") != 1:
+    if (
+        not isinstance(reviews, dict)
+        or reviews.get("required_approving_review_count") != 1
+    ):
         raise PermitInputError("classic protection must retain one required approval")
     return value
 
@@ -226,7 +242,7 @@ def machine_ruleset_payload() -> dict[str, Any]:
             {
                 "type": "pull_request",
                 "parameters": {
-                    "allowed_merge_methods": ["merge", "squash", "rebase"],
+                    "allowed_merge_methods": ["merge"],
                     "dismiss_stale_reviews_on_push": True,
                     "require_code_owner_review": False,
                     "require_last_push_approval": True,
@@ -257,7 +273,14 @@ def human_ruleset_state(contract: dict[str, Any], state: str) -> dict[str, Any]:
 def controlled_ruleset(ruleset: dict[str, Any]) -> dict[str, Any]:
     return {
         key: ruleset.get(key)
-        for key in ("name", "target", "enforcement", "bypass_actors", "conditions", "rules")
+        for key in (
+            "name",
+            "target",
+            "enforcement",
+            "bypass_actors",
+            "conditions",
+            "rules",
+        )
     }
 
 
@@ -274,7 +297,9 @@ def normalize_classic_protection(protection: dict[str, Any]) -> dict[str, Any]:
     reviews = protection.get("required_pull_request_reviews")
     if reviews is not None:
         if not isinstance(reviews, dict):
-            raise PermitInputError("classic required pull request reviews are malformed")
+            raise PermitInputError(
+                "classic required pull request reviews are malformed"
+            )
         reviews = {
             key: reviews.get(key)
             for key in (
@@ -295,7 +320,9 @@ def normalize_classic_protection(protection: dict[str, Any]) -> dict[str, Any]:
             protection,
             "required_conversation_resolution",
         ),
-        "required_linear_history": boolean_setting(protection, "required_linear_history"),
+        "required_linear_history": boolean_setting(
+            protection, "required_linear_history"
+        ),
         "required_pull_request_reviews": reviews,
         "required_signatures": boolean_setting(protection, "required_signatures"),
         "required_status_checks": protection.get("required_status_checks"),
@@ -310,6 +337,26 @@ def validate_approval(
     pull_request: int,
 ) -> dict[str, Any]:
     approval = load_json(path, label="machine approval receipt")
+    require_exact_keys(
+        approval,
+        required={
+            "schema",
+            "repository",
+            "pull_request",
+            "head_sha",
+            "workflow_sha",
+            "permit_id",
+            "base_sha",
+            "merge_sha",
+            "merge_tree_sha",
+            "review_id",
+            "review_state",
+            "approver_login",
+            "approver_app_id",
+            "approver_installation_id",
+        },
+        label="machine approval receipt",
+    )
     if (
         approval.get("schema") != APPROVAL_SCHEMA
         or approval.get("repository") != "Mindburn-Labs/.github"
@@ -322,6 +369,20 @@ def validate_approval(
         or not isinstance(approval.get("review_id"), int)
     ):
         raise PermitInputError("machine approval receipt is not exact")
+    for field in ("base_sha", "merge_sha", "merge_tree_sha", "workflow_sha"):
+        require_sha(
+            approval[field],
+            label=f"machine approval {field}",
+            length=40,
+        )
+    permit_id = approval["permit_id"]
+    if not isinstance(permit_id, str) or not permit_id.startswith("sha256:"):
+        raise PermitInputError("machine approval permit_id is not exact")
+    require_sha(
+        permit_id.removeprefix("sha256:"),
+        label="machine approval permit_id",
+        length=64,
+    )
     return approval
 
 
@@ -330,6 +391,7 @@ def verify_live_approval(
     approval: dict[str, Any],
     *,
     approved_head_sha: str,
+    allow_merged_resume: bool,
 ) -> None:
     pull_request = approval["pull_request"]
     review_id = approval["review_id"]
@@ -344,6 +406,7 @@ def verify_live_approval(
     if (
         review.get("state") != "APPROVED"
         or review.get("commit_id") != approved_head_sha
+        or review.get("body") != f"HELM signed ALLOW permit {approval['permit_id']}"
         or not isinstance(user, dict)
         or user.get("login") != APPROVER_LOGIN
     ):
@@ -352,15 +415,47 @@ def verify_live_approval(
         client.request("GET", f"/repos/Mindburn-Labs/.github/pulls/{pull_request}"),
         label="live approval pull request",
     )
+    base = current.get("base")
     head = current.get("head")
-    if (
-        current.get("state") != "open"
-        or current.get("draft") is True
-        or current.get("merged") is True
+    common_mismatch = (
+        current.get("draft") is True
+        or not isinstance(base, dict)
+        or base.get("ref") != "main"
+        or base.get("sha") != approval["base_sha"]
         or not isinstance(head, dict)
         or head.get("sha") != approved_head_sha
-    ):
+        or not isinstance(head.get("repo"), dict)
+        or head["repo"].get("full_name") != "Mindburn-Labs/.github"
+    )
+    if common_mismatch:
         raise PermitInputError("approved pull request changed before gate cutover")
+    if current.get("merged") is not True:
+        if current.get("state") != "open":
+            raise PermitInputError("approved pull request changed before gate cutover")
+        return
+    if (
+        not allow_merged_resume
+        or current.get("state") != "closed"
+        or current.get("merge_commit_sha") != approval["merge_sha"]
+    ):
+        raise PermitInputError("approved pull request is not resumably merged")
+    merge_commit = require_object(
+        client.request(
+            "GET",
+            f"/repos/Mindburn-Labs/.github/git/commits/{approval['merge_sha']}",
+        ),
+        label="merged approval commit",
+    )
+    parents = merge_commit.get("parents")
+    tree = merge_commit.get("tree")
+    if (
+        not isinstance(parents, list)
+        or [parent.get("sha") for parent in parents if isinstance(parent, dict)]
+        != [approval["base_sha"], approved_head_sha]
+        or not isinstance(tree, dict)
+        or tree.get("sha") != approval["merge_tree_sha"]
+    ):
+        raise PermitInputError("merged approval graph drifted from the permit")
 
 
 def ensure_machine_ruleset(client: GitHubAdminClient) -> dict[str, Any]:
@@ -414,7 +509,12 @@ def configure_machine_approval_gates(
         candidate_sha=approved_head_sha,
         pull_request=args.pull_request,
     )
-    verify_live_approval(client, approval, approved_head_sha=approved_head_sha)
+    verify_live_approval(
+        client,
+        approval,
+        approved_head_sha=approved_head_sha,
+        allow_merged_resume=bool(getattr(args, "allow_merged_resume", False)),
+    )
 
     stable = require_object(
         client.request("GET", f"/orgs/{ORGANIZATION}/rulesets/{STABLE_RULESET_ID}"),
@@ -431,13 +531,17 @@ def configure_machine_approval_gates(
     machine_id = machine["id"]
 
     classic = contract["classic_branch_protection"]
-    branch_path = f"/repos/{classic['repository']}/branches/{classic['branch']}/protection"
+    branch_path = (
+        f"/repos/{classic['repository']}/branches/{classic['branch']}/protection"
+    )
     protection = require_object(
         client.request("GET", branch_path),
         label="classic branch protection",
     )
     if normalize_classic_protection(protection) != classic["expected"]:
-        raise PermitInputError("classic branch protection did not retain its approval interlock")
+        raise PermitInputError(
+            "classic branch protection did not retain its approval interlock"
+        )
 
     human_path = f"/orgs/{ORGANIZATION}/rulesets/{HUMAN_RULESET_ID}"
     human_response = client.request("GET", human_path)
@@ -493,6 +597,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--approved-head-sha")
     parser.add_argument("--pull-request", type=int, required=True)
     parser.add_argument("--approval-receipt", type=Path, required=True)
+    parser.add_argument("--allow-merged-resume", action="store_true")
     parser.add_argument("--contract", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     return parser

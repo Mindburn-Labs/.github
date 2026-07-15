@@ -24,7 +24,7 @@ APPROVER_SLUG = "helm-authority-approver"
 APPROVER_APP_ID = 4298283
 APPROVER_INSTALLATION_ID = 146576964
 ORGANIZATION = "Mindburn-Labs"
-SCHEMA = "mindburn.release-authority-machine-approval/v1"
+SCHEMA = "mindburn.release-authority-machine-approval/v2"
 
 
 class GitHubApprovalClient:
@@ -74,7 +74,9 @@ class GitHubApprovalClient:
         try:
             return json.loads(body.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise PermitInputError(f"GitHub {method} {path} returned invalid JSON") from exc
+            raise PermitInputError(
+                f"GitHub {method} {path} returned invalid JSON"
+            ) from exc
 
 
 def nested(value: dict[str, Any], *keys: str, label: str) -> Any:
@@ -109,12 +111,16 @@ def verify_installation(
         raise PermitInputError("token action returned the wrong approver App identity")
     encoded = urllib.parse.quote(repository, safe="")
     repositories = require_object(
-        client.request("GET", f"/installation/repositories?per_page=100&repository={encoded}"),
+        client.request(
+            "GET", f"/installation/repositories?per_page=100&repository={encoded}"
+        ),
         label="installation repositories",
     )
     names = {
         item.get("full_name")
-        for item in require_list(repositories.get("repositories"), label="installation repositories")
+        for item in require_list(
+            repositories.get("repositories"), label="installation repositories"
+        )
         if isinstance(item, dict)
     }
     if names != {repository}:
@@ -142,7 +148,9 @@ def verify_permit(
     for field, value in expected.items():
         if permit.get(field) != value:
             raise PermitInputError(f"machine approval permit {field} is not exact")
-    merge_sha = require_sha(permit.get("merge_sha"), label="permit merge_sha", length=40)
+    merge_sha = require_sha(
+        permit.get("merge_sha"), label="permit merge_sha", length=40
+    )
     verify_attestation(
         args.permit,
         args.permit_bundle,
@@ -161,22 +169,60 @@ def validate_pull_request(
     repository: str,
     pull_request: int,
     head_sha: str,
+    base_sha: str,
+    merge_sha: str,
+    merge_tree_sha: str,
+    allow_merged_resume: bool,
 ) -> dict[str, Any]:
     value = require_object(
         client.request("GET", f"/repos/{repository}/pulls/{pull_request}"),
         label="pull request",
     )
+    merged = value.get("merged") is True
     if (
         value.get("number") != pull_request
-        or value.get("state") != "open"
         or value.get("draft") is True
-        or value.get("merged") is True
         or nested(value, "base", "ref", label="pull request base ref") != "main"
+        or nested(value, "base", "sha", label="pull request base SHA") != base_sha
         or nested(value, "head", "sha", label="pull request head SHA") != head_sha
-        or nested(value, "head", "repo", "full_name", label="pull request head repository")
+        or nested(
+            value, "head", "repo", "full_name", label="pull request head repository"
+        )
         != repository
     ):
-        raise PermitInputError("pull request does not match the machine approval contract")
+        raise PermitInputError(
+            "pull request does not match the machine approval contract"
+        )
+    if merged:
+        if (
+            not allow_merged_resume
+            or value.get("state") != "closed"
+            or value.get("merge_commit_sha") != merge_sha
+        ):
+            raise PermitInputError(
+                "pull request is not in an exact resumable merged state"
+            )
+        live_merge_sha = merge_sha
+    else:
+        if value.get("state") != "open":
+            raise PermitInputError("pull request is not open for machine approval")
+        live_merge_sha = require_sha(
+            value.get("merge_commit_sha"),
+            label="live pull request merge SHA",
+            length=40,
+        )
+    merge_commit = require_object(
+        client.request("GET", f"/repos/{repository}/git/commits/{live_merge_sha}"),
+        label="live pull request merge commit",
+    )
+    parents = require_list(merge_commit.get("parents"), label="merge commit parents")
+    if [parent.get("sha") for parent in parents if isinstance(parent, dict)] != [
+        base_sha,
+        head_sha,
+    ] or nested(
+        merge_commit, "tree", "sha", label="merge commit tree"
+    ) != merge_tree_sha:
+        raise PermitInputError("live pull request merge graph drifted from the permit")
     return value
 
 
@@ -196,6 +242,7 @@ def submit_machine_approval(
     client: GitHubApprovalClient,
     *,
     attestation_token: str,
+    metadata_client: GitHubApprovalClient | None = None,
 ) -> dict[str, Any]:
     args.head_sha = require_sha(args.head_sha, label="head_sha", length=40)
     args.workflow_sha = require_sha(args.workflow_sha, label="workflow_sha", length=40)
@@ -209,22 +256,44 @@ def submit_machine_approval(
         app_slug=args.approver_app_slug,
         installation_id=args.approver_installation_id,
     )
-    validate_pull_request(
-        client,
+    metadata_client = metadata_client or GitHubApprovalClient(
+        attestation_token,
+        api_url=client.api_url,
+    )
+    allow_merged_resume = bool(getattr(args, "allow_merged_resume", False))
+    pull_request_state = validate_pull_request(
+        metadata_client,
         repository=args.repository,
         pull_request=args.pull_request,
         head_sha=args.head_sha,
+        base_sha=permit["base_sha"],
+        merge_sha=permit["merge_sha"],
+        merge_tree_sha=permit["merge_tree_sha"],
+        allow_merged_resume=allow_merged_resume,
     )
     reviews_path = f"/repos/{args.repository}/pulls/{args.pull_request}/reviews"
-    reviews = require_list(client.request("GET", f"{reviews_path}?per_page=100"), label="reviews")
+    reviews = require_list(
+        client.request("GET", f"{reviews_path}?per_page=100"), label="reviews"
+    )
     review = latest_approver_review(reviews)
-    if review is None or review.get("state") != "APPROVED" or review.get("commit_id") != args.head_sha:
+    expected_body = f"HELM signed ALLOW permit {permit['permit_id']}"
+    exact_review = (
+        review is not None
+        and review.get("state") == "APPROVED"
+        and review.get("commit_id") == args.head_sha
+        and review.get("body") == expected_body
+    )
+    if pull_request_state.get("merged") is True and not exact_review:
+        raise PermitInputError(
+            "merged resume requires the retained exact-permit App approval"
+        )
+    if not exact_review:
         review = require_object(
             client.request(
                 "POST",
                 reviews_path,
                 payload={
-                    "body": f"HELM signed ALLOW permit {permit['permit_id']}",
+                    "body": expected_body,
                     "commit_id": args.head_sha,
                     "event": "APPROVE",
                 },
@@ -241,15 +310,20 @@ def submit_machine_approval(
     if (
         confirmed.get("state") != "APPROVED"
         or confirmed.get("commit_id") != args.head_sha
+        or confirmed.get("body") != expected_body
         or nested(confirmed, "user", "login", label="confirmed review author")
         != APPROVER_LOGIN
     ):
         raise PermitInputError("GitHub did not retain the exact-head machine approval")
     validate_pull_request(
-        client,
+        metadata_client,
         repository=args.repository,
         pull_request=args.pull_request,
         head_sha=args.head_sha,
+        base_sha=permit["base_sha"],
+        merge_sha=permit["merge_sha"],
+        merge_tree_sha=permit["merge_tree_sha"],
+        allow_merged_resume=allow_merged_resume,
     )
     return {
         "schema": SCHEMA,
@@ -258,6 +332,9 @@ def submit_machine_approval(
         "head_sha": args.head_sha,
         "workflow_sha": args.workflow_sha,
         "permit_id": permit["permit_id"],
+        "base_sha": permit["base_sha"],
+        "merge_sha": permit["merge_sha"],
+        "merge_tree_sha": permit["merge_tree_sha"],
         "review_id": review_id,
         "review_state": "APPROVED",
         "approver_login": APPROVER_LOGIN,
@@ -278,6 +355,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--workflow-sha", required=True)
     parser.add_argument("--approver-app-slug", required=True)
     parser.add_argument("--approver-installation-id", type=int, required=True)
+    parser.add_argument("--allow-merged-resume", action="store_true")
     parser.add_argument("--output", type=Path, required=True)
     return parser
 

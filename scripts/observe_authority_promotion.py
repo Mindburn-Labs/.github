@@ -19,13 +19,11 @@ from autonomous_release_permit import (
     require_sha,
 )
 from authority_ruleset_broker import (
+    AUTHORITY_REPOSITORY_ID,
     CANDIDATE_RULESET_ID,
     MAIN_REF,
     STABLE_RULESET_ID,
-    GitHubRulesetClient,
-    get_ruleset,
     validate_ref,
-    validate_ruleset,
 )
 from verify_authority_promotion import validate_authority_shape
 from wait_for_authority_canary import (
@@ -35,21 +33,31 @@ from wait_for_authority_canary import (
     artifact_for_run,
     extract_attested_permit,
     extract_trusted_context,
+    require_get_forbidden,
     verify_candidate_permit,
+    verify_permit_reduction,
+    write_model_reviews,
 )
 
 
-EXECUTION_SCHEMA = "mindburn.release-authority-promotion-execution/v1"
-OBSERVER_SCHEMA = "mindburn.release-authority-observer-receipt/v1"
+EXECUTION_SCHEMA = "mindburn.release-authority-promotion-execution/v2"
+OBSERVER_SCHEMA = "mindburn.release-authority-observer-receipt/v3"
 AUTHORITY_REPOSITORY = "Mindburn-Labs/.github"
 CANARY_REPOSITORY = "Mindburn-Labs/contracts-autonomous-release-lab"
 CANARY_PULL_REQUEST = 8
+PUBLIC_STABLE_REPOSITORIES = (
+    "Mindburn-Labs/.github",
+    "Mindburn-Labs/helm-ai-kernel",
+    "Mindburn-Labs/contracts-autonomous-release-lab",
+)
+STABLE_RULESET_WRITE_PROBE = f"/orgs/Mindburn-Labs/rulesets/{STABLE_RULESET_ID}"
 EXECUTION_KEYS = {
     "schema",
     "parent_generation",
     "candidate_generation",
     "parent_base_sha",
     "parent_workflow_sha",
+    "control_workflow_sha",
     "candidate_workflow_sha",
     "candidate_workflow_ref",
     "candidate_tree_sha",
@@ -120,6 +128,7 @@ def validate_execution(value: dict[str, Any]) -> dict[str, Any]:
     for field in (
         "parent_base_sha",
         "parent_workflow_sha",
+        "control_workflow_sha",
         "candidate_workflow_sha",
         "candidate_tree_sha",
         "merged_workflow_sha",
@@ -164,13 +173,78 @@ def nested_string(value: dict[str, Any], *keys: str, label: str) -> str:
     return current
 
 
+def observe_effective_stable_rules(
+    client: GitHubReadClient,
+    *,
+    workflow_sha: str,
+) -> list[dict[str, Any]]:
+    expected_parameters = {
+        "do_not_enforce_on_create": False,
+        "workflows": [
+            {
+                "path": ".github/workflows/ci.yml",
+                "ref": MAIN_REF,
+                "repository_id": AUTHORITY_REPOSITORY_ID,
+                "sha": require_sha(
+                    workflow_sha,
+                    label="effective stable workflow SHA",
+                    length=40,
+                ),
+            },
+        ],
+    }
+    observed = []
+    for repository in PUBLIC_STABLE_REPOSITORIES:
+        try:
+            rules = json.loads(
+                client.get_bytes(
+                    f"/repos/{repository}/rules/branches/main",
+                ).decode("utf-8")
+            )
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise PermitInputError(
+                f"effective rules for {repository} are invalid JSON"
+            ) from exc
+        if not isinstance(rules, list):
+            raise PermitInputError(f"effective rules for {repository} must be an array")
+        matches = [
+            rule
+            for rule in rules
+            if isinstance(rule, dict)
+            and rule.get("ruleset_id") == STABLE_RULESET_ID
+            and rule.get("ruleset_source_type") == "Organization"
+            and rule.get("ruleset_source") == "Mindburn-Labs"
+            and rule.get("type") == "workflows"
+        ]
+        if len(matches) != 1:
+            raise PermitInputError(
+                f"{repository} must expose exactly one effective stable workflow rule"
+            )
+        if matches[0].get("parameters") != expected_parameters:
+            raise PermitInputError(
+                f"{repository} effective stable workflow binding drifted"
+            )
+        observed.append(
+            {
+                "repository": repository,
+                "ruleset_id": STABLE_RULESET_ID,
+                "workflow_sha": workflow_sha,
+            }
+        )
+    return observed
+
+
 def observe(
     args: argparse.Namespace,
     read_client: GitHubReadClient,
-    ruleset_client: GitHubRulesetClient,
     *,
     attestation_token: str,
 ) -> dict[str, Any]:
+    require_get_forbidden(
+        read_client,
+        STABLE_RULESET_WRITE_PROBE,
+        label="observer organization-ruleset write scope",
+    )
     execution = validate_execution(
         load_json(args.execution, label="promotion execution")
     )
@@ -318,6 +392,22 @@ def observe(
         raise PermitInputError(
             "ratification permit does not bind the observed candidate tree"
         )
+    ratification_replay = args.replay_dir / "ratification"
+    ratification_reviews = write_model_reviews(
+        read_client,
+        AUTHORITY_REPOSITORY,
+        execution["ratification_run_id"],
+        ratification_replay / "review-evidence",
+        context_path=args.ratification_context,
+    )
+    ratification_recomputed = ratification_replay / "parent-recomputed-permit.json"
+    verify_permit_reduction(
+        args.parent_kernel_verifier,
+        args.ratification_permit,
+        args.ratification_context,
+        ratification_reviews,
+        ratification_recomputed,
+    )
 
     canary_receipt = load_json(args.canary_receipt, label="canary receipt")
     require_exact_keys(
@@ -402,22 +492,31 @@ def observe(
     for field in ("permit_id", "merge_sha", "merge_tree_sha"):
         if permit[field] != canary_receipt[field]:
             raise PermitInputError(f"canary permit {field} does not match its receipt")
+    canary_replay = args.replay_dir / "canary"
+    canary_reviews = write_model_reviews(
+        read_client,
+        CANARY_REPOSITORY,
+        execution["canary_run_id"],
+        canary_replay / "review-evidence",
+        context_path=args.canary_context,
+    )
+    canary_recomputed = canary_replay / "parent-recomputed-permit.json"
+    verify_permit_reduction(
+        args.parent_kernel_verifier,
+        args.canary_permit,
+        args.canary_context,
+        canary_reviews,
+        canary_recomputed,
+    )
 
     stable_sha = (
         execution["parent_workflow_sha"]
         if args.phase == "pre-activation"
         else execution["merged_workflow_sha"]
     )
-    stable = get_ruleset(ruleset_client, STABLE_RULESET_ID)
-    candidate = get_ruleset(ruleset_client, CANDIDATE_RULESET_ID)
-    validate_ruleset(
-        stable.body, kind="stable", expected_sha=stable_sha, expected_ref=MAIN_REF
-    )
-    validate_ruleset(
-        candidate.body,
-        kind="candidate",
-        expected_sha=execution["merged_workflow_sha"],
-        expected_ref=MAIN_REF,
+    stable_effective_repositories = observe_effective_stable_rules(
+        read_client,
+        workflow_sha=stable_sha,
     )
 
     return {
@@ -433,16 +532,25 @@ def observe(
             label="promotion_run_attempt",
         ),
         "parent_workflow_sha": execution["parent_workflow_sha"],
+        "control_workflow_sha": execution["control_workflow_sha"],
         "candidate_workflow_sha": execution["candidate_workflow_sha"],
         "merged_workflow_sha": main_sha,
         "merged_tree_sha": main_tree_sha,
         "canary_permit_id": permit["permit_id"],
         "ratification_permit_id": ratification_permit["permit_id"],
+        "ratification_recomputed_permit_sha256": hashlib.sha256(
+            ratification_recomputed.read_bytes()
+        ).hexdigest(),
+        "canary_recomputed_permit_sha256": hashlib.sha256(
+            canary_recomputed.read_bytes()
+        ).hexdigest(),
         "authority_suite_sha256": execution["authority_suite_sha256"],
         "stable_ruleset_id": STABLE_RULESET_ID,
         "stable_workflow_sha": stable_sha,
+        "stable_effective_repositories": stable_effective_repositories,
         "candidate_ruleset_id": CANDIDATE_RULESET_ID,
         "candidate_workflow_binding_sha": execution["merged_workflow_sha"],
+        "observer_ruleset_write_scope": "denied",
         "decision": "ALLOW",
     }
 
@@ -462,6 +570,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--canary-receipt", type=Path, required=True)
     parser.add_argument("--authority-suite", type=Path, required=True)
     parser.add_argument("--parent-kernel-verifier", type=Path, required=True)
+    parser.add_argument("--replay-dir", type=Path, required=True)
     parser.add_argument("--promotion-run-id", type=int, required=True)
     parser.add_argument("--promotion-run-attempt", type=int, required=True)
     parser.add_argument("--output", type=Path, required=True)
@@ -476,7 +585,6 @@ def main(argv: list[str]) -> int:
         receipt = observe(
             args,
             GitHubReadClient(token, api_url=api_url),
-            GitHubRulesetClient(token, api_url=api_url),
             attestation_token=token,
         )
         encoded = json.dumps(receipt, indent=2, sort_keys=True) + "\n"

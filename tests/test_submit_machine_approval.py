@@ -19,6 +19,9 @@ SPEC.loader.exec_module(MODULE)
 
 HEAD_SHA = "2" * 40
 WORKFLOW_SHA = "3" * 40
+BASE_SHA = "1" * 40
+MERGE_SHA = "5" * 40
+TREE_SHA = "6" * 40
 REPOSITORY = "Mindburn-Labs/.github"
 
 
@@ -26,6 +29,7 @@ class FakeClient:
     def __init__(self) -> None:
         self.reviews: list[dict[str, object]] = []
         self.posts = 0
+        self.merged = False
 
     def request(self, method: str, path: str, *, payload=None):
         if path.startswith("/installation/repositories"):
@@ -33,11 +37,17 @@ class FakeClient:
         if path == "/repos/Mindburn-Labs/.github/pulls/36":
             return {
                 "number": 36,
-                "state": "open",
+                "state": "closed" if self.merged else "open",
                 "draft": False,
-                "merged": False,
-                "base": {"ref": "main"},
+                "merged": self.merged,
+                "merge_commit_sha": MERGE_SHA,
+                "base": {"ref": "main", "sha": BASE_SHA},
                 "head": {"sha": HEAD_SHA, "repo": {"full_name": REPOSITORY}},
+            }
+        if path == f"/repos/{REPOSITORY}/git/commits/{MERGE_SHA}":
+            return {
+                "parents": [{"sha": BASE_SHA}, {"sha": HEAD_SHA}],
+                "tree": {"sha": TREE_SHA},
             }
         if path.endswith("/reviews?per_page=100"):
             return json.loads(json.dumps(self.reviews))
@@ -47,6 +57,7 @@ class FakeClient:
                 "id": len(self.reviews) + 1,
                 "state": "APPROVED",
                 "commit_id": payload["commit_id"],
+                "body": payload["body"],
                 "user": {"login": MODULE.APPROVER_LOGIN},
             }
             self.reviews.append(review)
@@ -81,6 +92,9 @@ class SubmitMachineApprovalTests(unittest.TestCase):
             "head_sha": HEAD_SHA,
             "workflow_sha": WORKFLOW_SHA,
             "permit_id": "sha256:" + "4" * 64,
+            "base_sha": BASE_SHA,
+            "merge_sha": MERGE_SHA,
+            "merge_tree_sha": TREE_SHA,
         }
 
     def test_submits_and_confirms_exact_head_approval(self) -> None:
@@ -90,6 +104,7 @@ class SubmitMachineApprovalTests(unittest.TestCase):
                 arguments(),
                 client,
                 attestation_token="observer",
+                metadata_client=client,
             )
         self.assertEqual(receipt["review_state"], "APPROVED")
         self.assertEqual(receipt["head_sha"], HEAD_SHA)
@@ -102,12 +117,77 @@ class SubmitMachineApprovalTests(unittest.TestCase):
                 "id": 1,
                 "state": "APPROVED",
                 "commit_id": HEAD_SHA,
+                "body": "HELM signed ALLOW permit sha256:" + "4" * 64,
                 "user": {"login": MODULE.APPROVER_LOGIN},
             },
         )
         with mock.patch.object(MODULE, "verify_permit", return_value=self.permit()):
-            MODULE.submit_machine_approval(arguments(), client, attestation_token="observer")
+            MODULE.submit_machine_approval(
+                arguments(),
+                client,
+                attestation_token="observer",
+                metadata_client=client,
+            )
         self.assertEqual(client.posts, 0)
+
+    def test_merged_resume_requires_retained_exact_permit_approval(self) -> None:
+        client = FakeClient()
+        client.merged = True
+        client.reviews.append(
+            {
+                "id": 1,
+                "state": "APPROVED",
+                "commit_id": HEAD_SHA,
+                "body": "HELM signed ALLOW permit sha256:" + "4" * 64,
+                "user": {"login": MODULE.APPROVER_LOGIN},
+            },
+        )
+        args = arguments()
+        args.allow_merged_resume = True
+        with mock.patch.object(MODULE, "verify_permit", return_value=self.permit()):
+            receipt = MODULE.submit_machine_approval(
+                args,
+                client,
+                attestation_token="observer",
+                metadata_client=client,
+            )
+        self.assertEqual(receipt["merge_sha"], MERGE_SHA)
+        self.assertEqual(client.posts, 0)
+
+    def test_merged_resume_rejects_missing_or_wrong_permit_approval(self) -> None:
+        for body in (None, "HELM signed ALLOW permit sha256:" + "9" * 64):
+            client = FakeClient()
+            client.merged = True
+            if body is not None:
+                client.reviews.append(
+                    {
+                        "id": 1,
+                        "state": "APPROVED",
+                        "commit_id": HEAD_SHA,
+                        "body": body,
+                        "user": {"login": MODULE.APPROVER_LOGIN},
+                    },
+                )
+            args = arguments()
+            args.allow_merged_resume = True
+            with (
+                self.subTest(body=body),
+                mock.patch.object(
+                    MODULE,
+                    "verify_permit",
+                    return_value=self.permit(),
+                ),
+                self.assertRaisesRegex(
+                    MODULE.PermitInputError,
+                    "retained exact-permit App approval",
+                ),
+            ):
+                MODULE.submit_machine_approval(
+                    args,
+                    client,
+                    attestation_token="observer",
+                    metadata_client=client,
+                )
 
     def test_stale_approval_is_replaced(self) -> None:
         client = FakeClient()
@@ -120,7 +200,12 @@ class SubmitMachineApprovalTests(unittest.TestCase):
             },
         )
         with mock.patch.object(MODULE, "verify_permit", return_value=self.permit()):
-            MODULE.submit_machine_approval(arguments(), client, attestation_token="observer")
+            MODULE.submit_machine_approval(
+                arguments(),
+                client,
+                attestation_token="observer",
+                metadata_client=client,
+            )
         self.assertEqual(client.posts, 1)
 
     def test_wrong_repository_scope_fails_closed_before_review(self) -> None:
@@ -138,7 +223,12 @@ class SubmitMachineApprovalTests(unittest.TestCase):
             mock.patch.object(MODULE, "verify_permit", return_value=self.permit()),
             self.assertRaisesRegex(MODULE.PermitInputError, "scope is not exact"),
         ):
-            MODULE.submit_machine_approval(arguments(), client, attestation_token="observer")
+            MODULE.submit_machine_approval(
+                arguments(),
+                client,
+                attestation_token="observer",
+                metadata_client=client,
+            )
         self.assertEqual(client.posts, 0)
 
     def test_wrong_action_identity_fails_closed_before_review(self) -> None:
@@ -147,9 +237,16 @@ class SubmitMachineApprovalTests(unittest.TestCase):
         args.approver_installation_id += 1
         with (
             mock.patch.object(MODULE, "verify_permit", return_value=self.permit()),
-            self.assertRaisesRegex(MODULE.PermitInputError, "wrong approver App identity"),
+            self.assertRaisesRegex(
+                MODULE.PermitInputError, "wrong approver App identity"
+            ),
         ):
-            MODULE.submit_machine_approval(args, client, attestation_token="observer")
+            MODULE.submit_machine_approval(
+                args,
+                client,
+                attestation_token="observer",
+                metadata_client=client,
+            )
         self.assertEqual(client.posts, 0)
 
 

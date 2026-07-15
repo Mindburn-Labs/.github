@@ -113,6 +113,116 @@ def prepare_args(
 
 
 class AutonomousReleasePermitTests(unittest.TestCase):
+    def build_replay_evidence(
+        self,
+        root: Path,
+    ) -> tuple[Path, Path, Path, Path]:
+        repo, base, head, merge = build_repo(root)
+        permit_input = root / "permit-input"
+        MODULE.prepare(prepare_args(repo, base, head, merge, permit_input))
+        raw = root / "raw-openai.txt"
+        raw.write_text(
+            json.dumps(
+                {
+                    "type": "assistant.message",
+                    "data": {
+                        "toolRequests": [],
+                        "content": '{"verdict":"ALLOW","findings":[]}',
+                    },
+                },
+                separators=(",", ":"),
+            )
+            + "\n"
+            + json.dumps(
+                {"type": "result", "exitCode": 0},
+                separators=(",", ":"),
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        normalized = root / "normalized-openai.json"
+        MODULE.normalize_model_output(
+            argparse.Namespace(
+                raw=raw,
+                output=normalized,
+                transport_format="copilot-jsonl",
+                max_transport_bytes=16_777_216,
+                max_response_bytes=1_048_576,
+            )
+        )
+        review = root / "review-openai.json"
+        MODULE.envelope(
+            argparse.Namespace(
+                context=permit_input / "context.json",
+                raw=normalized,
+                provider="openai",
+                model="gpt-5.6-sol",
+                output=review,
+                max_response_bytes=1_048_576,
+            )
+        )
+        return permit_input / "context.json", raw, normalized, review
+
+    def test_raw_review_evidence_rebuilds_byte_for_byte(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            context, raw, normalized, review = self.build_replay_evidence(root)
+            rebuilt = MODULE.rebuild_review_evidence(
+                context=context,
+                raw_transport=raw,
+                normalized_response=normalized,
+                review_envelope=review,
+                provider="openai",
+                model="gpt-5.6-sol",
+                output_dir=root / "rebuilt",
+            )
+            self.assertEqual(rebuilt.read_bytes(), review.read_bytes())
+
+    def test_raw_review_replay_rejects_normalized_or_envelope_tampering(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            context, raw, normalized, review = self.build_replay_evidence(root)
+            original_normalized = normalized.read_bytes()
+            normalized.write_text(
+                '{"findings":[{"code":"FABRICATED","severity":"P3",'
+                '"summary":"not present in transport"}],"verdict":"ALLOW"}\n',
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                MODULE.PermitInputError,
+                "normalized response is not derivable",
+            ):
+                MODULE.rebuild_review_evidence(
+                    context=context,
+                    raw_transport=raw,
+                    normalized_response=normalized,
+                    review_envelope=review,
+                    provider="openai",
+                    model="gpt-5.6-sol",
+                    output_dir=root / "rebuilt-normalized-tamper",
+                )
+
+            normalized.write_bytes(original_normalized)
+            forged_review = json.loads(review.read_text(encoding="utf-8"))
+            forged_review["response_sha256"] = "0" * 64
+            review.write_text(
+                json.dumps(forged_review, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                MODULE.PermitInputError,
+                "review envelope is not derivable",
+            ):
+                MODULE.rebuild_review_evidence(
+                    context=context,
+                    raw_transport=raw,
+                    normalized_response=normalized,
+                    review_envelope=review,
+                    provider="openai",
+                    model="gpt-5.6-sol",
+                    output_dir=root / "rebuilt-envelope-tamper",
+                )
+
     def test_prepare_binds_context_and_patch(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -499,25 +609,21 @@ class AutonomousReleasePermitTests(unittest.TestCase):
             workflow,
         )
         self.assertNotIn("npm install --global", workflow)
-        self.assertNotIn("path: target\n", workflow[workflow.index("model-review:") :])
         model_job = workflow[
             workflow.index("  model-review:") : workflow.index("  permit:")
         ]
+        self.assertNotIn("path: target\n", model_job)
         self.assertNotIn("contents: read", model_job)
         self.assertNotIn("actions: read", model_job)
         self.assertIn("copilot-requests: write", model_job)
         self.assertNotIn('prompt="$(<permit-input/review-prompt.txt)"', workflow)
         self.assertIn("needs.model-review.result == 'success'", workflow)
-        self.assertIn("HELM_AUTHORITY_APPROVER_TOKEN", workflow)
-        self.assertIn("permission-pull-requests: write", workflow)
-        self.assertIn(
-            "action.yml defines client-id and deprecates app-id",
-            workflow,
-        )
-        self.assertIn("--approver-app-slug", workflow)
-        self.assertIn("--approver-installation-id", workflow)
-        self.assertIn("steps.approver-token.outputs.app-slug", workflow)
-        self.assertIn("steps.approver-token.outputs.installation-id", workflow)
+        self.assertNotIn("HELM_AUTHORITY_APPROVER", workflow)
+        self.assertNotIn("permission-pull-requests: write", workflow)
+        self.assertNotIn("--approver-app-slug", workflow)
+        self.assertIn("dispatch-authority-promotion:", workflow)
+        self.assertIn("ref=authority/control-v1", workflow)
+        self.assertIn("needs.permit.outputs.authority_generation != '1'", workflow)
         self.assertIn("No target checkout or network context is available", helper)
         self.assertIn(
             "trusted model invocation supplies the absolute path",
@@ -539,7 +645,7 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertEqual(workflow.count('= "$GITHUB_RUN_ATTEMPT"'), 2)
         self.assertEqual(
             workflow.count("ref: 83cc3eeb1cf512bed44b560254b11a342cee5b15"),
-            3,
+            2,
         )
         self.assertIn("attestations: write", workflow)
         self.assertIn("id-token: write", workflow)

@@ -4,6 +4,11 @@ All notable changes to the `.github` organization configurations repository will
 
 ## [Unreleased]
 
+- Added the immutable `authority/control-v1` promotion controller, environment-
+  scoped App credentials, zero-admission bootstrap state, no-bypass environment
+  policy, and exact organization-ruleset/ref readback so mutable pull-request or
+  `main` workflows cannot obtain release-authority secrets.
+
 ### Changed
 - Added the MIN-408 Linear release gate contract for release pipelines,
   merge-to-verification behavior, and evidence-backed `Done` transitions.
