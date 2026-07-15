@@ -25,6 +25,12 @@ from atomic_merge_authority import (
     validate_pull_request,
     verify_merger_installation,
 )
+from authority_evidence_ledger import (
+    LEDGER_REF,
+    GitHubLedgerClient,
+    append_record,
+    stable_record_descriptor,
+)
 from authority_ruleset_broker import (
     CANDIDATE_RULESET_ID,
     GitHubRulesetClient,
@@ -40,6 +46,9 @@ from autonomous_release_permit import (
     PermitInputError,
     require_exact_keys,
     require_sha,
+)
+from autonomous_release_controller import (
+    validate_contract as validate_controller_contract,
 )
 from configure_machine_approval_gates import (
     GitHubAdminClient,
@@ -112,11 +121,14 @@ CANDIDATE_ARGUMENT_SOURCE_INPUTS = {
     "control_contract": "config/autonomous-release-control-plane.json",
     "adversarial_corpus": "tests/fixtures/autonomous-release-adversarial.json",
     "bootstrap_contract": "config/autonomous-release-bootstrap-v1.json",
+    "controller_contract": "config/autonomous-release-controller.json",
 }
 CANDIDATE_LOCAL_SOURCE_INPUTS = (
     "config/autonomous-release-ci-template.yml",
     "scripts/atomic_merge_authority.py",
+    "scripts/authority_evidence_ledger.py",
     "scripts/authority_ruleset_broker.py",
+    "scripts/autonomous_release_controller.py",
     "scripts/autonomous_release_permit.py",
     "scripts/bootstrap_authority.py",
     "scripts/configure_machine_approval_gates.py",
@@ -126,6 +138,10 @@ CANDIDATE_LOCAL_SOURCE_INPUTS = (
     "scripts/verify_control_plane.py",
     "scripts/wait_for_authority_canary.py",
     "scripts/wait_for_authority_suite.py",
+    "tests/test_authority_evidence_ledger.py",
+    "tests/test_autonomous_release_controller.py",
+    "tests/test_bootstrap_authority.py",
+    "tests/test_configure_machine_approval_gates.py",
 )
 DISABLED_ENVIRONMENT_PAYLOAD = {
     "wait_timer": 0,
@@ -147,9 +163,11 @@ READY_EVIDENCE_NAMES = {
     "control_plane",
     "control_plane_observer",
     "control_environments_disabled",
+    "controller_baselines",
     "repository_settings",
     "machine_approval",
     "machine_gates",
+    "evidence_ledger_seed",
     "liveness_bundle",
     "liveness_context",
     "liveness_permit",
@@ -324,6 +342,129 @@ def nested(value: dict[str, Any], *keys: str, label: str) -> Any:
             raise PermitInputError(f"GitHub response is missing {label}")
         current = current.get(key)
     return current
+
+
+def ensure_evidence_ledger_seed(
+    client: GitHubMergeClient,
+    *,
+    expected_sha: str,
+) -> dict[str, Any]:
+    expected_sha = require_sha(
+        expected_sha, label="evidence ledger seed SHA", length=40
+    )
+    ref_path = LEDGER_REF.removeprefix("refs/")
+    path = f"/repos/{REPOSITORY}/git/ref/{ref_path}"
+    try:
+        ref = client.get(path)
+        created = False
+    except PermitInputError as exc:
+        if "failed with HTTP 404:" not in str(exc):
+            raise
+        ref = client.request(
+            "POST",
+            f"/repos/{REPOSITORY}/git/refs",
+            payload={"ref": LEDGER_REF, "sha": expected_sha},
+        )
+        created = True
+    if (
+        ref.get("ref") != LEDGER_REF
+        or not isinstance(ref.get("object"), dict)
+        or ref["object"].get("sha") != expected_sha
+    ):
+        raise PermitInputError("evidence ledger seed ref is not exact")
+    confirmed = client.get(path)
+    if (
+        confirmed.get("ref") != LEDGER_REF
+        or not isinstance(confirmed.get("object"), dict)
+        or confirmed["object"].get("sha") != expected_sha
+    ):
+        raise PermitInputError("evidence ledger seed ref drifted after creation")
+    return {
+        "schema": "mindburn.authority-evidence-ledger-seed/v1",
+        "repository": REPOSITORY,
+        "ref": LEDGER_REF,
+        "sha": expected_sha,
+        "created": created,
+    }
+
+
+def verify_evidence_ledger_descendant(
+    client: GitHubMergeClient,
+    *,
+    seed_sha: str,
+) -> dict[str, Any]:
+    seed_sha = require_sha(seed_sha, label="evidence ledger seed SHA", length=40)
+    ref_path = LEDGER_REF.removeprefix("refs/")
+    ref = client.get(f"/repos/{REPOSITORY}/git/ref/{ref_path}")
+    if ref.get("ref") != LEDGER_REF or not isinstance(ref.get("object"), dict):
+        raise PermitInputError("evidence ledger ref is malformed")
+    head_sha = require_sha(
+        ref["object"].get("sha"), label="evidence ledger head SHA", length=40
+    )
+    advanced = head_sha != seed_sha
+    if advanced:
+        comparison = client.get(
+            f"/repos/{REPOSITORY}/compare/{seed_sha}...{head_sha}"
+        )
+        if (
+            comparison.get("status") != "ahead"
+            or not isinstance(comparison.get("merge_base_commit"), dict)
+            or comparison["merge_base_commit"].get("sha") != seed_sha
+            or comparison.get("ahead_by", 0) <= 0
+            or comparison.get("behind_by") != 0
+        ):
+            raise PermitInputError("evidence ledger head is not a seed descendant")
+    return {
+        "schema": "mindburn.authority-evidence-ledger-state/v1",
+        "repository": REPOSITORY,
+        "ref": LEDGER_REF,
+        "seed_sha": seed_sha,
+        "head_sha": head_sha,
+        "advanced": advanced,
+    }
+
+
+def evidence_tree_inputs(root: Path, *, prefix: str) -> dict[str, bytes]:
+    if root.is_symlink() or not root.is_dir():
+        raise PermitInputError(f"evidence tree {prefix} is not a regular directory")
+    resolved_root = root.resolve(strict=True)
+    result: dict[str, bytes] = {}
+    for path in sorted(resolved_root.rglob("*")):
+        if path.is_symlink():
+            raise PermitInputError(f"evidence tree {prefix} contains a symbolic link")
+        if path.is_file():
+            relative = path.relative_to(resolved_root).as_posix()
+            result[f"{prefix}/{relative}"] = path.read_bytes()
+    if not result:
+        raise PermitInputError(f"evidence tree {prefix} is empty")
+    return result
+
+
+def verify_controller_baselines(
+    args: argparse.Namespace,
+    client: GitHubReadClient,
+) -> dict[str, Any]:
+    contract = validate_controller_contract(
+        load_json_file(args.controller_contract, label="controller contract")
+    )
+    baseline = contract["evidence_ledger"]["baseline_main"][
+        "Mindburn-Labs/helm-ai-kernel"
+    ]
+    kernel_ref = client.get_json(
+        "/repos/Mindburn-Labs/helm-ai-kernel/git/ref/heads/main"
+    )
+    kernel_main = nested_string(kernel_ref, "object", "sha", label="Kernel main SHA")
+    if kernel_main != baseline:
+        raise PermitInputError("Kernel main moved beyond the controller ledger baseline")
+    if contract["evidence_ledger"]["bootstrap_pr"] != args.candidate_pr:
+        raise PermitInputError("controller bootstrap PR identity drifted")
+    return {
+        "schema": "mindburn.autonomous-release-controller-baselines/v1",
+        "authority_repository": REPOSITORY,
+        "authority_baseline": "active-workflow",
+        "kernel_repository": "Mindburn-Labs/helm-ai-kernel",
+        "kernel_main_sha": kernel_main,
+    }
 
 
 def reopen_pull_request(
@@ -1189,11 +1330,14 @@ def prepare(
         approval_client,
         merger_client,
     )
+    controller_baselines = verify_controller_baselines(args, observer_client)
     args.output_dir.mkdir(parents=True)
     source_input_path = args.output_dir / "source-inputs.json"
     write_json(source_input_path, source_input_receipt)
     credential_preflight_path = args.output_dir / "credential-preflight.json"
     write_json(credential_preflight_path, credential_preflight)
+    controller_baselines_path = args.output_dir / "controller-baselines.json"
+    write_json(controller_baselines_path, controller_baselines)
     verifier_root = args.output_dir / "verifiers"
     parent_verifier = build_exact_kernel_verifier(
         args.kernel_repository,
@@ -1410,6 +1554,13 @@ def prepare(
         )
         write_json(approval_path, approval_receipt)
 
+        ledger_seed_path = args.output_dir / "evidence-ledger-seed.json"
+        ledger_seed = ensure_evidence_ledger_seed(
+            merge_client,
+            expected_sha=args.candidate_sha,
+        )
+        write_json(ledger_seed_path, ledger_seed)
+
         gate_receipt = configure_machine_approval_gates(
             argparse.Namespace(
                 candidate_sha=args.candidate_sha,
@@ -1458,11 +1609,13 @@ def prepare(
                 "control_environments_disabled": sha256_file(
                     args.output_dir / "control-environments-disabled.json",
                 ),
+                "controller_baselines": sha256_file(controller_baselines_path),
                 "repository_settings": sha256_file(
                     args.output_dir / "repository-settings.json",
                 ),
                 "machine_approval": sha256_file(approval_path),
                 "machine_gates": sha256_file(gate_path),
+                "evidence_ledger_seed": sha256_file(ledger_seed_path),
                 "liveness_bundle": sha256_file(liveness_args.bundle),
                 "liveness_context": sha256_file(liveness_args.context),
                 "liveness_permit": sha256_file(liveness_args.output),
@@ -1672,6 +1825,7 @@ def finalize(
         approval_client,
         merge_client,
     )
+    current_controller_baselines = verify_controller_baselines(args, read_client)
     ratification, promotion = verify_ratification(
         args,
         attestation_token=observer_token,
@@ -1706,9 +1860,11 @@ def finalize(
         "control_environments_disabled": (
             args.ready.parent / "control-environments-disabled.json"
         ),
+        "controller_baselines": args.ready.parent / "controller-baselines.json",
         "repository_settings": args.ready.parent / "repository-settings.json",
         "machine_approval": args.ready.parent / "machine-approval.json",
         "machine_gates": args.ready.parent / "machine-gates.json",
+        "evidence_ledger_seed": args.ready.parent / "evidence-ledger-seed.json",
         "liveness_bundle": liveness_bundle_path,
         "liveness_context": liveness_context_path,
         "liveness_permit": liveness_permit_path,
@@ -1733,6 +1889,14 @@ def finalize(
         raise PermitInputError(
             "bootstrap credential identities changed before finalization"
         )
+    if (
+        load_json_file(
+            paths["controller_baselines"],
+            label="recorded controller baselines",
+        )
+        != current_controller_baselines
+    ):
+        raise PermitInputError("controller repository baselines changed")
     if (
         load_json_file(paths["source_inputs"], label="recorded source inputs")
         != current_source_inputs
@@ -1833,6 +1997,23 @@ def finalize(
     )
     if current_approval != recorded_approval:
         raise PermitInputError("machine approval changed after bootstrap prepare")
+    recorded_ledger_seed = load_json_file(
+        paths["evidence_ledger_seed"],
+        label="recorded evidence ledger seed",
+    )
+    if (
+        recorded_ledger_seed.get("schema")
+        != "mindburn.authority-evidence-ledger-seed/v1"
+        or recorded_ledger_seed.get("repository") != REPOSITORY
+        or recorded_ledger_seed.get("ref") != LEDGER_REF
+        or recorded_ledger_seed.get("sha") != args.candidate_sha
+        or not isinstance(recorded_ledger_seed.get("created"), bool)
+    ):
+        raise PermitInputError("evidence ledger seed changed after bootstrap prepare")
+    ledger_state = verify_evidence_ledger_descendant(
+        merge_client,
+        seed_sha=args.candidate_sha,
+    )
     gate_receipt = configure_machine_approval_gates(
         argparse.Namespace(
             candidate_sha=machine_sha,
@@ -1853,6 +2034,10 @@ def finalize(
         **recorded_gate_receipt,
         "machine_workflow_sha": machine_sha,
         "machine_workflow_ref": machine_ref,
+        "evidence_ledger": {
+            **recorded_gate_receipt["evidence_ledger"],
+            "head_sha": ledger_state["head_sha"],
+        },
     }
     if gate_receipt != expected_gate_receipt:
         raise PermitInputError(
@@ -1884,11 +2069,77 @@ def finalize(
     )
     if control != observer_control:
         raise PermitInputError("independent final control-plane reads did not match")
+    if verify_controller_baselines(args, read_client) != current_controller_baselines:
+        raise PermitInputError("controller repository baselines moved before intent")
+    intent_inputs = {
+        f"prepare/{name}/{path.name}": path.read_bytes()
+        for name, path in paths.items()
+    }
+    intent_inputs.update(
+        evidence_tree_inputs(liveness_dir, prefix="liveness")
+    )
+    intent_inputs.update(
+        evidence_tree_inputs(args.review_evidence_dir, prefix="ratification/reviews")
+    )
+    intent_inputs.update(
+        evidence_tree_inputs(
+            args.ready.parent / "suite-promoter",
+            prefix="suite/promoter",
+        )
+    )
+    intent_inputs.update(
+        {
+            "final/control-workflow-installation.json": canonical_json(
+                control_installation
+            ),
+            "final/control-environments.json": canonical_json(
+                {"environments": control_environments}
+            ),
+            "final/control-plane.json": canonical_json(control),
+            "final/control-plane-observer.json": canonical_json(observer_control),
+        }
+    )
+    ledger_client = GitHubLedgerClient(
+        merger_token,
+        api_url=os.environ.get("GITHUB_API_URL", "https://api.github.com"),
+    )
+    ledger_namespace = (
+        f"bootstrap/pr-{ready['pull_request']}/{ready['merge_sha']}"
+    )
+    intent_receipt = append_record(
+        ledger_client,
+        namespace=f"{ledger_namespace}/intent",
+        record_type="bootstrap",
+        phase="intent",
+        workflow_sha=args.candidate_sha,
+        run_id=ready["liveness_run_id"],
+        run_attempt=ready["liveness_run_attempt"],
+        inputs=intent_inputs,
+    )
+    write_json(args.ready.parent / "evidence-ledger-intent.json", intent_receipt)
     merge_receipt = confirmed_or_atomic_merge(
         ready,
         merge_client,
         merger=bootstrap_contract["merger"],
     )
+    closure_receipt = append_record(
+        ledger_client,
+        namespace=f"{ledger_namespace}/closure",
+        record_type="bootstrap",
+        phase="closure",
+        workflow_sha=args.candidate_sha,
+        run_id=ready["liveness_run_id"],
+        run_attempt=ready["liveness_run_attempt"],
+        inputs={
+            "intent-descriptor.json": canonical_json(
+                stable_record_descriptor(intent_receipt)
+            ),
+            "atomic-merge.json": canonical_json(merge_receipt),
+            "final-control-plane.json": canonical_json(control),
+            "final-control-plane-observer.json": canonical_json(observer_control),
+        },
+    )
+    write_json(args.ready.parent / "evidence-ledger-closure.json", closure_receipt)
     ruleset_receipt = transition(
         transition_args(
             "bootstrap-finalize",
@@ -1910,6 +2161,27 @@ def finalize(
         )
     if ratification["permit_id"] != ready["ratification_permit_id"]:
         raise PermitInputError("ratification permit changed during finalization")
+    final_ledger_receipt = append_record(
+        ledger_client,
+        namespace=f"{ledger_namespace}/final",
+        record_type="bootstrap",
+        phase="final",
+        workflow_sha=args.candidate_sha,
+        run_id=ready["liveness_run_id"],
+        run_attempt=ready["liveness_run_attempt"],
+        inputs={
+            "closure-descriptor.json": canonical_json(
+                stable_record_descriptor(closure_receipt)
+            ),
+            "ruleset-finalization.json": canonical_json(ruleset_receipt),
+            "final-control-plane.json": canonical_json(control),
+            "final-control-plane-observer.json": canonical_json(observer_control),
+        },
+    )
+    write_json(
+        args.ready.parent / "evidence-ledger-final.json",
+        final_ledger_receipt,
+    )
     return {
         "schema": FINAL_SCHEMA,
         "decision": "ALLOW",
@@ -1927,6 +2199,11 @@ def finalize(
         "control_environments": control_environments,
         "control_plane": control,
         "atomic_merge": merge_receipt,
+        "evidence_ledger": {
+            "intent": intent_receipt,
+            "closure": closure_receipt,
+            "final": final_ledger_receipt,
+        },
         "ruleset_finalization": ruleset_receipt,
     }
 
@@ -1945,6 +2222,7 @@ def add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--control-contract", type=Path, required=True)
     parser.add_argument("--adversarial-corpus", type=Path, required=True)
     parser.add_argument("--bootstrap-contract", type=Path, required=True)
+    parser.add_argument("--controller-contract", type=Path, required=True)
 
 
 def build_parser() -> argparse.ArgumentParser:

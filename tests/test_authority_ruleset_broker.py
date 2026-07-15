@@ -428,6 +428,44 @@ class AuthorityRulesetBrokerTests(unittest.TestCase):
             (binding["sha"], binding["ref"]), (CANDIDATE_SHA, candidate_ref)
         )
 
+    def test_bootstrap_stage_restore_stage_is_exactly_retryable(self) -> None:
+        candidate_ref = "refs/heads/codex/autonomous-release-gen2-bootstrap"
+        client = FakeClient(
+            ruleset(
+                "stable",
+                MODULE.LEGACY_STABLE_WORKFLOW_SHA,
+                MODULE.LEGACY_WORKFLOW_REF,
+                enforcement="evaluate",
+                conditions=MODULE.legacy_stable_conditions(),
+            ),
+            ruleset(
+                "candidate",
+                MODULE.LEGACY_PARENT_WORKFLOW_SHA,
+                MODULE.LEGACY_WORKFLOW_REF,
+                conditions=MODULE.legacy_candidate_conditions(),
+            ),
+        )
+        bootstrap_args = argparse.Namespace(
+            operation="bootstrap-stage",
+            parent_sha=MODULE.LEGACY_PARENT_WORKFLOW_SHA,
+            candidate_sha=CANDIDATE_SHA,
+            candidate_ref=candidate_ref,
+            merge_sha=None,
+        )
+        MODULE.transition(bootstrap_args, client)
+        bootstrap_args.operation = "bootstrap-restore"
+        MODULE.transition(bootstrap_args, client)
+        self.assertEqual(
+            client.current[MODULE.CANDIDATE_RULESET_ID]["conditions"],
+            MODULE.legacy_candidate_conditions(),
+        )
+        bootstrap_args.operation = "bootstrap-stage"
+        MODULE.transition(bootstrap_args, client)
+        self.assertEqual(
+            client.current[MODULE.CANDIDATE_RULESET_ID]["conditions"],
+            MODULE.expected_conditions("candidate"),
+        )
+
     def test_bootstrap_retry_repairs_confirmation_lost_forward_state(self) -> None:
         candidate_ref = "refs/heads/codex/autonomous-release-gen2-bootstrap"
         client = FakeClient(

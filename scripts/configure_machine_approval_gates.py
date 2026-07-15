@@ -19,6 +19,7 @@ from autonomous_release_permit import (
     require_exact_keys,
     require_sha,
 )
+from authority_evidence_ledger import LEDGER_REF, REPOSITORY as LEDGER_REPOSITORY
 from authority_ruleset_broker import (
     API_VERSION,
     ORGANIZATION,
@@ -41,6 +42,8 @@ HUMAN_RULESET_NAME = "Mindburn default branch approval gate"
 MACHINE_RULESET_NAME = "HELM Machine Approval Interlock"
 UPDATER_RULESET_NAME = "HELM Exclusive Main Updater"
 PROOF_REF_RULESET_NAME = "HELM Immutable Proof Fixtures"
+EVIDENCE_HISTORY_RULESET_NAME = "HELM Append-Only Evidence History"
+EVIDENCE_UPDATER_RULESET_NAME = "HELM Exclusive Evidence Appender"
 AUTHORITY_REPOSITORY_ID = 1159255601
 KERNEL_REPOSITORY_ID = 1158479649
 LAB_REPOSITORY_ID = 1300498536
@@ -212,6 +215,7 @@ def load_contract(path: Path) -> dict[str, Any]:
             "kernel_quality_ruleset",
             "proof_ref_ruleset",
             "proof_refs",
+            "evidence_ledger",
         },
         label="bootstrap contract",
     )
@@ -319,6 +323,16 @@ def load_contract(path: Path) -> dict[str, Any]:
         raise PermitInputError("bootstrap proof-ref ruleset contract is not exact")
     if value["proof_refs"] != PROOF_REFS:
         raise PermitInputError("bootstrap proof-ref identities are not exact")
+    expected_ledger = {
+        "repository": LEDGER_REPOSITORY,
+        "ref": LEDGER_REF,
+        "history_ruleset": evidence_history_ruleset_payload(),
+        "exclusive_updater_ruleset": evidence_updater_ruleset_payload(
+            merger_app_id
+        ),
+    }
+    if value["evidence_ledger"] != expected_ledger:
+        raise PermitInputError("bootstrap evidence ledger contract is not exact")
     return value
 
 
@@ -456,6 +470,56 @@ def proof_ref_ruleset_staged_payload() -> dict[str, Any]:
                 "type": "update",
                 "parameters": {"update_allows_fetch_and_merge": False},
             },
+        ],
+    }
+
+
+def evidence_history_ruleset_payload() -> dict[str, Any]:
+    return {
+        "name": EVIDENCE_HISTORY_RULESET_NAME,
+        "target": "branch",
+        "enforcement": "active",
+        "bypass_actors": [],
+        "conditions": {
+            "ref_name": {"exclude": [], "include": [LEDGER_REF]},
+            "repository_id": {"repository_ids": [AUTHORITY_REPOSITORY_ID]},
+        },
+        "rules": [
+            {"type": "creation"},
+            {"type": "deletion"},
+            {"type": "non_fast_forward"},
+        ],
+    }
+
+
+def evidence_updater_ruleset_payload(
+    merger_app_id: int | None,
+) -> dict[str, Any]:
+    bypass_actors = (
+        []
+        if merger_app_id is None
+        else [
+            {
+                "actor_id": merger_app_id,
+                "actor_type": "Integration",
+                "bypass_mode": "always",
+            }
+        ]
+    )
+    return {
+        "name": EVIDENCE_UPDATER_RULESET_NAME,
+        "target": "branch",
+        "enforcement": "active",
+        "bypass_actors": bypass_actors,
+        "conditions": {
+            "ref_name": {"exclude": [], "include": [LEDGER_REF]},
+            "repository_id": {"repository_ids": [AUTHORITY_REPOSITORY_ID]},
+        },
+        "rules": [
+            {
+                "type": "update",
+                "parameters": {"update_allows_fetch_and_merge": False},
+            }
         ],
     }
 
@@ -787,6 +851,101 @@ def ensure_machine_ruleset(
     return current
 
 
+def ensure_named_organization_ruleset(
+    client: GitHubAdminClient,
+    *,
+    name: str,
+    expected: dict[str, Any],
+    create: bool = True,
+) -> dict[str, Any]:
+    response = client.request("GET", f"/orgs/{ORGANIZATION}/rulesets?per_page=100")
+    if not isinstance(response.body, list):
+        raise PermitInputError("GitHub ruleset list is malformed")
+    matches = [
+        item
+        for item in response.body
+        if isinstance(item, dict) and item.get("name") == name
+    ]
+    if len(matches) > 1:
+        raise PermitInputError(f"multiple organization rulesets named {name} exist")
+    if not matches:
+        if not create:
+            raise PermitInputError(f"required organization ruleset {name} is absent")
+        created = require_object(
+            client.request(
+                "POST",
+                f"/orgs/{ORGANIZATION}/rulesets",
+                payload=expected,
+            ),
+            label=f"created {name} ruleset",
+        )
+        ruleset_id = created.get("id")
+    else:
+        ruleset_id = matches[0].get("id")
+    if not isinstance(ruleset_id, int) or isinstance(ruleset_id, bool) or ruleset_id <= 0:
+        raise PermitInputError(f"{name} ruleset ID is invalid")
+    current = require_object(
+        client.request("GET", f"/orgs/{ORGANIZATION}/rulesets/{ruleset_id}"),
+        label=f"{name} ruleset",
+    )
+    if controlled_ruleset(current) != expected:
+        raise PermitInputError(f"{name} ruleset is not exact and active")
+    return current
+
+
+def ensure_evidence_ledger_rulesets(
+    client: GitHubAdminClient,
+    *,
+    merger_app_id: int,
+    expected_head_sha: str,
+    allow_advanced: bool,
+) -> dict[str, Any]:
+    expected_head_sha = require_sha(
+        expected_head_sha,
+        label="evidence ledger bootstrap head SHA",
+        length=40,
+    )
+    ref_path = LEDGER_REF.removeprefix("refs/")
+
+    def observed_head() -> str:
+        ref = require_object(
+            client.request("GET", f"/repos/{LEDGER_REPOSITORY}/git/ref/{ref_path}"),
+            label="evidence ledger ref",
+        )
+        if ref.get("ref") != LEDGER_REF or not isinstance(ref.get("object"), dict):
+            raise PermitInputError("evidence ledger ref identity drifted")
+        return require_sha(
+            ref["object"].get("sha"), label="evidence ledger head SHA", length=40
+        )
+
+    initial_head_sha = observed_head()
+    advanced = initial_head_sha != expected_head_sha
+    if advanced and not allow_advanced:
+        raise PermitInputError("evidence ledger moved before its authority lock")
+    updater = ensure_named_organization_ruleset(
+        client,
+        name=EVIDENCE_UPDATER_RULESET_NAME,
+        expected=evidence_updater_ruleset_payload(merger_app_id),
+        create=not advanced,
+    )
+    if observed_head() != initial_head_sha:
+        raise PermitInputError("evidence ledger moved while installing updater lock")
+    history = ensure_named_organization_ruleset(
+        client,
+        name=EVIDENCE_HISTORY_RULESET_NAME,
+        expected=evidence_history_ruleset_payload(),
+        create=not advanced,
+    )
+    if observed_head() != initial_head_sha:
+        raise PermitInputError("evidence ledger moved while installing history lock")
+    return {
+        "ref": LEDGER_REF,
+        "head_sha": initial_head_sha,
+        "history_ruleset_id": history["id"],
+        "exclusive_updater_ruleset_id": updater["id"],
+    }
+
+
 def ensure_updater_ruleset(
     client: GitHubAdminClient,
     *,
@@ -1016,6 +1175,12 @@ def configure_machine_approval_gates(
         expected_ref=candidate_ref,
     )
 
+    evidence_ledger = ensure_evidence_ledger_rulesets(
+        client,
+        merger_app_id=merger_app_id,
+        expected_head_sha=approved_head_sha,
+        allow_advanced=bool(getattr(args, "allow_merged_resume", False)),
+    )
     proof_refs = ensure_proof_ref_ruleset(client)
     machine = ensure_machine_ruleset(client)
     machine_id = machine["id"]
@@ -1076,6 +1241,7 @@ def configure_machine_approval_gates(
         "machine_workflow_ref": candidate_ref,
         "machine_approval_ruleset_id": machine_id,
         "proof_ref_ruleset_id": proof_refs["id"],
+        "evidence_ledger": evidence_ledger,
         "exclusive_updater_ruleset_id": updater_id,
         "exclusive_updater_app_id": merger_app_id,
         "repository_settings": repository_settings,

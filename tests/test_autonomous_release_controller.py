@@ -89,6 +89,11 @@ def plan_value(*, ordinary=None, promotions=None) -> dict[str, object]:
             "kernel_quality_ruleset_id": 7002,
             "proof_ref_ruleset_id": 7003,
             "proof_refs": {},
+            "evidence_ledger_ref": "refs/heads/authority/evidence-v1",
+            "evidence_ledger_head_sha": "c" * 40,
+            "evidence_history_ruleset_id": 7004,
+            "evidence_updater_ruleset_id": 7005,
+            "evidence_ledger_effective_rules": [],
             "effective_rules": {
                 KERNEL: [
                     [
@@ -101,6 +106,7 @@ def plan_value(*, ordinary=None, promotions=None) -> dict[str, object]:
                 ]
             },
             "repository_settings": {},
+            "classic_branch_protection": {},
         },
         "ordinary": ordinary or [],
         "promotions": promotions or [],

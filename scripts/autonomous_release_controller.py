@@ -34,20 +34,31 @@ from authority_ruleset_broker import (
     MAIN_REF,
     STABLE_RULESET_ID,
 )
+from authority_evidence_ledger import (
+    LEDGER_REF,
+    REPOSITORY as EVIDENCE_LEDGER_REPOSITORY,
+    GitHubLedgerClient,
+    read_record,
+)
 from configure_machine_approval_gates import (
     AUTONOMOUS_REPOSITORIES,
     ATOMIC_MERGE_SETTINGS,
     HUMAN_RULESET_ID,
+    EVIDENCE_HISTORY_RULESET_NAME,
+    EVIDENCE_UPDATER_RULESET_NAME,
     KERNEL_QUALITY_RULESET_ID,
     MACHINE_RULESET_NAME,
     PROOF_REFS,
     PROOF_REF_RULESET_NAME,
     UPDATER_RULESET_NAME,
     controlled_ruleset,
+    evidence_history_ruleset_payload,
+    evidence_updater_ruleset_payload,
     human_ruleset_state,
     kernel_quality_ruleset_payload,
     load_contract as load_bootstrap_contract,
     machine_ruleset_payload,
+    normalize_classic_protection,
     proof_ref_ruleset_payload,
     updater_ruleset_payload,
     validate_merger,
@@ -78,6 +89,7 @@ DISCOVERY_SCHEMA = "mindburn.autonomous-release-controller-discovery/v1"
 PLAN_SCHEMA = "mindburn.autonomous-release-plan/v2"
 APPROVAL_SCHEMA = "mindburn.autonomous-release-approvals/v1"
 MERGE_SCHEMA = "mindburn.autonomous-release-merge/v1"
+ORDINARY_CLOSURE_SCHEMA = "mindburn.autonomous-release-merge-closure/v1"
 PROMOTION_WORKFLOW_NAME = "Promote HELM Release Authority"
 PROMOTION_WORKFLOW_PATH = ".github/workflows/promote-authority.yml"
 PROMOTION_RECEIPT_ARTIFACT = "helm-authority-promotion-receipt"
@@ -89,6 +101,9 @@ SELECTED_REPOSITORIES = {
     "Mindburn-Labs/helm-ai-kernel",
     "Mindburn-Labs/contracts-autonomous-release-lab",
     "Mindburn-Labs/contracts-autonomous-release-canary",
+}
+ORDINARY_REPOSITORY_SLUGS = {
+    "Mindburn-Labs/helm-ai-kernel": "helm-ai-kernel",
 }
 MERGE_METHODS = {"merge", "squash", "rebase"}
 UPDATE_REFS_MUTATION = """
@@ -153,6 +168,28 @@ def load_object(path: Path, *, label: str) -> dict[str, Any]:
     return value
 
 
+def parse_object_bytes(content: bytes, *, label: str) -> dict[str, Any]:
+    try:
+        value = parse_json_strict(content.decode("utf-8"), label=label)
+    except UnicodeDecodeError as exc:
+        raise PermitInputError(f"{label} is not UTF-8") from exc
+    if not isinstance(value, dict):
+        raise PermitInputError(f"{label} must be an object")
+    return value
+
+
+def record_input_object(
+    record: dict[str, Any],
+    name: str,
+    *,
+    label: str,
+) -> dict[str, Any]:
+    inputs = record.get("inputs")
+    if not isinstance(inputs, dict) or not isinstance(inputs.get(name), bytes):
+        raise PermitInputError(f"{label} is absent from the evidence ledger")
+    return parse_object_bytes(inputs[name], label=label)
+
+
 def positive_integer(value: Any, *, label: str) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
         raise PermitInputError(f"{label} must be a positive integer")
@@ -162,7 +199,7 @@ def positive_integer(value: Any, *, label: str) -> int:
 def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
     require_exact_keys(
         value,
-        required={"schema", "enabled", "apps", "repositories"},
+        required={"schema", "enabled", "apps", "evidence_ledger", "repositories"},
         label="controller contract",
     )
     if value["schema"] != CONTRACT_SCHEMA or not isinstance(value["enabled"], bool):
@@ -209,6 +246,29 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
         positive_integer(merger.get("installation_id"), label="merger installation_id")
     elif merger.get("app_id") is not None or merger.get("installation_id") is not None:
         raise PermitInputError("disabled controller must not declare merger authority")
+
+    evidence_ledger = value["evidence_ledger"]
+    if not isinstance(evidence_ledger, dict):
+        raise PermitInputError("controller evidence ledger must be an object")
+    require_exact_keys(
+        evidence_ledger,
+        required={"repository", "ref", "bootstrap_pr", "baseline_main"},
+        label="controller evidence ledger",
+    )
+    baselines = evidence_ledger["baseline_main"]
+    if (
+        evidence_ledger["repository"] != EVIDENCE_LEDGER_REPOSITORY
+        or evidence_ledger["ref"] != LEDGER_REF
+        or evidence_ledger["bootstrap_pr"] != 36
+        or not isinstance(baselines, dict)
+        or set(baselines) != set(ORDINARY_REPOSITORY_SLUGS)
+    ):
+        raise PermitInputError("controller evidence ledger identity drifted")
+    require_sha(
+        baselines["Mindburn-Labs/helm-ai-kernel"],
+        label="Kernel evidence ledger baseline",
+        length=40,
+    )
 
     repositories = value["repositories"]
     if not isinstance(repositories, list) or len(repositories) != 4:
@@ -270,6 +330,109 @@ def contract_status(args: argparse.Namespace) -> dict[str, Any]:
             and merger["installation_id"] > 0
         ),
         "repositories": [item["repository"] for item in contract["repositories"]],
+    }
+
+
+def verify_bootstrap_final(
+    args: argparse.Namespace,
+    client: GitHubLedgerClient,
+) -> dict[str, Any]:
+    contract = validate_contract(
+        load_object(args.contract, label="controller contract")
+    )
+    control_sha = require_sha(args.control_sha, label="control_sha", length=40)
+    pull_request = contract["evidence_ledger"]["bootstrap_pr"]
+    root = f"bootstrap/pr-{pull_request}/{control_sha}"
+    final = read_record(
+        client,
+        namespace=f"{root}/final",
+        record_type="bootstrap",
+        phase="final",
+    )
+    closure = read_record(
+        client,
+        namespace=f"{root}/closure",
+        record_type="bootstrap",
+        phase="closure",
+    )
+    intent = read_record(
+        client,
+        namespace=f"{root}/intent",
+        record_type="bootstrap",
+        phase="intent",
+    )
+    if final is None or closure is None or intent is None:
+        raise PermitInputError("bootstrap evidence ledger state is incomplete")
+    if set(final["inputs"]) != {
+        "closure-descriptor.json",
+        "ruleset-finalization.json",
+        "final-control-plane.json",
+        "final-control-plane-observer.json",
+    }:
+        raise PermitInputError("bootstrap final record has an unexpected file set")
+    if set(closure["inputs"]) != {
+        "intent-descriptor.json",
+        "atomic-merge.json",
+        "final-control-plane.json",
+        "final-control-plane-observer.json",
+    }:
+        raise PermitInputError("bootstrap closure record has an unexpected file set")
+    if record_input_object(
+        final,
+        "closure-descriptor.json",
+        label="bootstrap closure descriptor",
+    ) != closure["descriptor"]:
+        raise PermitInputError("bootstrap final record names another closure")
+    if record_input_object(
+        closure,
+        "intent-descriptor.json",
+        label="bootstrap intent descriptor",
+    ) != intent["descriptor"]:
+        raise PermitInputError("bootstrap closure names another intent")
+    merge = record_input_object(
+        closure,
+        "atomic-merge.json",
+        label="bootstrap atomic merge",
+    )
+    if (
+        merge.get("schema") != "mindburn.release-authority-atomic-merge/v1"
+        or merge.get("repository") != AUTHORITY_REPOSITORY
+        or merge.get("pull_request") != pull_request
+        or merge.get("merge_sha") != control_sha
+        or merge.get("ref") != "refs/heads/main"
+        or merge.get("force") is not False
+    ):
+        raise PermitInputError("bootstrap atomic merge record is not exact")
+    rulesets = record_input_object(
+        final,
+        "ruleset-finalization.json",
+        label="bootstrap ruleset finalization",
+    )
+    if (
+        rulesets.get("schema")
+        != "mindburn.release-authority-ruleset-transition/v1"
+        or rulesets.get("operation") != "bootstrap-finalize"
+        or rulesets.get("merged_workflow_sha") != control_sha
+        or rulesets.get("stable_ruleset_id") != STABLE_RULESET_ID
+    ):
+        raise PermitInputError("bootstrap ruleset finalization is not exact")
+    identities = {
+        (
+            record["manifest"]["workflow_sha"],
+            record["manifest"]["run_id"],
+            record["manifest"]["run_attempt"],
+        )
+        for record in (intent, closure, final)
+    }
+    if len(identities) != 1:
+        raise PermitInputError("bootstrap ledger phases have different run identities")
+    return {
+        "schema": "mindburn.autonomous-release-bootstrap-final/v1",
+        "decision": "ALLOW",
+        "control_sha": control_sha,
+        "pull_request": pull_request,
+        "ledger_head_sha": final["ledger_head_sha"],
+        "final_manifest_sha256": final["descriptor"]["manifest_sha256"],
     }
 
 
@@ -380,6 +543,20 @@ def observe_merge_interlock(
     updater = named_organization_ruleset(client, name=UPDATER_RULESET_NAME)
     if controlled_ruleset(updater) != updater_ruleset_payload(bootstrap_merger_id):
         raise PermitInputError("exclusive updater ruleset drifted")
+    ledger_updater = named_organization_ruleset(
+        client,
+        name=EVIDENCE_UPDATER_RULESET_NAME,
+    )
+    if controlled_ruleset(ledger_updater) != evidence_updater_ruleset_payload(
+        bootstrap_merger_id
+    ):
+        raise PermitInputError("exclusive evidence appender ruleset drifted")
+    ledger_history = named_organization_ruleset(
+        client,
+        name=EVIDENCE_HISTORY_RULESET_NAME,
+    )
+    if controlled_ruleset(ledger_history) != evidence_history_ruleset_payload():
+        raise PermitInputError("append-only evidence history ruleset drifted")
     proof_refs = named_organization_ruleset(client, name=PROOF_REF_RULESET_NAME)
     if controlled_ruleset(proof_refs) != proof_ref_ruleset_payload():
         raise PermitInputError("immutable proof-ref ruleset drifted")
@@ -402,6 +579,60 @@ def observe_merge_interlock(
     )
     if controlled_ruleset(kernel_quality) != kernel_quality_ruleset_payload():
         raise PermitInputError("Kernel quality ruleset drifted")
+    classic = bootstrap["classic_branch_protection"]
+    classic_protection = client.get_json(
+        f"/repos/{classic['repository']}/branches/{classic['branch']}/protection"
+    )
+    normalized_classic = normalize_classic_protection(classic_protection)
+    if normalized_classic != classic["expected"]:
+        raise PermitInputError("classic machine approval protection drifted")
+
+    ledger_ref_name = bootstrap["evidence_ledger"]["ref"]
+    ledger_ref = client.get_json(
+        f"/repos/{AUTHORITY_REPOSITORY}/git/ref/{ledger_ref_name.removeprefix('refs/')}"
+    )
+    if ledger_ref.get("ref") != ledger_ref_name or not isinstance(
+        ledger_ref.get("object"), dict
+    ):
+        raise PermitInputError("evidence ledger ref identity drifted")
+    ledger_head_sha = require_sha(
+        ledger_ref["object"].get("sha"), label="evidence ledger head SHA", length=40
+    )
+    encoded_ledger_branch = urllib.parse.quote(
+        ledger_ref_name.removeprefix("refs/heads/"), safe=""
+    )
+    ledger_rules = get_json_value(
+        client,
+        f"/repos/{AUTHORITY_REPOSITORY}/rules/branches/{encoded_ledger_branch}",
+        label="effective evidence ledger rules",
+    )
+    if not isinstance(ledger_rules, list):
+        raise PermitInputError("effective evidence ledger rules are malformed")
+    actual_ledger_rules = sorted(
+        (
+            rule.get("ruleset_id"),
+            rule.get("type"),
+            rule.get("ruleset_source_type"),
+            rule.get("ruleset_source"),
+        )
+        for rule in ledger_rules
+        if isinstance(rule, dict)
+    )
+    expected_ledger_rules = sorted(
+        [
+            (ledger_history["id"], "creation", "Organization", ORGANIZATION),
+            (ledger_history["id"], "deletion", "Organization", ORGANIZATION),
+            (
+                ledger_history["id"],
+                "non_fast_forward",
+                "Organization",
+                ORGANIZATION,
+            ),
+            (ledger_updater["id"], "update", "Organization", ORGANIZATION),
+        ]
+    )
+    if actual_ledger_rules != expected_ledger_rules:
+        raise PermitInputError("evidence ledger is not append-only and App-exclusive")
 
     expected_effective: dict[str, list[tuple[int, str, str, str]]] = {}
     interlock_repositories = set(AUTONOMOUS_REPOSITORIES) | {lab}
@@ -464,8 +695,14 @@ def observe_merge_interlock(
         "kernel_quality_ruleset_id": KERNEL_QUALITY_RULESET_ID,
         "proof_ref_ruleset_id": proof_refs["id"],
         "proof_refs": PROOF_REFS,
+        "evidence_ledger_ref": ledger_ref_name,
+        "evidence_ledger_head_sha": ledger_head_sha,
+        "evidence_history_ruleset_id": ledger_history["id"],
+        "evidence_updater_ruleset_id": ledger_updater["id"],
+        "evidence_ledger_effective_rules": expected_ledger_rules,
         "effective_rules": expected_effective,
         "repository_settings": bootstrap["repository_settings"],
+        "classic_branch_protection": normalized_classic,
     }
 
 
@@ -839,6 +1076,305 @@ def verified_plan_entry(
         "merge_method": repository_config["merge_method"],
         "recovery": recovery,
     }
+
+
+def materialize_ledger_evidence(
+    record: dict[str, Any],
+    *,
+    output_dir: Path,
+    evidence_path: str,
+) -> Path:
+    pure = PurePosixPath(evidence_path)
+    if pure.is_absolute() or ".." in pure.parts or "\\" in evidence_path:
+        raise PermitInputError("ledger plan evidence path escapes its artifact")
+    prefix = evidence_path.rstrip("/") + "/"
+    inputs = record.get("inputs")
+    if not isinstance(inputs, dict):
+        raise PermitInputError("ledger intent inputs are malformed")
+    evidence_inputs = {
+        path: content
+        for path, content in inputs.items()
+        if path.startswith(prefix)
+    }
+    if not evidence_inputs:
+        raise PermitInputError("ledger intent lacks permit evidence")
+    for relative, content in evidence_inputs.items():
+        target = output_dir.joinpath(*PurePosixPath(relative).parts)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists() or target.is_symlink():
+            raise PermitInputError("ledger evidence materialization would overwrite a file")
+        target.write_bytes(content)
+    return evidence_directory(output_dir, {"evidence": evidence_path})
+
+
+def verify_ledger_approval(
+    client: GitHubReadClient,
+    *,
+    approval_artifact: dict[str, Any],
+    entry: dict[str, Any],
+    control_sha: str,
+) -> None:
+    require_exact_keys(
+        approval_artifact,
+        required={"schema", "controller_sha", "repository", "approvals"},
+        label="ledger approval artifact",
+    )
+    approvals = approval_artifact["approvals"]
+    if (
+        approval_artifact["schema"] != APPROVAL_SCHEMA
+        or approval_artifact["controller_sha"] != control_sha
+        or approval_artifact["repository"] != entry["repository"]
+        or not isinstance(approvals, list)
+        or len(approvals) != 1
+        or not isinstance(approvals[0], dict)
+    ):
+        raise PermitInputError("ledger approval artifact is not exact")
+    approval = approvals[0]
+    expected = {
+        "schema": "mindburn.release-authority-machine-approval/v2",
+        "repository": entry["repository"],
+        "pull_request": entry["pull_request"],
+        "head_sha": entry["head_sha"],
+        "workflow_sha": entry["workflow_sha"],
+        "permit_id": entry["permit_id"],
+        "base_sha": entry["base_sha"],
+        "merge_sha": entry["merge_sha"],
+        "merge_tree_sha": entry["merge_tree_sha"],
+        "review_state": "APPROVED",
+        "approver_login": APPROVER_LOGIN,
+        "approver_app_id": APPROVER_APP_ID,
+        "approver_installation_id": APPROVER_INSTALLATION_ID,
+    }
+    if any(approval.get(field) != value for field, value in expected.items()):
+        raise PermitInputError("ledger approval fields are not exact")
+    review_id = positive_integer(approval.get("review_id"), label="ledger review_id")
+    review = client.get_json(
+        f"/repos/{entry['repository']}/pulls/{entry['pull_request']}/reviews/{review_id}"
+    )
+    author = review.get("user")
+    if (
+        review.get("state") != "APPROVED"
+        or review.get("commit_id") != entry["head_sha"]
+        or review.get("body") != f"HELM signed ALLOW permit {entry['permit_id']}"
+        or not isinstance(author, dict)
+        or author.get("login") != APPROVER_LOGIN
+    ):
+        raise PermitInputError("ledger-bound live App approval drifted")
+
+
+def verify_ordinary_closure(
+    closure: dict[str, Any],
+    *,
+    intent: dict[str, Any],
+    entry: dict[str, Any],
+    control_sha: str,
+) -> None:
+    if set(closure.get("inputs", {})) != {
+        "intent-descriptor.json",
+        "ordinary-merge-closure.json",
+    }:
+        raise PermitInputError("ordinary closure has an unexpected file set")
+    if record_input_object(
+        closure,
+        "intent-descriptor.json",
+        label="ordinary intent descriptor",
+    ) != intent["descriptor"]:
+        raise PermitInputError("ordinary closure names another intent")
+    value = record_input_object(
+        closure,
+        "ordinary-merge-closure.json",
+        label="ordinary merge closure",
+    )
+    require_exact_keys(
+        value,
+        required={"schema", "controller_sha", "repository", "merges"},
+        label="ordinary merge closure",
+    )
+    merges = value["merges"]
+    if (
+        value["schema"] != ORDINARY_CLOSURE_SCHEMA
+        or value["controller_sha"] != control_sha
+        or value["repository"] != entry["repository"]
+        or not isinstance(merges, list)
+        or len(merges) != 1
+        or not isinstance(merges[0], dict)
+    ):
+        raise PermitInputError("ordinary merge closure is malformed")
+    expected = {
+        "repository": entry["repository"],
+        "pull_request": entry["pull_request"],
+        "head_sha": entry["head_sha"],
+        "permit_id": entry["permit_id"],
+        "merge_method": "merge",
+        "merge_commit_sha": entry["merge_sha"],
+        "merge_tree_sha": entry["merge_tree_sha"],
+    }
+    if merges[0] != expected:
+        raise PermitInputError("ordinary merge closure does not match its intent")
+    for field in ("workflow_sha", "run_id", "run_attempt"):
+        if closure["manifest"][field] != intent["manifest"][field]:
+            raise PermitInputError("ordinary ledger phases have different run identities")
+
+
+def recover_ordinary_from_ledger(
+    args: argparse.Namespace,
+    client: GitHubReadClient,
+    *,
+    contract: dict[str, Any],
+    control_sha: str,
+    repository_config: dict[str, Any],
+) -> dict[str, Any] | None:
+    repository = repository_config["repository"]
+    if repository not in ORDINARY_REPOSITORY_SLUGS:
+        return None
+    baseline_value = contract["evidence_ledger"]["baseline_main"][repository]
+    baseline = baseline_value
+    main = client.get_json(f"/repos/{repository}/git/ref/heads/main")
+    main_sha = nested_string(main, "object", "sha", label=f"{repository} main SHA")
+    if main_sha == baseline:
+        return None
+    ledger_client = GitHubLedgerClient(client.token, api_url=client.api_url)
+    matches: list[tuple[dict[str, Any], dict[str, Any] | None]] = []
+    for pull_request_value in pull_requests_for_commit(client, repository, main_sha):
+        number = pull_request_value.get("number")
+        if not isinstance(number, int) or isinstance(number, bool) or number <= 0:
+            continue
+        base = pull_request_value.get("base")
+        head = pull_request_value.get("head")
+        if not isinstance(base, dict) or not isinstance(head, dict):
+            continue
+        try:
+            validate_merged_pull_request(
+                pull_request_value,
+                repository=repository,
+                pull_request=number,
+                base_sha=require_sha(
+                    base.get("sha"), label="ledger recovery base SHA", length=40
+                ),
+                head_sha=require_sha(
+                    head.get("sha"), label="ledger recovery head SHA", length=40
+                ),
+                merge_sha=main_sha,
+            )
+        except PermitInputError:
+            continue
+        root = (
+            f"ordinary/{ORDINARY_REPOSITORY_SLUGS[repository]}/"
+            f"pr-{number}/{main_sha}"
+        )
+        intent = read_record(
+            ledger_client,
+            namespace=f"{root}/intent",
+            record_type="ordinary-merge",
+            phase="intent",
+        )
+        if intent is None:
+            continue
+        closure = read_record(
+            ledger_client,
+            namespace=f"{root}/closure",
+            record_type="ordinary-merge",
+            phase="closure",
+        )
+        matches.append((intent, closure))
+    if len(matches) != 1:
+        raise PermitInputError(
+            "non-baseline main lacks exactly one durable ordinary merge intent"
+        )
+    intent, closure = matches[0]
+    if not {"entry.json", "approval.json"}.issubset(intent["inputs"]) or any(
+        path not in {"entry.json", "approval.json"}
+        and not path.startswith("evidence/")
+        for path in intent["inputs"]
+    ):
+        raise PermitInputError("ordinary intent contains an unexpected path")
+    entry = validate_plan_entry(
+        record_input_object(intent, "entry.json", label="ordinary intent entry"),
+        label="ordinary intent entry",
+    )
+    if (
+        entry["repository"] != repository
+        or entry["merge_sha"] != main_sha
+        or entry["recovery"] is not False
+        or intent["manifest"]["workflow_sha"] != entry["workflow_sha"]
+        or intent["manifest"]["run_id"] != entry["run_id"]
+        or intent["manifest"]["run_attempt"] != entry["run_attempt"]
+    ):
+        raise PermitInputError("ordinary intent entry identity drifted")
+    expected_namespace = (
+        f"ordinary/{ORDINARY_REPOSITORY_SLUGS[repository]}/"
+        f"pr-{entry['pull_request']}/{main_sha}/intent"
+    )
+    if intent["manifest"]["namespace"] != expected_namespace:
+        raise PermitInputError("ordinary intent namespace differs from its entry")
+    live_pull_request = client.get_json(
+        f"/repos/{repository}/pulls/{entry['pull_request']}"
+    )
+    validate_merged_pull_request(
+        live_pull_request,
+        repository=repository,
+        pull_request=entry["pull_request"],
+        base_sha=entry["base_sha"],
+        head_sha=entry["head_sha"],
+        merge_sha=entry["merge_sha"],
+    )
+    evidence = materialize_ledger_evidence(
+        intent,
+        output_dir=args.output_dir,
+        evidence_path=entry["evidence"],
+    )
+    authority = head_authority(client, head_sha=entry["workflow_sha"])
+    permit = verify_candidate_permit(
+        evidence / "release-permit.json",
+        evidence / "release-permit.attestation.json",
+        evidence / "context.json",
+        run={"id": entry["run_id"], "run_attempt": entry["run_attempt"]},
+        repository=repository,
+        pull_request=entry["pull_request"],
+        head_sha=entry["head_sha"],
+        expected_workflow_sha=entry["workflow_sha"],
+        expected_authority=authority,
+        kernel_verifier=args.kernel_verifier,
+        attestation_token=client.token,
+    )
+    if (
+        permit["base_sha"] != entry["base_sha"]
+        or permit["merge_sha"] != entry["merge_sha"]
+        or permit["merge_tree_sha"] != entry["merge_tree_sha"]
+        or permit["permit_id"] != entry["permit_id"]
+    ):
+        raise PermitInputError("ordinary ledger permit differs from its entry")
+    verify_permit_reduction(
+        args.kernel_verifier,
+        evidence / "release-permit.json",
+        evidence / "context.json",
+        {
+            provider: evidence
+            / f"parent-rebuilt-{provider}"
+            / f"review-{provider}.json"
+            for provider in ("anthropic", "openai")
+        },
+        evidence / "ledger-recomputed-permit.json",
+    )
+    verify_ledger_approval(
+        client,
+        approval_artifact=record_input_object(
+            intent,
+            "approval.json",
+            label="ordinary intent approval",
+        ),
+        entry=entry,
+        control_sha=control_sha,
+    )
+    if closure is not None:
+        verify_ordinary_closure(
+            closure,
+            intent=intent,
+            entry=entry,
+            control_sha=control_sha,
+        )
+        return None
+    return {**entry, "recovery": True}
 
 
 def extract_final_promotion_receipt(archive: bytes) -> tuple[bytes, bytes]:
@@ -1343,6 +1879,34 @@ def plan(args: argparse.Namespace, client: GitHubReadClient) -> dict[str, Any]:
                         }
                     )
                 continue
+        ordinary_recovery: dict[str, Any] | None = None
+        if recovery is None:
+            try:
+                ordinary_recovery = recover_ordinary_from_ledger(
+                    args,
+                    client,
+                    contract=contract,
+                    control_sha=control_sha,
+                    repository_config=repository_config,
+                )
+            except (OSError, PermitInputError) as exc:
+                blocked.append(
+                    {
+                        "repository": repository,
+                        "pull_request": None,
+                        "reason": "ORDINARY_LEDGER_RECOVERY_FAILED",
+                        "detail": str(exc)[:1000],
+                    }
+                )
+                for entry in repository_promotions + repository_ordinary:
+                    blocked.append(
+                        {
+                            "repository": repository,
+                            "pull_request": entry["pull_request"],
+                            "reason": "SERIALIZED_BEHIND_LEDGER_RECOVERY",
+                        }
+                    )
+                continue
         if recovery is not None:
             promotions.append(recovery)
             for entry in repository_promotions + repository_ordinary:
@@ -1351,6 +1915,16 @@ def plan(args: argparse.Namespace, client: GitHubReadClient) -> dict[str, Any]:
                         "repository": repository,
                         "pull_request": entry["pull_request"],
                         "reason": "SERIALIZED_BEHIND_AUTHORITY_RECOVERY",
+                    }
+                )
+        elif ordinary_recovery is not None:
+            ordinary.append(ordinary_recovery)
+            for entry in repository_promotions + repository_ordinary:
+                blocked.append(
+                    {
+                        "repository": repository,
+                        "pull_request": entry["pull_request"],
+                        "reason": "SERIALIZED_BEHIND_LEDGER_RECOVERY",
                     }
                 )
         elif repository_promotions:
@@ -1375,6 +1949,43 @@ def plan(args: argparse.Namespace, client: GitHubReadClient) -> dict[str, Any]:
                         "reason": "SERIALIZED_BEHIND_EARLIER_PR",
                     }
                 )
+    if any(entry["recovery"] is True for entry in ordinary):
+        for entry in promotions:
+            blocked.append(
+                {
+                    "repository": entry["repository"],
+                    "pull_request": entry["pull_request"],
+                    "reason": "SERIALIZED_BEHIND_LEDGER_RECOVERY",
+                }
+            )
+        promotions = []
+    elif promotions:
+        for entry in ordinary:
+            blocked.append(
+                {
+                    "repository": entry["repository"],
+                    "pull_request": entry["pull_request"],
+                    "reason": "SERIALIZED_BEHIND_AUTHORITY_PROMOTION",
+                }
+            )
+        ordinary = []
+    if len(ordinary) > 1:
+        ordinary.sort(
+            key=lambda entry: (
+                entry["recovery"] is not True,
+                entry["repository"],
+                entry["pull_request"],
+            )
+        )
+        for entry in ordinary[1:]:
+            blocked.append(
+                {
+                    "repository": entry["repository"],
+                    "pull_request": entry["pull_request"],
+                    "reason": "SERIALIZED_BEHIND_EARLIER_REPOSITORY",
+                }
+            )
+        ordinary = ordinary[:1]
     return {
         "schema": PLAN_SCHEMA,
         "controller_sha": control_sha,
@@ -1473,8 +2084,14 @@ def validate_plan(value: dict[str, Any], *, control_sha: str) -> dict[str, Any]:
             "kernel_quality_ruleset_id",
             "proof_ref_ruleset_id",
             "proof_refs",
+            "evidence_ledger_ref",
+            "evidence_ledger_head_sha",
+            "evidence_history_ruleset_id",
+            "evidence_updater_ruleset_id",
+            "evidence_ledger_effective_rules",
             "effective_rules",
             "repository_settings",
+            "classic_branch_protection",
         },
         label="controller plan merge interlock",
     )
@@ -1487,8 +2104,17 @@ def validate_plan(value: dict[str, Any], *, control_sha: str) -> dict[str, Any]:
         "updater_ruleset_id",
         "kernel_quality_ruleset_id",
         "proof_ref_ruleset_id",
+        "evidence_history_ruleset_id",
+        "evidence_updater_ruleset_id",
     ):
         positive_integer(interlock[field], label=f"merge interlock {field}")
+    if interlock["evidence_ledger_ref"] != "refs/heads/authority/evidence-v1":
+        raise PermitInputError("controller plan names the wrong evidence ledger ref")
+    require_sha(
+        interlock["evidence_ledger_head_sha"],
+        label="merge interlock evidence ledger head SHA",
+        length=40,
+    )
     active_workflow_sha = require_sha(
         value["active_workflow_sha"],
         label="plan active_workflow_sha",
@@ -1518,7 +2144,11 @@ def validate_plan(value: dict[str, Any], *, control_sha: str) -> dict[str, Any]:
         or len({entry["repository"] for entry in ordinary}) != len(ordinary)
     ):
         raise PermitInputError("controller plan violates fixed serialization")
-    if any(entry["workflow_sha"] != active_workflow_sha for entry in ordinary):
+    if any(
+        entry["workflow_sha"] != active_workflow_sha
+        and entry["recovery"] is not True
+        for entry in ordinary
+    ):
         raise PermitInputError("ordinary plan entries do not use the active authority")
     if any(
         entry["workflow_sha"] != active_workflow_sha and entry["recovery"] is not True
@@ -1580,6 +2210,7 @@ def approve(args: argparse.Namespace) -> dict[str, Any]:
                 workflow_sha=entry["workflow_sha"],
                 approver_app_slug=args.approver_app_slug,
                 approver_installation_id=args.approver_installation_id,
+                allow_merged_resume=entry["recovery"],
             ),
             approver,
             attestation_token=observer_token,
@@ -1902,11 +2533,21 @@ def merge(args: argparse.Namespace) -> dict[str, Any]:
                 "resumed": resumed,
             }
         )
+    closure = {
+        "schema": ORDINARY_CLOSURE_SCHEMA,
+        "controller_sha": control_sha,
+        "repository": args.repository,
+        "merges": [
+            {key: value for key, value in receipt.items() if key != "resumed"}
+            for receipt in receipts
+        ],
+    }
     return {
         "schema": MERGE_SCHEMA,
         "controller_sha": control_sha,
         "repository": args.repository,
         "merges": receipts,
+        "closure": closure,
     }
 
 
@@ -1916,6 +2557,10 @@ def build_parser() -> argparse.ArgumentParser:
     status_parser = subparsers.add_parser("validate-contract")
     status_parser.add_argument("--contract", type=Path, required=True)
     status_parser.add_argument("--output", type=Path, required=True)
+    bootstrap_parser = subparsers.add_parser("verify-bootstrap")
+    bootstrap_parser.add_argument("--contract", type=Path, required=True)
+    bootstrap_parser.add_argument("--control-sha", required=True)
+    bootstrap_parser.add_argument("--output", type=Path, required=True)
     discover_parser = subparsers.add_parser("discover")
     discover_parser.add_argument("--contract", type=Path, required=True)
     discover_parser.add_argument("--control-sha", required=True)
@@ -1953,6 +2598,16 @@ def main(argv: list[str]) -> int:
         args = build_parser().parse_args(argv)
         if args.command == "validate-contract":
             result = contract_status(args)
+        elif args.command == "verify-bootstrap":
+            result = verify_bootstrap_final(
+                args,
+                GitHubLedgerClient(
+                    os.environ.get("GH_TOKEN", ""),
+                    api_url=os.environ.get(
+                        "GITHUB_API_URL", "https://api.github.com"
+                    ),
+                ),
+            )
         elif args.command == "discover":
             result = discover(
                 args,

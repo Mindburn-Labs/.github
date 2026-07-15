@@ -61,6 +61,67 @@
     ],
     "target": "branch"
   },
+  "evidence_ledger": {
+    "exclusive_updater_ruleset": {
+      "bypass_actors": [],
+      "conditions": {
+        "ref_name": {
+          "exclude": [],
+          "include": [
+            "refs/heads/authority/evidence-v1"
+          ]
+        },
+        "repository_id": {
+          "repository_ids": [
+            1159255601
+          ]
+        }
+      },
+      "enforcement": "active",
+      "name": "HELM Exclusive Evidence Appender",
+      "rules": [
+        {
+          "parameters": {
+            "update_allows_fetch_and_merge": false
+          },
+          "type": "update"
+        }
+      ],
+      "target": "branch"
+    },
+    "history_ruleset": {
+      "bypass_actors": [],
+      "conditions": {
+        "ref_name": {
+          "exclude": [],
+          "include": [
+            "refs/heads/authority/evidence-v1"
+          ]
+        },
+        "repository_id": {
+          "repository_ids": [
+            1159255601
+          ]
+        }
+      },
+      "enforcement": "active",
+      "name": "HELM Append-Only Evidence History",
+      "rules": [
+        {
+          "type": "creation"
+        },
+        {
+          "type": "deletion"
+        },
+        {
+          "type": "non_fast_forward"
+        }
+      ],
+      "target": "branch"
+    },
+    "ref": "refs/heads/authority/evidence-v1",
+    "repository": "Mindburn-Labs/.github"
+  },
   "human_approval_ruleset": {
     "after_repository_ids": [
       1158732928,

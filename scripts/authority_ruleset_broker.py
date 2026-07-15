@@ -504,12 +504,14 @@ def transition(args: argparse.Namespace, client: GitHubRulesetClient) -> dict[st
                 candidate,
                 workflow_sha=LEGACY_PARENT_WORKFLOW_SHA,
                 workflow_ref=LEGACY_WORKFLOW_REF,
+                conditions=legacy_candidate_conditions(),
             )
             validate_ruleset(
                 updated.body,
                 kind="candidate",
                 expected_sha=LEGACY_PARENT_WORKFLOW_SHA,
                 expected_ref=LEGACY_WORKFLOW_REF,
+                expected_coverage=legacy_candidate_conditions(),
             )
             return receipt(
                 args.operation, parent_sha, candidate_sha, candidate_ref, None

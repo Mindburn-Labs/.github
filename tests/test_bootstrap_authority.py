@@ -121,6 +121,47 @@ class RepositorySettingsClient:
         return {"delete_branch_on_merge": False}
 
 
+class LedgerSeedClient:
+    def __init__(self) -> None:
+        self.sha: str | None = None
+        self.posts = 0
+
+    def get(self, path: str):
+        if not path.endswith("/git/ref/heads/authority/evidence-v1"):
+            raise AssertionError(path)
+        if self.sha is None:
+            raise MODULE.PermitInputError("GitHub GET failed with HTTP 404: absent")
+        return {"ref": MODULE.LEDGER_REF, "object": {"sha": self.sha}}
+
+    def request(self, method: str, path: str, *, payload=None):
+        if (
+            method != "POST"
+            or not path.endswith("/git/refs")
+            or payload != {"ref": MODULE.LEDGER_REF, "sha": CANDIDATE_SHA}
+        ):
+            raise AssertionError((method, path, payload))
+        self.sha = CANDIDATE_SHA
+        self.posts += 1
+        return {"ref": MODULE.LEDGER_REF, "object": {"sha": self.sha}}
+
+
+class LedgerStateClient:
+    def __init__(self, head_sha: str, *, status: str = "ahead") -> None:
+        self.head_sha = head_sha
+        self.status = status
+
+    def get(self, path: str):
+        if path.endswith("/git/ref/heads/authority/evidence-v1"):
+            return {"ref": MODULE.LEDGER_REF, "object": {"sha": self.head_sha}}
+        if "/compare/" in path:
+            return {
+                "status": self.status,
+                "ahead_by": 1,
+                "behind_by": 0,
+                "merge_base_commit": {"sha": CANDIDATE_SHA},
+            }
+        raise AssertionError(path)
+
 class ControlPlaneAdminClient:
     RULESET_ID = 4242
 
@@ -337,6 +378,37 @@ class BootstrapAuthorityTests(unittest.TestCase):
                 receipt = MODULE.ensure_recovery_head_ref_policy(client)
                 self.assertFalse(receipt["delete_branch_on_merge_after"])
                 self.assertEqual(client.patches, expected_patches)
+
+    def test_evidence_ledger_seed_creation_is_exact_and_idempotent(self) -> None:
+        client = LedgerSeedClient()
+        first = MODULE.ensure_evidence_ledger_seed(
+            client,
+            expected_sha=CANDIDATE_SHA,
+        )
+        second = MODULE.ensure_evidence_ledger_seed(
+            client,
+            expected_sha=CANDIDATE_SHA,
+        )
+        self.assertTrue(first["created"])
+        self.assertFalse(second["created"])
+        self.assertEqual(client.posts, 1)
+
+    def test_evidence_ledger_resume_requires_seed_descendant(self) -> None:
+        exact = MODULE.verify_evidence_ledger_descendant(
+            LedgerStateClient(CANDIDATE_SHA),
+            seed_sha=CANDIDATE_SHA,
+        )
+        self.assertFalse(exact["advanced"])
+        advanced = MODULE.verify_evidence_ledger_descendant(
+            LedgerStateClient("d" * 40),
+            seed_sha=CANDIDATE_SHA,
+        )
+        self.assertTrue(advanced["advanced"])
+        with self.assertRaisesRegex(MODULE.PermitInputError, "not a seed descendant"):
+            MODULE.verify_evidence_ledger_descendant(
+                LedgerStateClient("e" * 40, status="diverged"),
+                seed_sha=CANDIDATE_SHA,
+            )
 
     def test_suite_trigger_reopens_every_exact_permanent_case(self) -> None:
         contract = MODULE.validate_contract(

@@ -48,6 +48,7 @@ jobs:
       - name: Validate source-owned activation contract without credentials
         id: status
         env:
+          GH_TOKEN: ${{ github.token }}
           PERMIT_RUN_ATTEMPT: ${{ inputs.permit_run_attempt }}
           PERMIT_RUN_ID: ${{ inputs.permit_run_id }}
         run: |
@@ -60,6 +61,10 @@ jobs:
           python3 broker/scripts/autonomous_release_controller.py validate-contract \
             --contract broker/config/autonomous-release-controller.json \
             --output controller-status.json
+          python3 broker/scripts/autonomous_release_controller.py verify-bootstrap \
+            --contract broker/config/autonomous-release-controller.json \
+            --control-sha "$GITHUB_WORKFLOW_SHA" \
+            --output bootstrap-final.json
           enabled="$(jq -er '.enabled | tostring' controller-status.json)"
           test "$(jq -er '.merger_configured | tostring' controller-status.json)" = "$enabled"
           echo "enabled=$enabled" >> "$GITHUB_OUTPUT"
@@ -401,11 +406,158 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+  tick-intent:
+    name: Persist ordinary merge intent (${{ matrix.slug }})
+    needs:
+      - tick-plan
+      - tick-approve
+    environment: authority-merge
+    permissions:
+      actions: read
+      attestations: read
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repository: Mindburn-Labs/.github
+            selected: ${{ needs.tick-plan.outputs.github_selected }}
+            slug: github-authority
+          - repository: Mindburn-Labs/helm-ai-kernel
+            selected: ${{ needs.tick-plan.outputs.kernel_selected }}
+            slug: helm-ai-kernel
+    steps:
+      - name: Download signed controller plan
+        if: matrix.selected == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-autonomous-controller-plan
+          path: controller-plan
+
+      - name: Download isolated ordinary approval
+        if: matrix.selected == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-ordinary-approval-${{ matrix.slug }}
+          path: approval
+
+      - name: Checkout immutable evidence writer
+        if: matrix.selected == 'true'
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          path: broker
+
+      - name: Verify plan and approval provenance
+        if: matrix.selected == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for subject in \
+            controller-plan/controller-plan.json \
+            approval/ordinary-approval.json; do
+            gh attestation verify "$subject" \
+              --bundle "${subject%.json}.attestation.json" \
+              --repo Mindburn-Labs/.github \
+              --signer-workflow Mindburn-Labs/.github/.github/workflows/promote-authority.yml \
+              --signer-digest "$GITHUB_WORKFLOW_SHA" \
+              --source-digest "$GITHUB_SHA" \
+              --deny-self-hosted-runners
+          done
+
+      - name: Build deterministic intent evidence
+        if: matrix.selected == 'true'
+        id: intent
+        env:
+          REPOSITORY: ${{ matrix.repository }}
+        run: |
+          set -euo pipefail
+          mkdir ledger-input
+          jq -e --arg repository "$REPOSITORY" \
+            '[.ordinary[] | select(.repository == $repository)] |
+             if length == 1 then (.[0] | .recovery = false)
+             else error("expected one ordinary entry") end' \
+            controller-plan/controller-plan.json > ledger-input/entry.json
+          cp approval/ordinary-approval.json ledger-input/approval.json
+          evidence_path="$(jq -er '.evidence' ledger-input/entry.json)"
+          case "$evidence_path" in evidence/*) ;; *) exit 1 ;; esac
+          test -d "controller-plan/$evidence_path"
+          mkdir -p "ledger-input/$evidence_path"
+          cp -R "controller-plan/$evidence_path/." "ledger-input/$evidence_path/"
+          pull_request="$(jq -er '.pull_request' ledger-input/entry.json)"
+          merge_sha="$(jq -er '.merge_sha' ledger-input/entry.json)"
+          workflow_sha="$(jq -er '.workflow_sha' ledger-input/entry.json)"
+          run_id="$(jq -er '.run_id' ledger-input/entry.json)"
+          run_attempt="$(jq -er '.run_attempt' ledger-input/entry.json)"
+          {
+            echo "evidence_path=$evidence_path"
+            echo "namespace=ordinary/${{ matrix.slug }}/pr-$pull_request/$merge_sha/intent"
+            echo "run_attempt=$run_attempt"
+            echo "run_id=$run_id"
+            echo "workflow_sha=$workflow_sha"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Mint exact central-ledger writer token
+        if: matrix.selected == 'true'
+        id: ledger-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.HELM_AUTHORITY_MERGER_CLIENT_ID }}
+          private-key: ${{ secrets.HELM_AUTHORITY_MERGER_PRIVATE_KEY }}
+          owner: Mindburn-Labs
+          repositories: .github
+          permission-contents: write
+
+      - name: Bind exact ledger writer identity and repository scope
+        if: matrix.selected == 'true'
+        env:
+          APP_SLUG: ${{ steps.ledger-token.outputs.app-slug }}
+          GH_TOKEN: ${{ steps.ledger-token.outputs.token }}
+          INSTALLATION_ID: ${{ steps.ledger-token.outputs.installation-id }}
+        run: |
+          set -euo pipefail
+          test "$APP_SLUG" = "helm-authority-merger"
+          test "$INSTALLATION_ID" = "$(jq -er '.apps.merger.installation_id' broker/config/autonomous-release-controller.json)"
+          test "$(gh api /installation/repositories?per_page=100 --jq '.repositories | map(.full_name) | sort | join(",")')" = "Mindburn-Labs/.github"
+
+      - name: Append intent before any main-ref mutation
+        if: matrix.selected == 'true'
+        env:
+          GH_TOKEN: ${{ steps.ledger-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/authority_evidence_ledger.py append \
+            --namespace "${{ steps.intent.outputs.namespace }}" \
+            --record-type ordinary-merge \
+            --phase intent \
+            --workflow-sha "${{ steps.intent.outputs.workflow_sha }}" \
+            --run-id "${{ steps.intent.outputs.run_id }}" \
+            --run-attempt "${{ steps.intent.outputs.run_attempt }}" \
+            --input-root ledger-input \
+            --include entry.json \
+            --include approval.json \
+            --include-tree "${{ steps.intent.outputs.evidence_path }}" \
+            --output ordinary-intent.json
+
+      - name: Retain intent append receipt
+        if: matrix.selected == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: helm-ordinary-intent-${{ matrix.slug }}
+          path: ordinary-intent.json
+          if-no-files-found: error
+          retention-days: 90
+
   tick-merge:
     name: Atomically merge selected ordinary PR (${{ matrix.slug }})
     needs:
       - tick-plan
       - tick-approve
+      - tick-intent
     environment: authority-merge
     permissions:
       actions: read
@@ -441,6 +593,13 @@ jobs:
           name: helm-ordinary-approval-${{ matrix.slug }}
           path: approval
 
+      - name: Download durable intent receipt
+        if: matrix.selected == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-ordinary-intent-${{ matrix.slug }}
+          path: ledger-intent
+
       - name: Checkout immutable merge broker
         if: matrix.selected == 'true'
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -470,6 +629,8 @@ jobs:
           test "$(jq -er '.controller_sha' controller-plan/controller-plan.json)" = "$GITHUB_WORKFLOW_SHA"
           test "$(jq -er '.controller_sha' approval/ordinary-approval.json)" = "$GITHUB_WORKFLOW_SHA"
           test "$(jq -er '.repository' approval/ordinary-approval.json)" = "${{ matrix.repository }}"
+          test "$(jq -er '.record_type' ledger-intent/ordinary-intent.json)" = "ordinary-merge"
+          test "$(jq -er '.phase' ledger-intent/ordinary-intent.json)" = "intent"
 
       - name: Require source-owned merger App activation
         if: matrix.selected == 'true'
@@ -547,6 +708,147 @@ jobs:
           path: |
             ordinary-merge.json
             ordinary-merge.attestation.json
+          if-no-files-found: error
+          retention-days: 90
+
+  tick-closure:
+    name: Persist ordinary merge closure (${{ matrix.slug }})
+    needs:
+      - tick-plan
+      - tick-intent
+      - tick-merge
+    environment: authority-merge
+    permissions:
+      actions: read
+      attestations: read
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repository: Mindburn-Labs/.github
+            selected: ${{ needs.tick-plan.outputs.github_selected }}
+            slug: github-authority
+          - repository: Mindburn-Labs/helm-ai-kernel
+            selected: ${{ needs.tick-plan.outputs.kernel_selected }}
+            slug: helm-ai-kernel
+    steps:
+      - name: Download signed controller plan
+        if: matrix.selected == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-autonomous-controller-plan
+          path: controller-plan
+
+      - name: Download durable intent receipt
+        if: matrix.selected == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-ordinary-intent-${{ matrix.slug }}
+          path: ledger-intent
+
+      - name: Download exact merge receipt
+        if: matrix.selected == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-ordinary-merge-${{ matrix.slug }}
+          path: merge
+
+      - name: Checkout immutable evidence writer
+        if: matrix.selected == 'true'
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          path: broker
+
+      - name: Verify merge provenance and build deterministic closure
+        if: matrix.selected == 'true'
+        id: closure
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ matrix.repository }}
+        run: |
+          set -euo pipefail
+          gh attestation verify merge/ordinary-merge.json \
+            --bundle merge/ordinary-merge.attestation.json \
+            --repo Mindburn-Labs/.github \
+            --signer-workflow Mindburn-Labs/.github/.github/workflows/promote-authority.yml \
+            --signer-digest "$GITHUB_WORKFLOW_SHA" \
+            --source-digest "$GITHUB_SHA" \
+            --deny-self-hosted-runners
+          mkdir closure-input
+          python3 broker/scripts/authority_evidence_ledger.py descriptor \
+            --receipt ledger-intent/ordinary-intent.json \
+            --output closure-input/intent-descriptor.json
+          jq -e '.closure | select(.schema == "mindburn.autonomous-release-merge-closure/v1")' \
+            merge/ordinary-merge.json > closure-input/ordinary-merge-closure.json
+          jq -e --arg repository "$REPOSITORY" \
+            '[.ordinary[] | select(.repository == $repository)] |
+             if length == 1 then .[0] else error("expected one ordinary entry") end' \
+            controller-plan/controller-plan.json > closure-entry.json
+          pull_request="$(jq -er '.pull_request' closure-entry.json)"
+          merge_sha="$(jq -er '.merge_sha' closure-entry.json)"
+          workflow_sha="$(jq -er '.workflow_sha' closure-entry.json)"
+          run_id="$(jq -er '.run_id' closure-entry.json)"
+          run_attempt="$(jq -er '.run_attempt' closure-entry.json)"
+          test "$(jq -er '.merges[0].merge_commit_sha' closure-input/ordinary-merge-closure.json)" = "$merge_sha"
+          {
+            echo "namespace=ordinary/${{ matrix.slug }}/pr-$pull_request/$merge_sha/closure"
+            echo "run_attempt=$run_attempt"
+            echo "run_id=$run_id"
+            echo "workflow_sha=$workflow_sha"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Mint exact central-ledger writer token
+        if: matrix.selected == 'true'
+        id: ledger-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.HELM_AUTHORITY_MERGER_CLIENT_ID }}
+          private-key: ${{ secrets.HELM_AUTHORITY_MERGER_PRIVATE_KEY }}
+          owner: Mindburn-Labs
+          repositories: .github
+          permission-contents: write
+
+      - name: Bind exact ledger writer identity and repository scope
+        if: matrix.selected == 'true'
+        env:
+          APP_SLUG: ${{ steps.ledger-token.outputs.app-slug }}
+          GH_TOKEN: ${{ steps.ledger-token.outputs.token }}
+          INSTALLATION_ID: ${{ steps.ledger-token.outputs.installation-id }}
+        run: |
+          set -euo pipefail
+          test "$APP_SLUG" = "helm-authority-merger"
+          test "$INSTALLATION_ID" = "$(jq -er '.apps.merger.installation_id' broker/config/autonomous-release-controller.json)"
+          test "$(gh api /installation/repositories?per_page=100 --jq '.repositories | map(.full_name) | sort | join(",")')" = "Mindburn-Labs/.github"
+
+      - name: Append closure after exact GitHub reconciliation
+        if: matrix.selected == 'true'
+        env:
+          GH_TOKEN: ${{ steps.ledger-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/authority_evidence_ledger.py append \
+            --namespace "${{ steps.closure.outputs.namespace }}" \
+            --record-type ordinary-merge \
+            --phase closure \
+            --workflow-sha "${{ steps.closure.outputs.workflow_sha }}" \
+            --run-id "${{ steps.closure.outputs.run_id }}" \
+            --run-attempt "${{ steps.closure.outputs.run_attempt }}" \
+            --input-root closure-input \
+            --include intent-descriptor.json \
+            --include ordinary-merge-closure.json \
+            --output ordinary-closure.json
+
+      - name: Retain closure append receipt
+        if: matrix.selected == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: helm-ordinary-closure-${{ matrix.slug }}
+          path: ordinary-closure.json
           if-no-files-found: error
           retention-days: 90
 

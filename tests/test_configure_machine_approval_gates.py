@@ -89,6 +89,8 @@ class FakeClient:
         self.machine: dict[str, object] | None = None
         self.updater: dict[str, object] | None = None
         self.proof_ruleset: dict[str, object] | None = None
+        self.evidence_updater: dict[str, object] | None = None
+        self.evidence_history: dict[str, object] | None = None
         self.human = {
             "id": MODULE.HUMAN_RULESET_ID,
             **MODULE.human_ruleset_state(contract, "before"),
@@ -202,6 +204,20 @@ class FakeClient:
                         "name": MODULE.PROOF_REF_RULESET_NAME,
                     }
                 )
+            if self.evidence_updater is not None:
+                values.append(
+                    {
+                        "id": self.evidence_updater["id"],
+                        "name": MODULE.EVIDENCE_UPDATER_RULESET_NAME,
+                    }
+                )
+            if self.evidence_history is not None:
+                values.append(
+                    {
+                        "id": self.evidence_history["id"],
+                        "name": MODULE.EVIDENCE_HISTORY_RULESET_NAME,
+                    }
+                )
             return response(values, None)
         if path.endswith("/rulesets") and method == "POST":
             self.posts += 1
@@ -214,6 +230,22 @@ class FakeClient:
             if payload["name"] == MODULE.PROOF_REF_RULESET_NAME:
                 self.proof_ruleset = {"id": 9003, **json.loads(json.dumps(payload))}
                 return response(json.loads(json.dumps(self.proof_ruleset)), 'W/"proof"')
+            if payload["name"] == MODULE.EVIDENCE_UPDATER_RULESET_NAME:
+                self.evidence_updater = {
+                    "id": 9004,
+                    **json.loads(json.dumps(payload)),
+                }
+                return response(
+                    json.loads(json.dumps(self.evidence_updater)), 'W/"ledger-updater"'
+                )
+            if payload["name"] == MODULE.EVIDENCE_HISTORY_RULESET_NAME:
+                self.evidence_history = {
+                    "id": 9005,
+                    **json.loads(json.dumps(payload)),
+                }
+                return response(
+                    json.loads(json.dumps(self.evidence_history)), 'W/"ledger-history"'
+                )
             raise AssertionError("unexpected ruleset creation")
         if path.endswith("rulesets/9001"):
             return response(json.loads(json.dumps(self.machine)), 'W/"machine"')
@@ -229,6 +261,14 @@ class FakeClient:
                     **json.loads(json.dumps(payload)),
                 }
             return response(json.loads(json.dumps(self.proof_ruleset)), 'W/"proof"')
+        if path.endswith("rulesets/9004"):
+            return response(
+                json.loads(json.dumps(self.evidence_updater)), 'W/"ledger-updater"'
+            )
+        if path.endswith("rulesets/9005"):
+            return response(
+                json.loads(json.dumps(self.evidence_history)), 'W/"ledger-history"'
+            )
         if path.endswith(f"rulesets/{MODULE.HUMAN_RULESET_ID}"):
             if method == "GET":
                 return response(json.loads(json.dumps(self.human)), self.etag)
@@ -275,6 +315,13 @@ class FakeClient:
                 {"ref": ref, "object": {"sha": MODULE.PROOF_REFS[ref]}},
                 None,
             )
+        if path == (
+            "/repos/Mindburn-Labs/.github/git/ref/heads/authority/evidence-v1"
+        ):
+            return response(
+                {"ref": MODULE.LEDGER_REF, "object": {"sha": CANDIDATE_SHA}},
+                None,
+            )
         raise AssertionError(f"unexpected request {method} {path}")
 
 
@@ -298,6 +345,9 @@ class ConfigureMachineApprovalGatesTests(unittest.TestCase):
         contract["machine_approval_ruleset"] = MODULE.machine_ruleset_payload()
         contract["exclusive_updater_ruleset"] = MODULE.updater_ruleset_payload(
             MERGER_APP_ID
+        )
+        contract["evidence_ledger"]["exclusive_updater_ruleset"] = (
+            MODULE.evidence_updater_ruleset_payload(MERGER_APP_ID)
         )
         self.contract_path.write_text(json.dumps(contract), encoding="utf-8")
         self.contract = MODULE.load_contract(self.contract_path)
@@ -335,7 +385,7 @@ class ConfigureMachineApprovalGatesTests(unittest.TestCase):
     def test_installs_machine_interlock_before_retiring_codeowner_scope(self) -> None:
         client = FakeClient(self.contract)
         receipt = MODULE.configure_machine_approval_gates(self.args, client)
-        self.assertEqual(client.posts, 3)
+        self.assertEqual(client.posts, 5)
         self.assertEqual(client.puts, 1)
         self.assertEqual(client.kernel_puts, 1)
         self.assertEqual(client.proof_puts, 1)

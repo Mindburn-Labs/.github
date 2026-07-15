@@ -25,7 +25,7 @@ class AuthorityPromotionWorkflowTests(unittest.TestCase):
         self.assertEqual(workflow.count("HELM_AUTHORITY_OBSERVER_PRIVATE_KEY"), 3)
         self.assertIn("HELM_AUTHORITY_APPROVER_PRIVATE_KEY", workflow)
         self.assertEqual(workflow.count("HELM_AUTHORITY_APPROVER_PRIVATE_KEY"), 2)
-        self.assertEqual(workflow.count("HELM_AUTHORITY_MERGER_PRIVATE_KEY"), 2)
+        self.assertEqual(workflow.count("HELM_AUTHORITY_MERGER_PRIVATE_KEY"), 4)
         self.assertEqual(workflow.count("Bind exact promoter App identity"), 5)
         self.assertEqual(workflow.count("Bind exact observer App identity"), 3)
         self.assertEqual(workflow.count("Bind exact approval App identity"), 2)
@@ -34,7 +34,7 @@ class AuthorityPromotionWorkflowTests(unittest.TestCase):
             workflow.count("action.yml defines client-id and deprecates app-id"),
             7,
         )
-        self.assertEqual(workflow.count("client-id:"), 12)
+        self.assertEqual(workflow.count("client-id:"), 14)
         self.assertNotIn("app-id:", workflow)
         self.assertEqual(workflow.count('= "helm-authority-promoter"'), 5)
         self.assertEqual(workflow.count('= "helm-authority-observer"'), 3)
@@ -52,7 +52,7 @@ class AuthorityPromotionWorkflowTests(unittest.TestCase):
         self.assertIn("permission-actions: read", workflow)
         self.assertIn("permission-attestations: read", workflow)
         self.assertIn("permission-pull-requests: write", workflow)
-        self.assertEqual(workflow.count("permission-contents: write"), 2)
+        self.assertEqual(workflow.count("permission-contents: write"), 4)
         merge_job = workflow[workflow.index("  merge:") : workflow.index("  rebind:")]
         self.assertIn("contents: write", merge_job)
         self.assertNotIn("HELM_AUTHORITY_PROMOTER_PRIVATE_KEY", merge_job)
