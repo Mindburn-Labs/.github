@@ -5,11 +5,12 @@ permissions:
   pull-requests: write
 
 on:
-  pull_request:
+  # Keep the secret-bearing workflow definition on the trusted base branch.
+  # The reusable workflow checks out the exact candidate commit as data only.
+  pull_request_target:
     branches: [main]
   push:
     branches: [main]
-  workflow_dispatch:
 
 jobs:
   docs-truth:

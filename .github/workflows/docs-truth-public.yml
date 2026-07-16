@@ -2,11 +2,6 @@ name: Docs Truth Public Reusable
 
 permissions:
   contents: read
-  # Needed by the "Post orphan-ledger PR comment" step to upsert a comment on
-  # PRs when the report contains missing_ledger_row failures. Caller workflows
-  # must also declare pull-requests: write for the token to actually carry
-  # that permission — a reusable declaration alone is not enough.
-  pull-requests: write
 
 on:
   workflow_call:
@@ -20,29 +15,37 @@ on:
     secrets:
       MINDBURN_ORG_READ_TOKEN:
         required: true
-  workflow_dispatch:
-    inputs:
-      repo:
-        description: Repository name to check. Defaults to the current repo.
-        required: false
-        type: string
-      changed_base:
-        description: Optional base ref for source/doc drift checks.
-        required: false
-        type: string
 
 jobs:
   docs-truth:
     name: docs-truth
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      subject_repo: ${{ steps.subject.outputs.repo }}
     steps:
+      - name: Reject non-authoritative event execution
+        if: github.ref != 'refs/heads/main' || (github.event_name != 'pull_request_target' && github.event_name != 'push')
+        shell: bash
+        run: |
+          echo "::error::Secret-bearing Docs Truth runs require pull_request_target or push on refs/heads/main."
+          exit 1
+
       - name: Resolve subject repo
         id: subject
         shell: bash
+        env:
+          INPUT_REPO: ${{ inputs.repo }}
         run: |
-          repo="${{ inputs.repo }}"
+          set -euo pipefail
+          repo="$INPUT_REPO"
           if [ -z "$repo" ]; then
             repo="${GITHUB_REPOSITORY#*/}"
+          fi
+          if [[ ! "$repo" =~ ^[A-Za-z0-9._-]+$ ]] || [ "$repo" = "." ] || [ "$repo" = ".." ]; then
+            echo "::error::Invalid subject repository name"
+            exit 1
           fi
           local_name="$repo"
           if [ "$repo" = ".github" ]; then
@@ -52,66 +55,117 @@ jobs:
           echo "local_name=$local_name" >> "$GITHUB_OUTPUT"
 
       - name: Checkout subject repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: Mindburn-Labs/${{ steps.subject.outputs.repo }}
           path: workspace/${{ steps.subject.outputs.local_name }}
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.repo != '' && 'main' || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
-          token: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}
+          persist-credentials: false
+          token: ${{ github.event_name == 'pull_request_target' && github.token || secrets.MINDBURN_ORG_READ_TOKEN }}
 
       - name: Checkout .github inventory
         if: steps.subject.outputs.repo != '.github'
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: Mindburn-Labs/.github
           path: workspace/.github-repo
           fetch-depth: 1
+          persist-credentials: false
           token: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}
 
       - name: Checkout docs truth ledger
         if: steps.subject.outputs.repo != 'docs'
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: Mindburn-Labs/docs
           path: workspace/docs
           fetch-depth: 1
+          persist-credentials: false
           token: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}
 
       - name: Checkout docs-truth runner
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: Mindburn-Labs/dev-orchestration
           ref: 3d8f07723dff90aaa83473a3e8134f6ae93d501b
-          path: workspace/dev-orchestration
+          path: .trusted/docs-truth-runner
           fetch-depth: 1
+          persist-credentials: false
           token: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}
+
+      - name: Assert candidate checkout is data-only
+        if: github.event_name == 'pull_request_target'
+        shell: bash
+        env:
+          SUBJECT_REPO: ${{ steps.subject.outputs.repo }}
+          SUBJECT_PATH: workspace/${{ steps.subject.outputs.local_name }}
+        run: |
+          set -euo pipefail
+          if git -C "$SUBJECT_PATH" config --local --get-regexp '^(credential\.|http\..*\.extraheader)' >/dev/null; then
+            echo "::error::Candidate checkout retained Git credentials"
+            exit 1
+          fi
+          if git -C "$SUBJECT_PATH" ls-files -s -- '*.md' '*.mdx' | awk '$1 != "100644" && $1 != "100755" { found=1 } END { exit found ? 0 : 1 }'; then
+            echo "::error::Candidate Markdown must be regular files"
+            exit 1
+          fi
+          ruby -rcsv -e '
+            rows = CSV.read("workspace/docs/audit/markdown-estate-ledger.csv", headers: true)
+            subject = ENV.fetch("SUBJECT_REPO")
+            executable = rows.select do |row|
+              row["repo"].to_s.strip == subject && row["status"].to_s.strip.downcase == "generated"
+            end
+            abort "candidate data-only review cannot execute truth_gate rows: #{executable.map { |row| row["path"] }.join(", ")}" unless executable.empty?
+          '
 
       - name: Run docs truth gate
         shell: bash
+        env:
+          INPUT_CHANGED_BASE: ${{ inputs.changed_base }}
+          SUBJECT_REPO: ${{ steps.subject.outputs.repo }}
         run: |
           args=(
             --mode local
             --workspace-root "$GITHUB_WORKSPACE/workspace"
-            --repo "${{ steps.subject.outputs.repo }}"
+            --repo "$SUBJECT_REPO"
             --report "$RUNNER_TEMP/docs-truth-report.json"
           )
-          changed_base="${{ inputs.changed_base }}"
-          if [ -z "$changed_base" ] && [ "${{ github.event_name }}" = "pull_request" ]; then
+          changed_base="$INPUT_CHANGED_BASE"
+          if [ -z "$changed_base" ] && [ "${{ github.event_name }}" = "pull_request_target" ]; then
             changed_base="${{ github.event.pull_request.base.sha }}"
           fi
           if [ -n "$changed_base" ]; then
             args+=(--changed-base "$changed_base")
           fi
-          ruby "$GITHUB_WORKSPACE/workspace/dev-orchestration/estate-control-plane/scripts/docs-truth-org.rb" "${args[@]}"
+          ruby "$GITHUB_WORKSPACE/.trusted/docs-truth-runner/estate-control-plane/scripts/docs-truth-org.rb" "${args[@]}"
 
       - name: Upload docs truth report
-        if: always()
-        uses: actions/upload-artifact@v4
+        if: always() && github.event_name != 'pull_request'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: docs-truth-report
           path: ${{ runner.temp }}/docs-truth-report.json
           if-no-files-found: ignore
+
+  comment:
+    name: docs-truth-comment
+    needs: docs-truth
+    if: always() && github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+    permissions:
+      # The caller must also grant pull-requests: write. This isolated job has
+      # no candidate checkout and never references or exports the organization
+      # read token.
+      pull-requests: write
+    steps:
+      - name: Download docs truth report
+        id: report
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: docs-truth-report
+          path: ${{ runner.temp }}
 
       # Post-hoc: on a pull_request run, if the report contains any
       # missing_ledger_row failures, upsert a PR comment that lists the offending
@@ -123,11 +177,11 @@ jobs:
       # #27 and #28). If the report is clean, any prior orphan comment on this PR
       # is deleted so a re-opened PR doesn't carry stale advice.
       - name: Post orphan-ledger PR comment
-        if: always() && github.event_name == 'pull_request'
+        if: always() && steps.report.outcome == 'success'
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         env:
           REPORT_PATH: ${{ runner.temp }}/docs-truth-report.json
-          SUBJECT_REPO: ${{ steps.subject.outputs.repo }}
+          SUBJECT_REPO: ${{ needs.docs-truth.outputs.subject_repo }}
         with:
           script: |
             const fs = require('fs');
@@ -165,7 +219,6 @@ jobs:
 
             if (!fs.existsSync(path)) {
               core.info('No docs-truth-report.json found — nothing to comment on.');
-              await deleteIfExists();
               return;
             }
 
@@ -174,7 +227,6 @@ jobs:
               report = JSON.parse(fs.readFileSync(path, 'utf8'));
             } catch (err) {
               core.warning(`Could not parse docs-truth-report.json: ${err.message}`);
-              await deleteIfExists();
               return;
             }
 
@@ -204,21 +256,24 @@ jobs:
             // this bot-authored comment. Escape every untrusted value
             // (report.failures[].path) before interpolating.
             //
-            //   - Markdown escape: backslash-escape backticks and backslashes
-            //     inside the inline-code span; CR/LF replaced with visible
-            //     literals so a single log-line stays on one line.
+            //   - Markdown display: use an HTML code element, escape HTML
+            //     metacharacters, and visualize control/bidirectional marks.
+            //     Backslash escapes do not protect backticks inside a Markdown
+            //     code span, so untrusted paths must not delimit that span.
             //   - CSV escape: RFC 4180 — wrap every field in ", double any
             //     internal ", visualize CR/LF so the row stays single-line.
             //     Applied to every column (including the static ones) so the
             //     block round-trips cleanly if a reader pastes it into the
             //     ledger CSV. Ledger fields treat "" and unquoted "" as
             //     equivalent empty strings.
-            const escapeMarkdownInline = (value) =>
+            const escapeHtmlCode = (value) =>
               String(value)
-                .replace(/\\/g, '\\\\')
-                .replace(/`/g, '\\`')
-                .replace(/\r/g, '\\r')
-                .replace(/\n/g, '\\n');
+                .replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/gu, (char) =>
+                  `\\u{${char.codePointAt(0).toString(16)}}`
+                )
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
 
             const escapeCsvField = (value) =>
               `"${String(value)
@@ -246,7 +301,7 @@ jobs:
               .join('\n');
 
             const fileList = orphans
-              .map((f) => `- \`${escapeMarkdownInline(f.path)}\``)
+              .map((f) => `- <code>${escapeHtmlCode(f.path)}</code>`)
               .join('\n');
 
             const body = [
