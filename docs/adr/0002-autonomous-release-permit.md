@@ -52,6 +52,17 @@ Oversized or unsupported work must use a dedicated review lane. Each model
 executes in a separate ephemeral job. Only the strict JSON envelope and content
 digests flow to the Kernel reducer.
 
+Each provider job may make at most two isolated generation attempts for the
+same immutable context, provider, model, workflow run, and run attempt. An
+attempt that exits nonzero, times out, is empty, or does not normalize to one
+complete schema-valid response is non-authoritative diagnostic evidence; it
+never enters the reducer. The first schema-valid response ends generation,
+including a valid `DENY`, and every attempt uses a distinct working directory,
+Copilot home, and cache with system-temp access disabled. If both attempts
+fail, no review envelope is emitted and the provider job fails closed. This
+bounded in-job generation retry is distinct from a GitHub failed-job rerun,
+which must mint a new context for the new GitHub run attempt.
+
 The shared repository-gate baseline requires `make lint` and `make test`.
 `make setup` and `make build` run when the target repository defines them. A
 repository without a Makefile, lint target, or test target fails closed during
@@ -196,7 +207,8 @@ treated as an atomic compare-and-swap guarantee.
    activation.
 3. Prove `ALLOW` on an exact merge tree, structured `DENY` for stale context,
    provider duplication and blocking findings, and a failed check for a missing
-   reviewer, malformed response, or model outage.
+   reviewer, malformed responses after bounded generation attempts are
+   exhausted, or model outage.
 4. Before activation, require strict current-base status or a merge queue, prove
    every case in `tests/fixtures/autonomous-release-adversarial.json` against
    both live model jobs, and add a protected lane for changes to workflow, gate,
