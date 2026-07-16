@@ -1791,6 +1791,8 @@ def confirmed_or_atomic_merge(
     client: GitHubMergeClient,
     *,
     merger: dict[str, Any],
+    approval_receipt: Path,
+    permit: Path,
 ) -> dict[str, Any]:
     main = client.get(f"/repos/{REPOSITORY}/git/ref/heads/main")
     main_sha = nested_string(main, "object", "sha", label="main SHA")
@@ -1803,8 +1805,8 @@ def confirmed_or_atomic_merge(
         merger_app_slug=merger["slug"],
         merger_installation_id=merger["installation_id"],
         merger_app_id=merger["app_id"],
-        approval_receipt=None,
-        permit=None,
+        approval_receipt=approval_receipt,
+        permit=permit,
     )
     if main_sha == ready["base_sha"]:
         return atomic_merge(merge_args, client)
@@ -2181,6 +2183,8 @@ def finalize(
         ready,
         merge_client,
         merger=bootstrap_contract["merger"],
+        approval_receipt=paths["machine_approval"],
+        permit=liveness_permit_path,
     )
     closure_receipt = append_record(
         ledger_client,

@@ -8,6 +8,7 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -96,6 +97,13 @@ class ResumeMergeClient:
                 "parents": [{"sha": BASE_SHA}, {"sha": CANDIDATE_SHA}],
                 "tree": {"sha": TREE_SHA},
             }
+        raise AssertionError(f"unexpected GET {path}")
+
+
+class PendingMergeClient:
+    def get(self, path: str):
+        if path.endswith("/git/ref/heads/main"):
+            return {"object": {"sha": BASE_SHA}}
         raise AssertionError(f"unexpected GET {path}")
 
 
@@ -518,17 +526,55 @@ class BootstrapAuthorityTests(unittest.TestCase):
             "merge_sha": MERGE_SHA,
             "merge_tree_sha": TREE_SHA,
         }
-        receipt = MODULE.confirmed_or_atomic_merge(
-            ready,
-            ResumeMergeClient(),
-            merger={
-                "slug": "helm-authority-merger",
-                "app_id": 5000001,
-                "installation_id": 6000001,
-            },
-        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            receipt = MODULE.confirmed_or_atomic_merge(
+                ready,
+                ResumeMergeClient(),
+                merger={
+                    "slug": "helm-authority-merger",
+                    "app_id": 5000001,
+                    "installation_id": 6000001,
+                },
+                approval_receipt=Path(tmpdir) / "machine-approval.json",
+                permit=Path(tmpdir) / "liveness-permit.json",
+            )
         self.assertEqual(receipt["merge_sha"], MERGE_SHA)
         self.assertFalse(receipt["force"])
+
+    def test_pending_atomic_merge_forwards_authorization_for_revalidation(
+        self,
+    ) -> None:
+        ready = {
+            "pull_request": 36,
+            "base_sha": BASE_SHA,
+            "candidate_sha": CANDIDATE_SHA,
+            "merge_sha": MERGE_SHA,
+            "merge_tree_sha": TREE_SHA,
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            approval_path = Path(tmpdir) / "machine-approval.json"
+            permit_path = Path(tmpdir) / "liveness-permit.json"
+            captured: dict[str, argparse.Namespace] = {}
+
+            def capture(args: argparse.Namespace, _client: object) -> dict[str, object]:
+                captured["args"] = args
+                return {"merge_sha": MERGE_SHA, "force": False}
+
+            with patch.object(MODULE, "atomic_merge", side_effect=capture):
+                receipt = MODULE.confirmed_or_atomic_merge(
+                    ready,
+                    PendingMergeClient(),
+                    merger={
+                        "slug": "helm-authority-merger",
+                        "app_id": 5000001,
+                        "installation_id": 6000001,
+                    },
+                    approval_receipt=approval_path,
+                    permit=permit_path,
+                )
+        self.assertEqual(receipt["merge_sha"], MERGE_SHA)
+        self.assertEqual(captured["args"].approval_receipt, approval_path)
+        self.assertEqual(captured["args"].permit, permit_path)
 
     def test_ready_receipt_rejects_candidate_substitution(self) -> None:
         ready = {

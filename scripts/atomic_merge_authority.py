@@ -227,6 +227,41 @@ def verify_machine_approval(
         raise PermitInputError("live App approval does not match the signed permit")
 
 
+def required_authority_inputs(
+    args: argparse.Namespace,
+) -> tuple[str, int, int, Path, Path]:
+    merger_app_slug = getattr(args, "merger_app_slug", None)
+    merger_installation_id = getattr(args, "merger_installation_id", None)
+    merger_app_id = getattr(args, "merger_app_id", None)
+    approval_path = getattr(args, "approval_receipt", None)
+    permit_path = getattr(args, "permit", None)
+    if not isinstance(merger_app_slug, str) or not merger_app_slug:
+        raise PermitInputError("merger App slug is required")
+    if (
+        not isinstance(merger_installation_id, int)
+        or isinstance(merger_installation_id, bool)
+        or merger_installation_id <= 0
+    ):
+        raise PermitInputError("merger App installation ID is required")
+    if (
+        not isinstance(merger_app_id, int)
+        or isinstance(merger_app_id, bool)
+        or merger_app_id <= 0
+    ):
+        raise PermitInputError("merger App ID is required")
+    if not isinstance(approval_path, Path):
+        raise PermitInputError("machine approval receipt is required")
+    if not isinstance(permit_path, Path):
+        raise PermitInputError("ratification permit is required")
+    return (
+        merger_app_slug,
+        merger_installation_id,
+        merger_app_id,
+        approval_path,
+        permit_path,
+    )
+
+
 def validate_pull_request(
     pull_request: dict[str, Any],
     *,
@@ -283,35 +318,24 @@ def atomic_merge(args: argparse.Namespace, client: GitHubMergeClient) -> dict[st
     tree_sha = require_sha(args.tree_sha, label="tree_sha", length=40)
     if args.pull_request <= 0:
         raise PermitInputError("pull_request must be positive")
-    merger_app_slug = getattr(args, "merger_app_slug", None)
-    merger_installation_id = getattr(args, "merger_installation_id", None)
-    merger_app_id = getattr(args, "merger_app_id", None)
-    if any(
-        value is not None
-        for value in (merger_app_slug, merger_installation_id, merger_app_id)
-    ):
-        if not (
-            isinstance(merger_app_slug, str)
-            and isinstance(merger_installation_id, int)
-            and isinstance(merger_app_id, int)
-        ):
-            raise PermitInputError("merger App identity arguments are incomplete")
-        verify_merger_installation(
-            client,
-            app_slug=merger_app_slug,
-            installation_id=merger_installation_id,
-            app_id=merger_app_id,
-        )
-    approval_path = getattr(args, "approval_receipt", None)
-    permit_path = getattr(args, "permit", None)
-    if (approval_path is None) != (permit_path is None):
-        raise PermitInputError("approval receipt and permit must be supplied together")
-    if isinstance(approval_path, Path) and isinstance(permit_path, Path):
-        verify_machine_approval(
-            client,
-            approval_path=approval_path,
-            permit_path=permit_path,
-        )
+    (
+        merger_app_slug,
+        merger_installation_id,
+        merger_app_id,
+        approval_path,
+        permit_path,
+    ) = required_authority_inputs(args)
+    verify_machine_approval(
+        client,
+        approval_path=approval_path,
+        permit_path=permit_path,
+    )
+    verify_merger_installation(
+        client,
+        app_slug=merger_app_slug,
+        installation_id=merger_installation_id,
+        app_id=merger_app_id,
+    )
 
     main = client.get(f"/repos/{REPOSITORY}/git/ref/heads/main")
     main_sha = nested_string(main, "object", "sha", label="main SHA")
@@ -409,11 +433,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--head-sha", required=True)
     parser.add_argument("--merge-sha", required=True)
     parser.add_argument("--tree-sha", required=True)
-    parser.add_argument("--approval-receipt", type=Path)
-    parser.add_argument("--permit", type=Path)
-    parser.add_argument("--merger-app-slug")
-    parser.add_argument("--merger-installation-id", type=int)
-    parser.add_argument("--merger-app-id", type=int)
+    parser.add_argument("--approval-receipt", type=Path, required=True)
+    parser.add_argument("--permit", type=Path, required=True)
+    parser.add_argument("--merger-app-slug", required=True)
+    parser.add_argument("--merger-installation-id", type=int, required=True)
+    parser.add_argument("--merger-app-id", type=int, required=True)
     parser.add_argument("--output", type=Path, required=True)
     return parser
 
