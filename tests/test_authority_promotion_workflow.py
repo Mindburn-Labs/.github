@@ -197,6 +197,51 @@ class AuthorityPromotionWorkflowTests(unittest.TestCase):
         self.assertEqual(workflow.count("--candidate-kernel-verifier"), 2)
         self.assertIn("verify-kernel-transition", workflow)
 
+    def test_control_ref_and_permit_parent_have_separate_bindings(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "promote-authority.yml").read_text(
+            encoding="utf-8",
+        )
+        ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8",
+        )
+        clock = (
+            ROOT / ".github" / "workflows" / "autonomous-release-clock.yml"
+        ).read_text(encoding="utf-8")
+
+        # Both dispatch paths select the immutable control ref. The controller
+        # binds that selected ref to its own workflow source before privilege use.
+        for dispatcher in (ci, clock):
+            self.assertIn("-f ref=authority/control-v1", dispatcher)
+        self.assertIn("workflow_dispatch:", workflow)
+        self.assertNotIn("workflow_run:", workflow)
+        self.assertIn("control_ref=refs/heads/authority/control-v1", workflow)
+        self.assertIn('test "$GITHUB_REF" = "$control_ref"', workflow)
+        self.assertIn('test "$GITHUB_SHA" = "$GITHUB_WORKFLOW_SHA"', workflow)
+        self.assertIn(
+            'test "$GITHUB_WORKFLOW_REF" = "Mindburn-Labs/.github/.github/workflows/promote-authority.yml@$control_ref"',
+            workflow,
+        )
+        self.assertIn(
+            "git/ref/heads/authority/control-v1 --jq '.object.sha')\" = \"$GITHUB_WORKFLOW_SHA\"",
+            workflow,
+        )
+
+        # The permit's parent CI authority is independently attested and checked
+        # out; it is bound separately rather than assumed equal to the controller.
+        self.assertIn('parent_sha="$(jq -er \'.workflow_sha\' "$permit")"', workflow)
+        self.assertIn('echo "control_sha=$GITHUB_WORKFLOW_SHA"', workflow)
+        self.assertIn('echo "parent_sha=$parent_sha"', workflow)
+        self.assertIn(
+            "--signer-workflow Mindburn-Labs/.github/.github/workflows/ci.yml",
+            workflow,
+        )
+        self.assertIn(
+            '--signer-digest "${{ steps.metadata.outputs.parent_sha }}"',
+            workflow,
+        )
+        self.assertIn('test "$parent_sha" = "$current_main"', workflow)
+        self.assertNotIn('test "$parent_sha" = "$GITHUB_WORKFLOW_SHA"', workflow)
+
     def test_promotion_recovery_is_ledger_first_and_phase_ordered(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "promote-authority.yml").read_text(
             encoding="utf-8",
