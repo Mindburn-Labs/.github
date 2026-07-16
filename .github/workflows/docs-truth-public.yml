@@ -169,6 +169,7 @@ jobs:
         if: github.event_name == 'pull_request_target'
         shell: bash
         env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           SUBJECT_REPO: ${{ steps.subject.outputs.repo }}
           SUBJECT_PATH: workspace/${{ steps.subject.outputs.local_name }}
         run: |
@@ -185,9 +186,19 @@ jobs:
             echo "::error::Candidate docs-truth policy inputs must be regular files"
             exit 1
           fi
-          ruby -rcsv -e '
+          policy_paths=(docs-truth.yaml)
+          if [ "$SUBJECT_REPO" = ".github" ]; then
+            policy_paths+=(repo-manifest.yaml)
+          fi
+          if ! git -C "$SUBJECT_PATH" diff --quiet "$PR_BASE_SHA"...HEAD -- "${policy_paths[@]}"; then
+            echo "::error::Candidate pull requests cannot change docs-truth policy inputs in the secret-backed lane"
+            git -C "$SUBJECT_PATH" diff --name-only "$PR_BASE_SHA"...HEAD -- "${policy_paths[@]}"
+            exit 1
+          fi
+          ruby -rcsv -rdate -ropen3 -ryaml -e '
             rows = CSV.read("workspace/docs/audit/markdown-estate-ledger.csv", headers: true)
             subject = ENV.fetch("SUBJECT_REPO")
+            subject_path = ENV.fetch("SUBJECT_PATH")
             executable = rows.select do |row|
               next false unless row["repo"].to_s.strip == subject
 
@@ -196,6 +207,77 @@ jobs:
               status == "generated" || !truth_gate.empty?
             end
             abort "candidate data-only review rejects generated or truth_gate rows: #{executable.map { |row| row["path"] }.join(", ")}" unless executable.empty?
+
+            config_path = File.join(subject_path, "docs-truth.yaml")
+            ignored = if File.exist?(config_path)
+              raw = YAML.safe_load(File.read(config_path), aliases: false) || {}
+              Array(raw["ignored_paths"]).map { |value| value.to_s.strip }.reject(&:empty?)
+            else
+              []
+            end
+            ignored_path = lambda do |path|
+              built_in = path.match?(%r{\A(?:node_modules|vendor|dist|build|coverage|out|\.next|\.turbo|\.cache|tmp|temp)/}) ||
+                path.match?(%r{/(?:node_modules|vendor|dist|build|coverage|out|\.next|\.turbo|\.cache|tmp|temp)/})
+              next true if built_in
+
+              ignored.any? do |pattern|
+                clean = pattern.sub(%r{\A/+}, "")
+                if clean.end_with?("/")
+                  path.start_with?(clean)
+                elsif clean.match?(/[*?\[]/)
+                  File.fnmatch?(clean, path, File::FNM_EXTGLOB)
+                else
+                  path == clean
+                end
+              end
+            end
+
+            manifest_path = subject == ".github" ? File.join(subject_path, "repo-manifest.yaml") : "workspace/.github-repo/repo-manifest.yaml"
+            manifest = YAML.safe_load(File.read(manifest_path), permitted_classes: [Date, Time], aliases: true) || {}
+            stale_names = Array(manifest.dig("inventory_summary", "deleted_repositories"))
+            stale_names.concat(Array(manifest["repositories"]).select { |repo| repo["archived"] == true }.map { |repo| repo["name"].to_s })
+            stale_names.concat(%w[app-docs-platform platform-design-system svc-titan-proofd])
+            stale_names = stale_names.map(&:to_s).reject(&:empty?).uniq
+
+            ledger = rows.each_with_object({}) do |row, index|
+              next unless row["repo"].to_s.strip == subject
+
+              index[row["path"].to_s.strip] = row
+            end
+            stdout, stderr, status = Open3.capture3("git", "-C", subject_path, "ls-files", "-z", "--", "*.md", "*.mdx")
+            abort "git ls-files failed: #{stderr.strip}" unless status.success?
+
+            archive_wording = /\b(archive|archived|historical|superseded|retired|deleted|tombstone|read-only)\b/i
+            occurrence_archived = lambda do |line, match|
+              left = [match.begin(0) - 96, 0].max
+              right = [match.end(0) + 96, line.length].min
+              line[left...right].match?(archive_wording)
+            end
+            selftest_pattern = /(?<![\w.-])app\-docs\-platform(?![\w.-])/i
+            current_match = selftest_pattern.match("app-docs-platform powers the current path")
+            retired_match = selftest_pattern.match("app-docs-platform is retired historical material")
+            abort "occurrence-local archive self-test failed" if occurrence_archived.call("app-docs-platform powers the current path", current_match)
+            abort "occurrence-local archive self-test failed" unless occurrence_archived.call("app-docs-platform is retired historical material", retired_match)
+
+            failures = []
+            stdout.split("\0").sort.each do |path|
+              next if ignored_path.call(path)
+              next if ledger[path]&.[]("status").to_s.strip.downcase == "archive"
+
+              File.foreach(File.join(subject_path, path)).with_index(1) do |line, line_number|
+                stale_names.each do |name|
+                  pattern = /(?<![\w.-])#{Regexp.escape(name)}(?![\w.-])/i
+                  offset = 0
+                  while (match = pattern.match(line, offset))
+                    unless occurrence_archived.call(line, match)
+                      failures << "#{path}:#{line_number}: #{name} lacks occurrence-local archive wording"
+                    end
+                    offset = match.end(0)
+                  end
+                end
+              end
+            end
+            abort "candidate stale-reference preflight failed:\n#{failures.uniq.join("\n")}" unless failures.empty?
           '
 
       - name: Run docs truth gate
