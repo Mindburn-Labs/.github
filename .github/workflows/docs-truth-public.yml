@@ -58,6 +58,7 @@ jobs:
           path: workspace/${{ steps.subject.outputs.local_name }}
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.repo != '' && 'main' || github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
+          persist-credentials: false
           token: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}
 
       - name: Checkout .github inventory
@@ -67,6 +68,7 @@ jobs:
           repository: Mindburn-Labs/.github
           path: workspace/.github-repo
           fetch-depth: 1
+          persist-credentials: false
           token: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}
 
       - name: Checkout docs truth ledger
@@ -76,16 +78,43 @@ jobs:
           repository: Mindburn-Labs/docs
           path: workspace/docs
           fetch-depth: 1
+          persist-credentials: false
           token: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}
 
       - name: Checkout docs-truth runner
         uses: actions/checkout@v4
         with:
           repository: Mindburn-Labs/dev-orchestration
-          ref: 54c6d75da77e43bb6df35320d51aa59ec873901e
+          ref: 3d8f07723dff90aaa83473a3e8134f6ae93d501b
           path: workspace/dev-orchestration
           fetch-depth: 1
+          persist-credentials: false
           token: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}
+
+      - name: Stage explicit pre-merge ledger contracts
+        shell: ruby {0}
+        env:
+          SUBJECT_REPO: ${{ steps.subject.outputs.repo }}
+          SUBJECT_LOCAL_NAME: ${{ steps.subject.outputs.local_name }}
+        run: |
+          require "csv"
+
+          root = File.join(ENV.fetch("GITHUB_WORKSPACE"), "workspace", ENV.fetch("SUBJECT_LOCAL_NAME"))
+          ledger = File.join(ENV.fetch("GITHUB_WORKSPACE"), "workspace", "docs", "audit", "markdown-estate-ledger.csv")
+          rows = CSV.read(ledger, headers: true)
+          marker = %r{\Apre-merge docs-truth contract for [A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#\d+\b}
+          kept = rows.reject do |row|
+            row["repo"] == ENV.fetch("SUBJECT_REPO") &&
+              row["notes"].to_s.match?(marker) &&
+              !File.file?(File.join(root, row["path"].to_s))
+          end
+          if kept.length < rows.length
+            CSV.open(ledger, "w") do |csv|
+              csv << rows.headers
+              kept.each { |row| csv << rows.headers.map { |header| row[header] } }
+            end
+            puts "Staged #{rows.length - kept.length} pre-merge ledger contract(s)."
+          end
 
       - name: Run docs truth gate
         shell: bash
