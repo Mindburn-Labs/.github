@@ -91,30 +91,22 @@ jobs:
           persist-credentials: false
           token: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}
 
-      - name: Stage explicit pre-merge ledger contracts
-        shell: ruby {0}
-        env:
-          SUBJECT_REPO: ${{ steps.subject.outputs.repo }}
-          SUBJECT_LOCAL_NAME: ${{ steps.subject.outputs.local_name }}
+      - name: Verify pre-merge contract implementation
+        if: steps.subject.outputs.repo != '.github' && steps.subject.outputs.repo != 'docs' && github.repository == format('Mindburn-Labs/{0}', steps.subject.outputs.repo)
+        shell: bash
         run: |
-          require "csv"
+          echo "a51870ac590eb63bf7b700e6003a59a09c6fe007dc1ff37e8d0119ea1e4cc0b2  workspace/.github-repo/scripts/stage-docs-truth-premerge-contracts.rb" | sha256sum --check
 
-          root = File.join(ENV.fetch("GITHUB_WORKSPACE"), "workspace", ENV.fetch("SUBJECT_LOCAL_NAME"))
-          ledger = File.join(ENV.fetch("GITHUB_WORKSPACE"), "workspace", "docs", "audit", "markdown-estate-ledger.csv")
-          rows = CSV.read(ledger, headers: true)
-          marker = %r{\Apre-merge docs-truth contract for [A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#\d+\b}
-          kept = rows.reject do |row|
-            row["repo"] == ENV.fetch("SUBJECT_REPO") &&
-              row["notes"].to_s.match?(marker) &&
-              !File.file?(File.join(root, row["path"].to_s))
-          end
-          if kept.length < rows.length
-            CSV.open(ledger, "w") do |csv|
-              csv << rows.headers
-              kept.each { |row| csv << rows.headers.map { |header| row[header] } }
-            end
-            puts "Staged #{rows.length - kept.length} pre-merge ledger contract(s)."
-          end
+      - name: Stage verified pre-merge ledger contracts
+        if: steps.subject.outputs.repo != '.github' && steps.subject.outputs.repo != 'docs' && github.repository == format('Mindburn-Labs/{0}', steps.subject.outputs.repo)
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          ruby "$GITHUB_WORKSPACE/workspace/.github-repo/scripts/stage-docs-truth-premerge-contracts.rb" \
+            --ledger "$GITHUB_WORKSPACE/workspace/docs/audit/markdown-estate-ledger.csv" \
+            --root "$GITHUB_WORKSPACE/workspace/${{ steps.subject.outputs.local_name }}" \
+            --repo "${{ steps.subject.outputs.repo }}"
 
       - name: Run docs truth gate
         shell: bash
