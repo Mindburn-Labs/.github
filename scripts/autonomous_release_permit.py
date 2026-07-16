@@ -152,7 +152,27 @@ def load_authority(args: argparse.Namespace) -> dict[str, Any]:
     return authority
 
 
+def normalize_workflow_ref(
+    workflow_ref: str,
+    workflow_repository: str,
+    workflow_path: str,
+) -> str:
+    source, separator, ref = workflow_ref.rpartition("@")
+    if separator != "@" or source != f"{workflow_repository}/{workflow_path}":
+        raise PermitInputError(
+            "workflow_ref must bind the configured workflow repository and path",
+        )
+    if not (ref.startswith("refs/heads/") or ref.startswith("refs/tags/")):
+        raise PermitInputError("workflow_ref must name a branch or tag ref")
+    return ref
+
+
 def prepare(args: argparse.Namespace) -> None:
+    workflow_ref = normalize_workflow_ref(
+        args.workflow_ref,
+        args.workflow_repository,
+        args.workflow_path,
+    )
     target = args.target_dir.resolve()
     output = args.output_dir.resolve()
     output.mkdir(parents=True, exist_ok=False)
@@ -299,7 +319,7 @@ def prepare(args: argparse.Namespace) -> None:
         "merge_tree_sha": merge_tree_sha,
         "workflow_repository": args.workflow_repository,
         "workflow_path": args.workflow_path,
-        "workflow_ref": args.workflow_ref,
+        "workflow_ref": workflow_ref,
         "workflow_sha": args.workflow_sha,
         "run_id": args.run_id,
         "run_attempt": args.run_attempt,
