@@ -440,6 +440,17 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertNotIn("npm install --global", workflow)
         self.assertNotIn('path: target\n', workflow[workflow.index("model-review:"):])
         self.assertNotIn('prompt="$(<permit-input/review-prompt.txt)"', workflow)
+        model_review = workflow[
+            workflow.index("Run isolated read-only model review") : workflow.index(
+                "Upload commit-bound review envelope",
+            )
+        ]
+        self.assertIn(
+            '< "$GITHUB_WORKSPACE/permit-input/review-prompt.txt"',
+            model_review,
+        )
+        self.assertNotIn("copilot -p", model_review)
+        self.assertNotIn("--prompt", model_review)
         self.assertIn("No target checkout or network context is available", helper)
         self.assertIn("name: HELM Autonomous Release Permit", workflow)
         self.assertIn("name: local-validation", workflow)
