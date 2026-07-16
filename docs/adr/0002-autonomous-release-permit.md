@@ -2,12 +2,15 @@
 
 ## Status
 
-Accepted for controlled public-repository code-merge authority. Runtime
-enforcement remains a GitHub ruleset fact, not a documentation claim. Private
-and internal repositories retain their human approval gate until GitHub
+Accepted as the controlled public-repository code-merge architecture. Runtime
+enforcement remains a GitHub ruleset fact, not a documentation claim. The
+committed controller is currently disabled, and its merger and control-updater
+App IDs are unset; no autonomous public scope is live until every App,
+environment, ruleset, and bootstrap receipt has been independently read back.
+Private and internal repositories retain their human approval gate until GitHub
 restores the paid required-workflow entitlement that the organization is
 already billed for. This decision does not authorize customer production,
-deployment, billing, data migration, or other external effects.
+deployment, billing, data migration, access changes, or other external effects.
 
 ## Decision
 
@@ -69,13 +72,16 @@ Secret-bearing promotion is not triggered with `workflow_run`, because GitHub
 would load that workflow from mutable default-branch source. The permit job has
 no App secret and may only dispatch the fixed
 `authority/control-v1:.github/workflows/promote-authority.yml` controller for a
-strict generation N to N+1 change. That controller is created at the reviewed
-generation-2 merge SHA and then covered by an active organization ruleset that
-denies creation, update, and deletion with no bypass actors. The two credential
-environments disable administrator bypass and admit only the exact controller
-branch. During bootstrap they admit no branch at all. A same-repository pull
-request may therefore request a dispatch, but it cannot substitute the signed
-parent run, execute different controller YAML, or load an App key.
+strict generation N to N+1 change. `control-v1` is the parent control ref:
+without bypass actors it denies creation, deletion, and non-fast-forward
+updates. A separately scoped `helm-authority-control-updater` App may perform
+only a non-force parent-to-successor CAS after verifying the parent's durable
+final receipt; an independent observer must verify and durably close that
+successor before it is usable. The five credential environments disable
+administrator bypass and admit only the exact controller branch. During
+bootstrap they admit no branch at all. A same-repository pull request may
+therefore request a dispatch, but it cannot substitute the signed parent run,
+execute different controller YAML, or load an App key.
 
 Every admitted repository has an explicit source-owned gate profile. There is
 no command-discovery or Makefile fallback. The profile names an exact command
@@ -83,6 +89,19 @@ vector and SHA-256 digests for every build file that can alter those commands;
 missing, changed, non-regular, or symlinked protected files fail before either
 model runs. Authority-critical profile changes use the same two-generation
 ratification rule as workflow changes.
+
+Privileged workflow confinement is part of the same trusted boundary. Any
+workflow that uses an environment, secrets, `HELM_AUTHORITY`, GitHub-App-token
+minting, OIDC, or write authority must be in the parent source-owned protected
+workflow inventory. Every other workflow must declare top-level
+`permissions: {}`. Symlinks, invalid UTF-8, oversized workflow inventories,
+and unlisted privileged files fail closed before models run.
+
+An authority change may advance the pinned Kernel only through a candidate
+Kernel transition: the active parent must verify an ordinary merged Kernel
+change, and the parent and candidate reducers must produce byte-identical
+permit reductions for every permit-bearing proof case. A candidate Kernel never
+runs in a credentialed promotion or observer job.
 
 Every context also binds `config/autonomous-release-authority.json`. The
 manifest names a monotonically increasing generation, the exact Kernel SHA,
@@ -211,14 +230,15 @@ before using the token. The approval broker additionally requires the exact
 single-target token scope (the App itself is installed on only the three public
 autonomous repositories) and confirms the persisted review author before
 emitting a receipt.
-The promoter and approval-only App material exists only in the
-`authority-promotion` environment; observer material exists only in
-`authority-observer`. Neither key nor client ID is an organization-level or
-repository-level Actions secret. The immutable controller checks its live
-workflow ref and SHA before it consumes either environment.
+The promoter material exists only in `authority-promotion`; observer material
+exists only in `authority-observer`; approval, merge, and control-updater
+material is isolated in `authority-approval`, `authority-merge`, and
+`authority-control` respectively. Neither key nor client ID is an
+organization-level or repository-level Actions secret. The parent controller
+checks its live workflow ref and SHA before it consumes any environment.
 
 The steady-state promotion transaction is deliberately split across isolated
-jobs and three GitHub Apps. The immutable controller downloads the exact
+jobs and independently scoped GitHub-App roles. The parent controller downloads the exact
 successful parent permit run named by the uncredentialed dispatcher and binds
 its run ID, attempt, repository, workflow path, pull request, head, and signed
 provenance before any credentialed job. The approval-only App then turns that
@@ -239,7 +259,11 @@ tree and pull request with GitHub state, and reads back both rulesets. The
 candidate Kernel executes only inside its isolated evaluation workflow; no
 candidate binary is ever run in a job holding promoter or observer credentials.
 Only an attested observer `ALLOW` lets a later promoter job activate the stable
-ruleset. A second observer produces the final success receipt. Any incomplete
+ruleset. A second observer produces the durable final success receipt. Only
+then may the separately scoped control-updater make its parent-to-successor
+non-force CAS; an independent observer must verify the exact successor ref,
+both control rulesets, and the parent control digest before it durably closes
+that successor. Any incomplete
 promotion restores both rulesets to version N. After `main` advances, the exact
 merge SHA is admitted only as a recovery input proving that state transition;
 it is never a forward recovery target. The merged code may remain ahead while
@@ -262,12 +286,13 @@ recovery fails closed and requires a new source-owned bootstrap. This
 deliberately favors safety over liveness. The executor therefore cannot mint
 its own success receipt.
 
-The controller YAML is a deliberately fixed control ABI. Later authority
+The parent controller YAML is a deliberately fixed control ABI. Later authority
 generations may evolve the reducer, broker, tests, and policy only through the
-previous-generation permit; the controller checks those components out from
-the permit-named parent SHA. Changing the controller ref itself requires a new
-machine-proven bootstrap or controller-migration protocol. It is never advanced
-as part of an ordinary authority promotion.
+previous-generation permit; the controller checks those components out from the
+permit-named parent SHA. A control change is not an ordinary authority
+promotion: it must follow the durable-final, updater-only successor CAS, and
+independent successor-observation protocol. No human identity, review,
+CODEOWNER marker, label, or commit trailer can substitute for that evidence.
 
 GitHub's organization-ruleset API has two provider constraints that the broker
 must not conceal. Organization-ruleset `GET` requires the same organization
@@ -294,10 +319,11 @@ generation-2 controller ref nor its machine interlocks exist yet.
    three public repositories, and only then retire `.github` and Kernel from
    the CODEOWNER-specific organization rule; the `.github` classic one-review
    setting remains active; and
-7. create a staging control ruleset that blocks update and deletion, publish
-   `authority/control-v1` at the exact reviewed merge SHA, add the creation ban,
-   independently verify the locked ref and active rules, and only then admit
-   that ref to both credential environments; and
+7. create the parent control ruleset that blocks creation, deletion, and
+   non-fast-forward update; publish `authority/control-v1` at the exact
+   reviewed merge SHA; install the separately scoped successor-update lane;
+   independently verify the ref and both active rules; and only then admit
+   that ref to all five credential environments; and
 8. reverify the ready receipt and the live PR's current GitHub-generated merge,
    atomically advance `main` to that exact liveness merge commit, then bind both
    machine rulesets to the merged `main` SHA.
@@ -325,8 +351,9 @@ but is not an approval identity.
    both live model jobs, and add a protected lane for changes to workflow, gate,
    test-harness, and Kernel authority files. A target branch must not be able to
    weaken its own required commands or evidence threshold.
-5. Disable both credential environments, install and independently read back
-   the immutable no-bypass controller, then admit only that controller branch.
+5. Disable all five credential environments, install and independently read
+   back the no-bypass parent controller and successor-only update lane, then
+   admit only that controller branch.
 6. Activate the machine workflow rule only after live 2-of-2 evidence and the
    complete permanent adversarial suite exist.
 7. Then remove human approval requirements only for repositories already under
