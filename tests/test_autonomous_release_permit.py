@@ -123,7 +123,7 @@ class AutonomousReleasePermitTests(unittest.TestCase):
             context["authority"]["parent"],
             {
                 "generation": 1,
-                "workflow_sha": "a202531b4e4fd8a5468ac985abcdb2a407a7f381",
+                "workflow_sha": "52a1ef42118e618e811bce48204f4a49a41b8bca",
             },
         )
         self.assertEqual(

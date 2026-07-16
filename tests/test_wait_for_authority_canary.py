@@ -5,6 +5,7 @@ import io
 from pathlib import Path
 import sys
 import unittest
+from unittest import mock
 import zipfile
 
 
@@ -27,6 +28,19 @@ def archive(entries: dict[str, bytes]) -> bytes:
 
 
 class AuthorityCanaryTests(unittest.TestCase):
+    def test_get_bytes_constructs_bearer_authorization_header(self) -> None:
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = b"{}"
+        with mock.patch.object(MODULE.urllib.request, "urlopen", return_value=response) as urlopen:
+            MODULE.GitHubReadClient("observer-test-token").get_bytes(
+                "/repos/Mindburn-Labs/example/actions/runs",
+            )
+        request = urlopen.call_args.args[0]
+        self.assertEqual(
+            request.get_header("Authorization"),
+            "Bearer observer-test-token",
+        )
+
     def test_extract_attested_permit_accepts_bounded_exact_entries(self) -> None:
         permit = b'{"decision":"ALLOW"}\n'
         attestation = b'{"mediaType":"application/vnd.dev.sigstore.bundle.v0.3+json"}\n'
