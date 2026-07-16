@@ -39,3 +39,18 @@ Repository inventory does not prove production readiness. When there is a confli
 ```bash
 make lint
 ```
+
+Docs Truth changes have one canonical runtime source and two exact-byte
+bindings. The workflows check out the runner from an immutable
+`Mindburn-Labs/dev-orchestration` commit and verify its SHA-256 before
+execution. `.github/scripts/docs-truth-org.rb` is a review mirror of those
+bytes; `make lint` verifies the same digest and runs the mirror's self-tests.
+The mirror is not a second runtime authority.
+
+The secret-backed pull-request lane must keep candidate-controlled policy and
+executable ledger data out of the trusted runner boundary. It binds the subject
+to the caller repository, derives the base from the event, rejects candidate
+changes to Docs Truth policy inputs, rejects generated or nonempty
+`truth_gate` rows, and reports the result on the exact candidate head. A green
+local run or status is evidence only; merge authority remains a separate
+source-owned permit and approval-only App interlock.
