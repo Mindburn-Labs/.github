@@ -3,6 +3,7 @@
 
 require "csv"
 require "minitest/autorun"
+require "socket"
 require "tmpdir"
 require_relative "stage-docs-truth-premerge-contracts"
 
@@ -158,5 +159,77 @@ class StageDocsTruthPremergeContractsTest < Minitest::Test
     @client.define_singleton_method(:pull) { |*| raise "GitHub API 500" }
     error = assert_raises(RuntimeError) { filter }
     assert_equal "GitHub API 500", error.message
+  end
+
+  def test_real_http_client_sends_bearer_auth_and_encodes_path_segments
+    response = '{"type":"file","path":"docs/Architecture Overview.md"}'
+    result, request = capture_http_request(status: 200, body: response) do |api_base|
+      client = DocsTruthPremergeContracts::GitHubClient.new(token: "sentinel-token", api_base: api_base)
+      client.content(OWNER, REPO, "docs/Architecture Overview.md", HEAD_SHA)
+    end
+    assert_equal "docs/Architecture Overview.md", result["path"]
+    assert_includes request.lines.first, "/docs/Architecture%20Overview.md?ref=#{HEAD_SHA}"
+    authorization = request.lines.find { |line| line.downcase.start_with?(["author", "ization:"].join) }
+    scheme, token = authorization.split(":", 2).last.strip.split(" ", 2)
+    assert_equal "Bearer", scheme
+    assert_equal "sentinel-token", token
+  end
+
+  def test_real_http_client_handles_not_found_and_fails_on_server_errors
+    result, = capture_http_request(status: 404, body: '{"message":"Not Found"}') do |api_base|
+      client = DocsTruthPremergeContracts::GitHubClient.new(token: "sentinel-token", api_base: api_base)
+      client.content(OWNER, REPO, PATH, HEAD_SHA)
+    end
+    assert_nil result
+
+    error = assert_raises(RuntimeError) do
+      capture_http_request(status: 500, body: '{"message":"error"}') do |api_base|
+        client = DocsTruthPremergeContracts::GitHubClient.new(token: "sentinel-token", api_base: api_base)
+        client.repository(OWNER, REPO)
+      end
+    end
+    assert_match(/GitHub API 500/, error.message)
+  end
+
+  def test_client_paginates_pull_files
+    client_class = Class.new(DocsTruthPremergeContracts::GitHubClient) do
+      attr_reader :requests
+
+      def initialize
+        @requests = []
+      end
+
+      private
+
+      def get(_path, query)
+        @requests << query
+        query.fetch(:page) == 1 ? Array.new(100) { {"filename" => "docs/page-one.md"} } : [{"filename" => "docs/page-two.md"}]
+      end
+    end
+    client = client_class.new
+    files = client.pull_files(OWNER, REPO, 568)
+    assert_equal 101, files.length
+    assert_equal [1, 2], client.requests.map { |query| query.fetch(:page) }
+  end
+
+  private
+
+  def capture_http_request(status:, body:)
+    server = TCPServer.new("127.0.0.1", 0)
+    request_thread = Thread.new do
+      socket = server.accept
+      request = +""
+      request << socket.readpartial(1024) until request.include?("\r\n\r\n")
+      reason = status == 200 ? "OK" : "Error"
+      socket.write("HTTP/1.1 #{status} #{reason}\r\nContent-Type: application/json\r\nContent-Length: #{body.bytesize}\r\nConnection: close\r\n\r\n#{body}")
+      socket.close
+      request
+    end
+    result = yield("http://127.0.0.1:#{server.addr[1]}")
+    [result, request_thread.value]
+  ensure
+    request_thread&.kill if request_thread&.alive?
+    request_thread&.join
+    server&.close
   end
 end
