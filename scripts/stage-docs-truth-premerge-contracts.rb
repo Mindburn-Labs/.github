@@ -53,12 +53,16 @@ module DocsTruthPremergeContracts
     return false unless files.any? { |file| file["filename"] == path && file["status"] == "added" }
 
     content = client.content(owner, repo, path, contract.fetch(:head_sha))
-    content && content["type"] == "file" && content["path"] == path
+    content &&
+      content["type"] == "file" &&
+      content["submodule_git_url"].nil? &&
+      content["path"] == path
   end
 
   def filter(rows:, root:, owner:, repo:, client:, today: Time.now.utc.to_date)
     cache = {pulls: {}, files: {}}
     staged = []
+    staged_keys = []
     kept = rows.reject do |row|
       path = row["path"].to_s
       bound_contract = contract(row["notes"], owner, repo, today)
@@ -70,12 +74,34 @@ module DocsTruthPremergeContracts
 
       if verified?(client: client, owner: owner, repo: repo, path: path, contract: bound_contract, cache: cache)
         staged << "#{repo}:#{path} -> #{owner}/#{repo}##{bound_contract.fetch(:pull_number)}@#{bound_contract.fetch(:head_sha)}"
+        staged_keys << [repo, path]
         true
       else
         false
       end
     end
-    [kept, staged]
+    [kept, staged, staged_keys]
+  end
+
+  def remove_staged_rows(raw, staged_keys)
+    keys = staged_keys.to_h { |key| [key, true] }
+    lines = raw.lines
+    output = [lines.shift || raise("ledger is empty")]
+    removed = []
+    lines.each do |line|
+      fields = CSV.parse_line(line, liberal_parsing: true)
+      raise "ledger must contain one complete CSV record per line" unless fields && fields.length >= 2
+
+      key = fields.first(2)
+      if keys[key]
+        removed << key
+      else
+        output << line
+      end
+    end
+    raise "staged ledger rows were missing or duplicated" unless removed.sort == staged_keys.sort
+
+    output.join
   end
 
   class GitHubClient
@@ -156,20 +182,16 @@ if $PROGRAM_NAME == __FILE__
   raise "pre-merge contracts require the caller repository #{expected_repository}" unless ENV.fetch("GITHUB_REPOSITORY") == expected_repository
 
   token = ENV.fetch("GITHUB_TOKEN")
-  rows = CSV.read(options[:ledger], headers: true)
+  raw = File.binread(options[:ledger])
+  rows = CSV.parse(raw, headers: true)
   client = DocsTruthPremergeContracts::GitHubClient.new(token: token)
-  kept, staged = DocsTruthPremergeContracts.filter(
+  _kept, staged, staged_keys = DocsTruthPremergeContracts.filter(
     rows: rows,
     root: options[:root],
     owner: options[:owner],
     repo: options[:repo],
     client: client
   )
-  unless staged.empty?
-    CSV.open(options[:ledger], "w") do |csv|
-      csv << rows.headers
-      kept.each { |row| csv << rows.headers.map { |header| row[header] } }
-    end
-  end
+  File.binwrite(options[:ledger], DocsTruthPremergeContracts.remove_staged_rows(raw, staged_keys)) unless staged.empty?
   staged.each { |contract| puts "Staged verified pre-merge contract: #{contract}" }
 end

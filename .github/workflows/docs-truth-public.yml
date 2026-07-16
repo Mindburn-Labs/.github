@@ -101,7 +101,7 @@ jobs:
         if: steps.subject.outputs.repo != '.github' && steps.subject.outputs.repo != 'docs' && github.repository == format('Mindburn-Labs/{0}', steps.subject.outputs.repo)
         shell: bash
         run: |
-          echo "b158a1f1a6e178a6fde2184c51e2ab524f562ab5fe7e57d3f367820a492f0b17  workspace/.github-repo/scripts/stage-docs-truth-premerge-contracts.rb" | sha256sum --check
+          echo "e0d29e03c4c4ad8bc5f20955ce53c2d944f4af280b0e7442c61f9bd0b732ff9d  workspace/.github-repo/scripts/stage-docs-truth-premerge-contracts.rb" | sha256sum --check
 
       - name: Stage verified pre-merge ledger contracts
         if: steps.subject.outputs.repo != '.github' && steps.subject.outputs.repo != 'docs' && github.repository == format('Mindburn-Labs/{0}', steps.subject.outputs.repo)

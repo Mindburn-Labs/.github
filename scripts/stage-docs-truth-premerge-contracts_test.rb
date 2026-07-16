@@ -16,7 +16,7 @@ class StageDocsTruthPremergeContractsTest < Minitest::Test
   TODAY = Date.new(2026, 7, 16)
 
   class FakeClient
-    attr_accessor :base_ref, :base_repo, :default_content, :file_status, :head_content, :head_path, :head_repo, :head_sha, :head_type, :pull_state
+    attr_accessor :base_ref, :base_repo, :default_content, :file_status, :head_content, :head_path, :head_repo, :head_sha, :head_submodule, :head_type, :pull_state
 
     def initialize
       @default_content = false
@@ -28,6 +28,7 @@ class StageDocsTruthPremergeContractsTest < Minitest::Test
       @base_repo = "Mindburn-Labs/helm-ai-kernel"
       @head_repo = "Mindburn-Labs/helm-ai-kernel"
       @head_sha = HEAD_SHA
+      @head_submodule = false
       @head_type = "file"
     end
 
@@ -47,7 +48,11 @@ class StageDocsTruthPremergeContractsTest < Minitest::Test
       path = args[-2]
       ref = args[-1]
       present = ref == "main" ? default_content : head_content
-      present ? {"type" => (ref == "main" ? "file" : head_type), "path" => (ref == "main" ? path : head_path)} : nil
+      return unless present
+
+      content = {"type" => (ref == "main" ? "file" : head_type), "path" => (ref == "main" ? path : head_path)}
+      content["submodule_git_url"] = "https://example.invalid/module.git" if ref != "main" && head_submodule
+      content
     end
   end
 
@@ -113,6 +118,11 @@ class StageDocsTruthPremergeContractsTest < Minitest::Test
     assert_equal 1, filter.first.length
     @client.head_type = "file"
     @client.head_path = "docs/other.md"
+    assert_equal 1, filter.first.length
+  end
+
+  def test_keeps_a_git_submodule_reported_as_a_file
+    @client.head_submodule = true
     assert_equal 1, filter.first.length
   end
 
@@ -219,6 +229,14 @@ class StageDocsTruthPremergeContractsTest < Minitest::Test
     pinned = File.read(workflow).match(/echo "([0-9a-f]{64})  workspace\/.github-repo\/scripts\/stage-docs-truth-premerge-contracts\.rb"/)
     refute_nil pinned
     assert_equal Digest::SHA256.file(script).hexdigest, pinned[1]
+  end
+
+  def test_removes_only_verified_rows_without_reformatting_the_ledger
+    untouched = 'other,docs/keep.md,active,other,repo_docs,source,"",false,"",note with unquoted, comma' + "\n"
+    candidate = "#{REPO},#{PATH},active,#{REPO},repo_docs,source,\"\",false,\"\",contract\n"
+    raw = "repo,path,status,owner,truth_kind,source_refs,truth_gate,public_surface,superseded_by,notes\n#{untouched}#{candidate}"
+    rewritten = DocsTruthPremergeContracts.remove_staged_rows(raw, [[REPO, PATH]])
+    assert_equal raw.lines.first + untouched, rewritten
   end
 
   private
