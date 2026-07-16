@@ -2,6 +2,7 @@
 # frozen_string_literal: true
 
 require "csv"
+require "digest"
 require "minitest/autorun"
 require "socket"
 require "tmpdir"
@@ -210,6 +211,14 @@ class StageDocsTruthPremergeContractsTest < Minitest::Test
     files = client.pull_files(OWNER, REPO, 568)
     assert_equal 101, files.length
     assert_equal [1, 2], client.requests.map { |query| query.fetch(:page) }
+  end
+
+  def test_workflow_pin_matches_the_reviewed_script
+    script = File.expand_path("stage-docs-truth-premerge-contracts.rb", __dir__)
+    workflow = File.expand_path("../.github/workflows/docs-truth-public.yml", __dir__)
+    pinned = File.read(workflow).match(/echo "([0-9a-f]{64})  workspace\/.github-repo\/scripts\/stage-docs-truth-premerge-contracts\.rb"/)
+    refute_nil pinned
+    assert_equal Digest::SHA256.file(script).hexdigest, pinned[1]
   end
 
   private
