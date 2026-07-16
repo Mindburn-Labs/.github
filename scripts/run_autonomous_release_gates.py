@@ -9,14 +9,22 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import sys
 from typing import Any
 
 
-PROFILE_SCHEMA = "mindburn.autonomous-release-gates/v2"
+PROFILE_SCHEMA = "mindburn.autonomous-release-gates/v3"
 REPOSITORY_PATTERN = re.compile(r"^Mindburn-Labs/[A-Za-z0-9_.-]+$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+# The two omitted config documents bind each other outside this tree: the
+# authority manifest hashes the profile document, and permit preparation emits
+# that authority manifest into immutable review context.
+CONFIG_BINDING_EXCLUSIONS = (
+    "autonomous-release-authority.json",
+    "autonomous-release-gates.json",
+)
 
 
 class GateProfileError(ValueError):
@@ -42,12 +50,19 @@ def parse_json_strict(path: Path) -> Any:
         raise GateProfileError(f"{path}: invalid JSON: {exc}") from exc
 
 
-def require_exact_keys(value: dict[str, Any], required: set[str], label: str) -> None:
+def require_exact_keys(
+    value: dict[str, Any],
+    required: set[str],
+    label: str,
+    *,
+    optional: set[str] | None = None,
+) -> None:
     keys = set(value)
-    if keys != required:
+    allowed = required | (optional or set())
+    if keys - allowed or required - keys:
         raise GateProfileError(
             f"{label} keys invalid; missing={sorted(required - keys)}, "
-            f"unexpected={sorted(keys - required)}",
+            f"unexpected={sorted(keys - allowed)}",
         )
 
 
@@ -65,6 +80,35 @@ def validate_protected_path(value: Any, *, label: str) -> str:
     if any(part in {"", ".", ".."} for part in parts):
         raise GateProfileError(f"{label} must not contain empty or traversal components")
     return value
+
+
+def validate_tree_exclusions(
+    repository: str,
+    protected_tree: str,
+    value: Any,
+) -> tuple[str, ...]:
+    if not isinstance(value, list) or len(value) > 2:
+        raise GateProfileError(
+            f"profile {repository} tree exclusions must be a bounded list",
+        )
+    exclusions = tuple(
+        validate_protected_path(
+            excluded,
+            label=f"profile {repository} tree exclusion",
+        )
+        for excluded in value
+    )
+    if (
+        repository == "Mindburn-Labs/.github"
+        and protected_tree == "config"
+        and exclusions == CONFIG_BINDING_EXCLUSIONS
+    ):
+        return exclusions
+    if exclusions:
+        raise GateProfileError(
+            f"profile {repository} tree exclusions are reserved for the .github config bindings",
+        )
+    return exclusions
 
 
 def load_profiles(path: Path) -> dict[str, dict[str, Any]]:
@@ -85,8 +129,9 @@ def load_profiles(path: Path) -> dict[str, dict[str, Any]]:
             raise GateProfileError(f"profile {repository} must be an object")
         require_exact_keys(
             profile,
-            {"commands", "protected_files"},
+            {"commands", "protected_trees"},
             f"profile {repository}",
+            optional={"protected_files"},
         )
         commands = profile["commands"]
         if not isinstance(commands, list) or not commands or len(commands) > 32:
@@ -110,14 +155,12 @@ def load_profiles(path: Path) -> dict[str, dict[str, Any]]:
                     f"profile {repository} command {index} must use a PATH executable",
                 )
             validated_commands.append(command)
-        protected_files = profile["protected_files"]
-        if (
-            not isinstance(protected_files, dict)
-            or not protected_files
-            or len(protected_files) > 32
-        ):
+        protected_files = profile.get("protected_files", {})
+        if not isinstance(protected_files, dict) or len(protected_files) > 32:
+            raise GateProfileError(f"profile {repository} protected_files is invalid")
+        if "protected_files" in profile and not protected_files:
             raise GateProfileError(
-                f"profile {repository} must protect 1-32 gate-definition files",
+                f"profile {repository} must protect 1-32 gate-definition files when present",
             )
         validated_protected_files: dict[str, str] = {}
         for protected_path, digest in protected_files.items():
@@ -128,11 +171,50 @@ def load_profiles(path: Path) -> dict[str, dict[str, Any]]:
             if not isinstance(digest, str) or not SHA256_PATTERN.fullmatch(digest):
                 raise GateProfileError(
                     f"profile {repository} protected digest for {validated_path!r} is invalid",
-                )
+            )
             validated_protected_files[validated_path] = digest
+        protected_trees = profile["protected_trees"]
+        if (
+            not isinstance(protected_trees, dict)
+            or not protected_trees
+            or len(protected_trees) > 32
+        ):
+            raise GateProfileError(
+                f"profile {repository} must protect 1-32 gate-definition trees",
+            )
+        validated_protected_trees: dict[str, dict[str, Any]] = {}
+        for protected_tree, descriptor in protected_trees.items():
+            validated_tree = validate_protected_path(
+                protected_tree,
+                label=f"profile {repository} protected tree",
+            )
+            if not isinstance(descriptor, dict):
+                raise GateProfileError(
+                    f"profile {repository} tree {validated_tree!r} must be an object",
+                )
+            require_exact_keys(
+                descriptor,
+                {"exclude", "sha256"},
+                f"profile {repository} tree {validated_tree!r}",
+            )
+            digest = descriptor["sha256"]
+            if not isinstance(digest, str) or not SHA256_PATTERN.fullmatch(digest):
+                raise GateProfileError(
+                    f"profile {repository} tree digest for {validated_tree!r} is invalid",
+                )
+            exclusions = validate_tree_exclusions(
+                repository,
+                validated_tree,
+                descriptor["exclude"],
+            )
+            validated_protected_trees[validated_tree] = {
+                "exclude": exclusions,
+                "sha256": digest,
+            }
         profiles[repository] = {
             "commands": validated_commands,
             "protected_files": validated_protected_files,
+            "protected_trees": validated_protected_trees,
         }
     return profiles
 
@@ -152,6 +234,108 @@ def verify_protected_files(target: Path, protected_files: dict[str, str]) -> Non
             )
 
 
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        while chunk := source.read(131_072):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def canonical_tree_sha256(
+    target: Path,
+    relative_tree: str,
+    exclusions: tuple[str, ...],
+) -> str:
+    root = target.joinpath(*relative_tree.split("/"))
+    try:
+        root_stat = root.lstat()
+    except OSError as exc:
+        raise GateProfileError(
+            f"protected gate-definition tree is missing: {relative_tree}",
+        ) from exc
+    if stat.S_ISLNK(root_stat.st_mode) or not stat.S_ISDIR(root_stat.st_mode):
+        raise GateProfileError(
+            f"protected gate-definition tree is missing or not a directory: {relative_tree}",
+        )
+
+    digest = hashlib.sha256()
+
+    def update(kind: bytes, relative_path: str, content_digest: str = "") -> None:
+        try:
+            encoded_path = relative_path.encode("utf-8")
+        except UnicodeEncodeError as exc:
+            raise GateProfileError(
+                f"protected gate-definition tree has a non-UTF-8 member: {relative_tree}",
+            ) from exc
+        digest.update(kind)
+        digest.update(b"\0")
+        digest.update(encoded_path)
+        digest.update(b"\0")
+        digest.update(content_digest.encode("ascii"))
+        digest.update(b"\0")
+
+    excluded = set(exclusions)
+
+    def visit(directory: Path, prefix: str) -> None:
+        update(b"D", prefix)
+        try:
+            entries = sorted(
+                os.scandir(directory),
+                key=lambda entry: entry.name.encode("utf-8"),
+            )
+        except UnicodeEncodeError as exc:
+            raise GateProfileError(
+                f"protected gate-definition tree has a non-UTF-8 member: {relative_tree}",
+            ) from exc
+        for entry in entries:
+            relative_path = f"{prefix}/{entry.name}" if prefix else entry.name
+            if relative_path in excluded:
+                continue
+            try:
+                entry_stat = entry.stat(follow_symlinks=False)
+            except OSError as exc:
+                raise GateProfileError(
+                    "protected gate-definition tree member is unreadable: "
+                    f"{relative_tree}/{relative_path}",
+                ) from exc
+            if stat.S_ISLNK(entry_stat.st_mode):
+                raise GateProfileError(
+                    "protected gate-definition tree member is a symlink: "
+                    f"{relative_tree}/{relative_path}",
+                )
+            entry_path = Path(entry.path)
+            if stat.S_ISDIR(entry_stat.st_mode):
+                visit(entry_path, relative_path)
+            elif stat.S_ISREG(entry_stat.st_mode):
+                update(b"F", relative_path, file_sha256(entry_path))
+            else:
+                raise GateProfileError(
+                    "protected gate-definition tree member is not regular: "
+                    f"{relative_tree}/{relative_path}",
+                )
+
+    visit(root, "")
+    return digest.hexdigest()
+
+
+def verify_protected_trees(
+    target: Path,
+    protected_trees: dict[str, dict[str, Any]],
+) -> None:
+    for relative_tree, descriptor in protected_trees.items():
+        actual_digest = canonical_tree_sha256(
+            target,
+            relative_tree,
+            descriptor["exclude"],
+        )
+        if actual_digest != descriptor["sha256"]:
+            raise GateProfileError(
+                "protected gate-definition tree changed before its source-owned profile: "
+                f"{relative_tree}",
+            )
+
+
 def resolve_commands(
     repository: str,
     target: Path,
@@ -165,6 +349,7 @@ def resolve_commands(
         )
     profile = profiles[repository]
     verify_protected_files(target, profile["protected_files"])
+    verify_protected_trees(target, profile["protected_trees"])
     return "explicit", profile["commands"]
 
 

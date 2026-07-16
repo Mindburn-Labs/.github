@@ -118,6 +118,14 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertEqual(context["merge_sha"], merge)
         self.assertEqual(len(context["merge_tree_sha"]), 40)
         self.assertEqual(context["schema"], "mindburn.release-permit-context/v2")
+        self.assertEqual(
+            context["authority"],
+            json.loads(
+                (ROOT / "config" / "autonomous-release-authority.json").read_text(
+                    encoding="utf-8",
+                ),
+            ),
+        )
         self.assertEqual(context["authority"]["generation"], 2)
         self.assertEqual(
             context["authority"]["parent"],

@@ -7,47 +7,23 @@
       ],
       "protected_files": {
         "Makefile": "4559934af490cb54f61405c8471fca1e9d287ea5c719ff90192d33c1ec180925"
-      }
-    },
-    "Mindburn-Labs/app-helm-console": {
-      "commands": [
-        ["npm", "ci"],
-        ["npx", "playwright", "install", "--with-deps", "chromium"],
-        ["npm", "run", "gen:api"],
-        ["git", "diff", "--exit-code", "--", "lib/api"],
-        ["npm", "run", "sync:ds:check"],
-        ["npm", "run", "lint"],
-        ["npm", "test"],
-        ["npm", "run", "test:e2e"],
-        ["npm", "run", "build"],
-        ["npm", "audit", "--omit=dev", "--audit-level=moderate"]
-      ],
-      "protected_files": {
-        "package.json": "8a3b483b1c9c300f896029e048ef923ca25975d5d5db1a1cfa4c0f4f096bdd6c"
-      }
-    },
-    "Mindburn-Labs/app-helm-docs": {
-      "commands": [
-        ["git", "init", "helm-ai-kernel-source"],
-        ["git", "-C", "helm-ai-kernel-source", "remote", "add", "origin", "https://github.com/Mindburn-Labs/helm-ai-kernel.git"],
-        ["git", "-C", "helm-ai-kernel-source", "fetch", "--depth=1", "origin", "57e2e518b15a452ea4bed6c9189f092d0f4d7d04"],
-        ["git", "-C", "helm-ai-kernel-source", "checkout", "--detach", "FETCH_HEAD"],
-        ["npm", "ci"],
-        ["npm", "audit", "--audit-level=high"],
-        ["npm", "run", "ci"]
-      ],
-      "protected_files": {
-        "package.json": "93b1f51b7edaee4e5498ad189aff8a05bf3e35decfa0e3e147435b3182bbf117"
-      }
-    },
-    "Mindburn-Labs/app-mindburn-web": {
-      "commands": [
-        ["npm", "ci"],
-        ["npm", "audit", "--audit-level=high"],
-        ["npm", "run", "ci"]
-      ],
-      "protected_files": {
-        "package.json": "cedddab487eef9361782ee578ace4482c9c994bf6b0d2d855797fe8873142abc"
+      },
+      "protected_trees": {
+        "config": {
+          "exclude": [
+            "autonomous-release-authority.json",
+            "autonomous-release-gates.json"
+          ],
+          "sha256": "d16a7ad80717a9e74a2a28d29899854f2faa6b889f774043e6a25b6f020ff3a7"
+        },
+        "scripts": {
+          "exclude": [],
+          "sha256": "9e5181534a69248cb709935efb170eee0a691e0b109bbf5e16be6ee9e0d4f2f2"
+        },
+        "tests": {
+          "exclude": [],
+          "sha256": "d534b6ded5a50d302f31371675b8eccbf6d86ef5ca304daf510f3c5570171934"
+        }
       }
     },
     "Mindburn-Labs/contracts-autonomous-release-lab": {
@@ -56,63 +32,17 @@
         ["python3", "scripts/validate_lab.py"],
         ["python3", "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"]
       ],
-      "protected_files": {
-        "Makefile": "b9b2550692109833c5912a6259d03dd0697742616e3b266f1fd3bc99efc67b6e"
-      }
-    },
-    "Mindburn-Labs/helm-agent-integrations": {
-      "commands": [
-        ["npm", "ci", "--prefix", "packages/js/helm-tool-wrapper"],
-        ["npm", "test", "--prefix", "packages/js/helm-tool-wrapper"],
-        ["python3", "-m", "unittest", "discover", "packages/python/helm_tool_wrapper/tests"],
-        ["python3", "scripts/generate_samples.py", "--check"],
-        ["python3", "scripts/verify_samples.py"]
-      ],
-      "protected_files": {
-        "packages/js/helm-tool-wrapper/package.json": "bf38d3578a378bf91fedcabfe2641458e87f6b71e2976e29cad2d5655f4a59ea"
-      }
-    },
-    "Mindburn-Labs/helm-ai-kernel": {
-      "commands": [
-        ["go", "-C", "core", "vet", "./..."],
-        ["go", "-C", "core", "test", "-count=1", "./..."]
-      ],
-      "protected_files": {
-        "Makefile": "534a2a6edcb7a9e3c9e6620d77040c278cb47a18399e055d297235df75af9edd"
-      }
-    },
-    "Mindburn-Labs/helm-desktop": {
-      "commands": [
-        ["npm", "ci"],
-        ["cargo", "fmt", "--manifest-path", "src-tauri/Cargo.toml", "--", "--check"],
-        ["cargo", "test", "--locked", "--manifest-path", "src-tauri/Cargo.toml"],
-        ["cargo", "check", "--locked", "--manifest-path", "src-tauri/Cargo.toml"]
-      ],
-      "protected_files": {
-        "package.json": "569f02340f717b093568c93bc91b32378bc550095a4064d7f94381266af7bdf4"
-      }
-    },
-    "Mindburn-Labs/pkg-mindburn-helm-ds": {
-      "commands": [
-        ["npm", "ci"],
-        ["npm", "run", "typecheck"],
-        ["npm", "run", "test:security"]
-      ],
-      "protected_files": {
-        "package.json": "b17c7cfb0bf7ce65b893947fb8574cff0bb3ee3010eb3f37a60f42a2abf8cd17"
-      }
-    },
-    "Mindburn-Labs/tempora": {
-      "commands": [
-        ["npm", "ci"],
-        ["npm", "run", "typecheck"],
-        ["npm", "test"],
-        ["npm", "run", "build"]
-      ],
-      "protected_files": {
-        "package.json": "844a94818f764e7d35fe502938d4d46a9cd9597b348dfe39a4794603c61e8735"
+      "protected_trees": {
+        "scripts": {
+          "exclude": [],
+          "sha256": "62c10bc41f2ebebe5dbf20bf27de9cd58feab08475253ee06e0aff492a4a9b13"
+        },
+        "tests": {
+          "exclude": [],
+          "sha256": "c31c0be338f96b52b2b8a1a70784b4c304125f2cd1165d890b413ce7e5f6e309"
+        }
       }
     }
   },
-  "schema": "mindburn.autonomous-release-gates/v2"
+  "schema": "mindburn.autonomous-release-gates/v3"
 }
