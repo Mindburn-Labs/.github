@@ -3,6 +3,9 @@ name: Docs Truth
 permissions:
   contents: read
   pull-requests: write
+  # The trusted target workflow publishes an explicit status on the candidate
+  # SHA because pull_request_target's normal check is attached to the base SHA.
+  statuses: write
 
 on:
   # Keep the secret-bearing workflow definition on the trusted base branch.

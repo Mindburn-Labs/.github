@@ -21,6 +21,8 @@ lint:
 		echo "skipped HELM ecosystem map check: full Mindburn workspace context unavailable in repo-only CI"; \
 	fi
 	@ruby scripts/check-headless-ui-references.rb
+	@ruby -rdigest -e 'expected = "d9b7ff6e01d5ca64d2b37fc9714528501a0bd97097fe07130cff5186340dfcd0"; actual = Digest::SHA256.file(".github/scripts/docs-truth-org.rb").hexdigest; abort "vendored docs-truth runner digest mismatch: expected #{expected}, got #{actual}" unless actual == expected'
+	@ruby .github/scripts/docs-truth-org.rb --selftest
 	@test -f profile/README.md
 	@test -f AGENTS.md
 	@test -f SECURITY.md

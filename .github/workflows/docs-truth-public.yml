@@ -6,9 +6,6 @@ permissions:
 on:
   workflow_call:
     inputs:
-      repo:
-        required: false
-        type: string
       changed_base:
         required: false
         type: string
@@ -17,6 +14,32 @@ on:
         required: true
 
 jobs:
+  candidate-head-pending:
+    name: docs-truth-candidate-head-pending
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+    steps:
+      - name: Publish pending candidate-head status
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const pull = context.payload.pull_request;
+            if (!pull || pull.head.repo.full_name !== `${context.repo.owner}/${context.repo.repo}`) {
+              core.setFailed('Candidate-head status requires a same-repository pull request.');
+              return;
+            }
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: pull.head.sha,
+              state: 'pending',
+              context: 'Docs Truth / candidate-head',
+              description: 'Trusted docs-truth recomputation is running',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
+
   docs-truth:
     name: docs-truth
     runs-on: ubuntu-latest
@@ -25,24 +48,55 @@ jobs:
     outputs:
       subject_repo: ${{ steps.subject.outputs.repo }}
     steps:
-      - name: Reject non-authoritative event execution
-        if: github.ref != 'refs/heads/main' || (github.event_name != 'pull_request_target' && github.event_name != 'push')
+      - name: Validate trusted event and caller binding
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_REF: ${{ github.ref }}
+          PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
         run: |
-          echo "::error::Secret-bearing Docs Truth runs require pull_request_target or push on refs/heads/main."
-          exit 1
+          set -euo pipefail
+          case "$GITHUB_REPOSITORY" in
+            Mindburn-Labs/*) ;;
+            *)
+              echo "::error::Docs Truth is restricted to Mindburn-Labs callers."
+              exit 1
+              ;;
+          esac
+          subject="${GITHUB_REPOSITORY#*/}"
+          case "$EVENT_NAME" in
+            pull_request_target)
+              if [ "$EVENT_REF" != "refs/heads/main" ]; then
+                echo "::error::pull_request_target must target refs/heads/main."
+                exit 1
+              fi
+              if [ "$PR_HEAD_REPOSITORY" != "$GITHUB_REPOSITORY" ]; then
+                echo "::error::Secret-backed Docs Truth rejects fork pull requests."
+                exit 1
+              fi
+              if [ "$subject" = "docs" ]; then
+                echo "::error::docs pull requests require the unprivileged/broker lane; a candidate ledger cannot attest itself."
+                exit 1
+              fi
+              ;;
+            push)
+              if [ "$EVENT_REF" != "refs/heads/main" ]; then
+                echo "::error::Secret-backed Docs Truth push runs require refs/heads/main."
+                exit 1
+              fi
+              ;;
+            *)
+              echo "::error::Secret-backed Docs Truth requires pull_request_target or push on refs/heads/main."
+              exit 1
+              ;;
+          esac
 
       - name: Resolve subject repo
         id: subject
         shell: bash
-        env:
-          INPUT_REPO: ${{ inputs.repo }}
         run: |
           set -euo pipefail
-          repo="$INPUT_REPO"
-          if [ -z "$repo" ]; then
-            repo="${GITHUB_REPOSITORY#*/}"
-          fi
+          repo="${GITHUB_REPOSITORY#*/}"
           if [[ ! "$repo" =~ ^[A-Za-z0-9._-]+$ ]] || [ "$repo" = "." ] || [ "$repo" = ".." ]; then
             echo "::error::Invalid subject repository name"
             exit 1
@@ -57,12 +111,39 @@ jobs:
       - name: Checkout subject repo
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          repository: Mindburn-Labs/${{ steps.subject.outputs.repo }}
+          repository: ${{ github.repository }}
           path: workspace/${{ steps.subject.outputs.local_name }}
           ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
-          token: ${{ github.event_name == 'pull_request_target' && github.token || secrets.MINDBURN_ORG_READ_TOKEN }}
+          token: ${{ github.token }}
+
+      # Immutable review mirror, not a second runtime authority:
+      # .github/scripts/docs-truth-org.rb is byte-identical to
+      # Mindburn-Labs/dev-orchestration@3d8f07723dff90aaa83473a3e8134f6ae93d501b:
+      # estate-control-plane/scripts/docs-truth-org.rb. Makefile pins the mirror
+      # and the next step pins the executed upstream bytes to the same digest.
+      - name: Checkout reviewed docs-truth runner
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: Mindburn-Labs/dev-orchestration
+          ref: 3d8f07723dff90aaa83473a3e8134f6ae93d501b
+          path: .trusted/docs-truth-runner
+          fetch-depth: 1
+          persist-credentials: false
+          token: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}
+
+      - name: Verify reviewed runner bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          runner=".trusted/docs-truth-runner/estate-control-plane/scripts/docs-truth-org.rb"
+          ruby -rdigest -e '
+            expected = "d9b7ff6e01d5ca64d2b37fc9714528501a0bd97097fe07130cff5186340dfcd0"
+            actual = Digest::SHA256.file(ARGV.fetch(0)).hexdigest
+            abort "docs-truth runner digest mismatch: expected #{expected}, got #{actual}" unless actual == expected
+          ' "$runner"
+          ruby -c "$runner" >/dev/null
 
       - name: Checkout .github inventory
         if: steps.subject.outputs.repo != '.github'
@@ -84,16 +165,6 @@ jobs:
           persist-credentials: false
           token: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}
 
-      - name: Checkout docs-truth runner
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          repository: Mindburn-Labs/dev-orchestration
-          ref: 3d8f07723dff90aaa83473a3e8134f6ae93d501b
-          path: .trusted/docs-truth-runner
-          fetch-depth: 1
-          persist-credentials: false
-          token: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}
-
       - name: Assert candidate checkout is data-only
         if: github.event_name == 'pull_request_target'
         shell: bash
@@ -110,13 +181,21 @@ jobs:
             echo "::error::Candidate Markdown must be regular files"
             exit 1
           fi
+          if git -C "$SUBJECT_PATH" ls-files -s -- repo-manifest.yaml docs-truth.yaml | awk '$1 != "100644" && $1 != "100755" { found=1 } END { exit found ? 0 : 1 }'; then
+            echo "::error::Candidate docs-truth policy inputs must be regular files"
+            exit 1
+          fi
           ruby -rcsv -e '
             rows = CSV.read("workspace/docs/audit/markdown-estate-ledger.csv", headers: true)
             subject = ENV.fetch("SUBJECT_REPO")
             executable = rows.select do |row|
-              row["repo"].to_s.strip == subject && row["status"].to_s.strip.downcase == "generated"
+              next false unless row["repo"].to_s.strip == subject
+
+              status = row["status"].to_s.strip.downcase
+              truth_gate = row["truth_gate"].to_s.strip
+              status == "generated" || !truth_gate.empty?
             end
-            abort "candidate data-only review cannot execute truth_gate rows: #{executable.map { |row| row["path"] }.join(", ")}" unless executable.empty?
+            abort "candidate data-only review rejects generated or truth_gate rows: #{executable.map { |row| row["path"] }.join(", ")}" unless executable.empty?
           '
 
       - name: Run docs truth gate
@@ -131,9 +210,10 @@ jobs:
             --repo "$SUBJECT_REPO"
             --report "$RUNNER_TEMP/docs-truth-report.json"
           )
-          changed_base="$INPUT_CHANGED_BASE"
-          if [ -z "$changed_base" ] && [ "${{ github.event_name }}" = "pull_request_target" ]; then
+          if [ "${{ github.event_name }}" = "pull_request_target" ]; then
             changed_base="${{ github.event.pull_request.base.sha }}"
+          else
+            changed_base="$INPUT_CHANGED_BASE"
           fi
           if [ -n "$changed_base" ]; then
             args+=(--changed-base "$changed_base")
@@ -177,7 +257,7 @@ jobs:
       # #27 and #28). If the report is clean, any prior orphan comment on this PR
       # is deleted so a re-opened PR doesn't carry stale advice.
       - name: Post orphan-ledger PR comment
-        if: always() && steps.report.outcome == 'success'
+        if: always()
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         env:
           REPORT_PATH: ${{ runner.temp }}/docs-truth-report.json
@@ -219,6 +299,7 @@ jobs:
 
             if (!fs.existsSync(path)) {
               core.info('No docs-truth-report.json found — nothing to comment on.');
+              await deleteIfExists();
               return;
             }
 
@@ -227,6 +308,7 @@ jobs:
               report = JSON.parse(fs.readFileSync(path, 'utf8'));
             } catch (err) {
               core.warning(`Could not parse docs-truth-report.json: ${err.message}`);
+              await deleteIfExists();
               return;
             }
 
@@ -350,4 +432,39 @@ jobs:
                 body,
               });
               core.info(`Created orphan-ledger comment on PR #${context.issue.number}`);
+            }
+
+  candidate-head-status:
+    name: docs-truth-candidate-head
+    needs: [candidate-head-pending, docs-truth]
+    if: always() && github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+    steps:
+      - name: Publish final candidate-head status
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          DOCS_TRUTH_RESULT: ${{ needs.docs-truth.result }}
+        with:
+          script: |
+            const pull = context.payload.pull_request;
+            if (!pull || pull.head.repo.full_name !== `${context.repo.owner}/${context.repo.repo}`) {
+              core.setFailed('Candidate-head status requires a same-repository pull request.');
+              return;
+            }
+            const passed = process.env.DOCS_TRUTH_RESULT === 'success';
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: pull.head.sha,
+              state: passed ? 'success' : 'failure',
+              context: 'Docs Truth / candidate-head',
+              description: passed
+                ? 'Trusted docs-truth recomputation passed'
+                : `Trusted docs-truth result: ${process.env.DOCS_TRUTH_RESULT}`,
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
+            if (!passed) {
+              core.setFailed(`Docs Truth did not pass: ${process.env.DOCS_TRUTH_RESULT}`);
             }
