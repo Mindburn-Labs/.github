@@ -182,6 +182,7 @@ class LedgerStateClient:
 
 class ControlPlaneAdminClient:
     RULESET_ID = 4242
+    SUCCESSOR_RULESET_ID = 4243
 
     def __init__(
         self,
@@ -190,6 +191,7 @@ class ControlPlaneAdminClient:
         existing_environments: set[str] | None = None,
     ) -> None:
         self.ruleset: dict[str, object] | None = None
+        self.successor_ruleset: dict[str, object] | None = None
         self.etag = 'W/"control-1"'
         self.ref_sha = "9" * 40 if wrong_ref else None
         self.environment_policies = {
@@ -197,6 +199,7 @@ class ControlPlaneAdminClient:
             "authority-approval": [],
             "authority-merge": [],
             "authority-promotion": [],
+            "authority-control": [],
         }
         self.environments = (
             set(self.environment_policies)
@@ -211,21 +214,38 @@ class ControlPlaneAdminClient:
     def request(self, method: str, path: str, *, payload=None, if_match=None):
         self.operations.append(f"{method} {path}")
         if path == "/orgs/Mindburn-Labs/rulesets?per_page=100" and method == "GET":
-            summaries = (
-                []
-                if self.ruleset is None
-                else [{"id": self.RULESET_ID, "name": self.ruleset["name"]}]
-            )
+            summaries = []
+            if self.ruleset is not None:
+                summaries.append({"id": self.RULESET_ID, "name": self.ruleset["name"]})
+            if self.successor_ruleset is not None:
+                summaries.append(
+                    {
+                        "id": self.SUCCESSOR_RULESET_ID,
+                        "name": self.successor_ruleset["name"],
+                    }
+                )
             return self.response(summaries)
         if path == "/orgs/Mindburn-Labs/rulesets" and method == "POST":
-            if self.ruleset is not None or payload is None:
-                raise AssertionError("unexpected control ruleset creation")
-            if any(rule.get("type") == "creation" for rule in payload["rules"]):
-                raise AssertionError(
-                    "control ref creation was blocked before it existed"
-                )
-            self.ruleset = {"id": self.RULESET_ID, **payload}
-            return self.response(self.ruleset, self.etag)
+            if payload is None:
+                raise AssertionError("missing control ruleset payload")
+            if payload["name"] == MODULE.CONTROL_RULESET_NAME:
+                if self.ruleset is not None:
+                    raise AssertionError("unexpected control history creation")
+                if any(rule.get("type") == "creation" for rule in payload["rules"]):
+                    raise AssertionError(
+                        "control ref creation was blocked before it existed"
+                    )
+                self.ruleset = {"id": self.RULESET_ID, **payload}
+                return self.response(self.ruleset, self.etag)
+            if payload["name"] == MODULE.CONTROL_SUCCESSOR_RULESET_NAME:
+                if self.successor_ruleset is not None:
+                    raise AssertionError("unexpected control successor creation")
+                self.successor_ruleset = {
+                    "id": self.SUCCESSOR_RULESET_ID,
+                    **payload,
+                }
+                return self.response(self.successor_ruleset, 'W/"successor-1"')
+            raise AssertionError("unexpected named control ruleset")
         if path == f"/orgs/Mindburn-Labs/rulesets/{self.RULESET_ID}":
             if self.ruleset is None:
                 raise AssertionError("control ruleset is absent")
@@ -241,6 +261,10 @@ class ControlPlaneAdminClient:
                 self.ruleset = {"id": self.RULESET_ID, **payload}
                 self.etag = 'W/"control-2"'
                 return self.response(self.ruleset, self.etag)
+        if path == f"/orgs/Mindburn-Labs/rulesets/{self.SUCCESSOR_RULESET_ID}":
+            if self.successor_ruleset is None or method != "GET":
+                raise AssertionError("control successor ruleset is absent")
+            return self.response(self.successor_ruleset, 'W/"successor-1"')
         if path.endswith("/git/matching-refs/heads/authority/control-v1"):
             refs = (
                 []
@@ -319,6 +343,13 @@ class ControlPlaneObserverClient:
             if self.admin.ruleset is None:
                 raise MODULE.PermitInputError("control ruleset is absent")
             return self.admin.ruleset
+        if path == (
+            f"/orgs/Mindburn-Labs/rulesets/"
+            f"{self.admin.SUCCESSOR_RULESET_ID}"
+        ):
+            if self.admin.successor_ruleset is None:
+                raise MODULE.PermitInputError("control successor ruleset is absent")
+            return self.admin.successor_ruleset
         if path == f"/repos/{MODULE.AUTHORITY_REPOSITORY}":
             return {"delete_branch_on_merge": False}
         if path.endswith("/git/ref/heads/authority/control-v1"):
@@ -351,20 +382,29 @@ class ControlPlaneObserverClient:
 
     def get_bytes(self, path: str) -> bytes:
         if path == "/orgs/Mindburn-Labs/rulesets?per_page=100":
-            if self.admin.ruleset is None:
+            if self.admin.ruleset is None or self.admin.successor_ruleset is None:
                 return b"[]"
             return json.dumps(
                 [
                     {
                         "id": self.admin.RULESET_ID,
                         "name": self.admin.ruleset["name"],
-                    }
+                    },
+                    {
+                        "id": self.admin.SUCCESSOR_RULESET_ID,
+                        "name": self.admin.successor_ruleset["name"],
+                    },
                 ]
             ).encode()
         if path.endswith("/rules/branches/authority%2Fcontrol-v1"):
             if self.admin.ruleset is None:
                 raise MODULE.PermitInputError("control ruleset is absent")
-            return json.dumps(self.admin.ruleset["rules"]).encode()
+            return json.dumps(
+                [
+                    *self.admin.ruleset["rules"],
+                    *self.admin.successor_ruleset["rules"],
+                ]
+            ).encode()
         raise AssertionError(f"unexpected observer bytes GET {path}")
 
 
@@ -536,7 +576,7 @@ class BootstrapAuthorityTests(unittest.TestCase):
             expected_sha=MERGE_SHA,
         )
         self.assertEqual(receipt["sha"], MERGE_SHA)
-        self.assertEqual(len(environments), 4)
+        self.assertEqual(len(environments), 5)
         create_ruleset = admin.operations.index("POST /orgs/Mindburn-Labs/rulesets")
         create_ref = admin.operations.index(
             "POST /repos/Mindburn-Labs/.github/git/refs"
@@ -630,7 +670,7 @@ class BootstrapAuthorityTests(unittest.TestCase):
             admin,
             observer,
         )
-        self.assertEqual(len(receipts), 4)
+        self.assertEqual(len(receipts), 5)
         self.assertEqual(admin.environments, set(admin.environment_policies))
         self.assertTrue(all(receipt["branch_policies"] == [] for receipt in receipts))
         self.assertEqual(
@@ -646,6 +686,7 @@ class BootstrapAuthorityTests(unittest.TestCase):
                 "PUT /repos/Mindburn-Labs/.github/environments/authority-approval",
                 "PUT /repos/Mindburn-Labs/.github/environments/authority-merge",
                 "PUT /repos/Mindburn-Labs/.github/environments/authority-promotion",
+                "PUT /repos/Mindburn-Labs/.github/environments/authority-control",
             ],
         )
 
@@ -721,13 +762,14 @@ class BootstrapAuthorityTests(unittest.TestCase):
             for operation in admin.operations[before:]
             if operation.startswith("POST ")
         ]
-        self.assertEqual(len(receipts), 4)
+        self.assertEqual(len(receipts), 5)
         self.assertEqual(
             mutations,
             [
                 "POST /repos/Mindburn-Labs/.github/environments/authority-approval/deployment-branch-policies",
                 "POST /repos/Mindburn-Labs/.github/environments/authority-merge/deployment-branch-policies",
                 "POST /repos/Mindburn-Labs/.github/environments/authority-promotion/deployment-branch-policies",
+                "POST /repos/Mindburn-Labs/.github/environments/authority-control/deployment-branch-policies",
             ],
         )
 

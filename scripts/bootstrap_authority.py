@@ -74,6 +74,7 @@ from verify_control_plane import (
     CONTROL_BRANCH,
     CONTROL_REF,
     CONTROL_RULESET_NAME,
+    CONTROL_SUCCESSOR_RULESET_NAME,
     load_json,
     validate_contract,
     verify_live_control_workflow,
@@ -481,6 +482,25 @@ def verify_controller_baselines(
     contract = validate_controller_contract(
         load_json_file(args.controller_contract, label="controller contract")
     )
+    control_contract = validate_contract(
+        load_json(args.control_contract, label="control contract"),
+        load_json(args.adversarial_corpus, label="adversarial corpus"),
+    )
+    if (
+        control_contract["control_workflow"]["successor_app"]
+        != contract["apps"]["control_updater"]
+    ):
+        raise PermitInputError(
+            "controller and control-plane successor App identities differ"
+        )
+    bootstrap_contract = load_json(
+        args.bootstrap_contract, label="bootstrap contract"
+    )
+    if {
+        key: bootstrap_contract["merger"].get(key)
+        for key in ("slug", "app_id", "installation_id")
+    } != contract["apps"]["merger"]:
+        raise PermitInputError("controller and bootstrap merger identities differ")
     baseline = contract["evidence_ledger"]["baseline_main"][
         "Mindburn-Labs/helm-ai-kernel"
     ]
@@ -885,6 +905,9 @@ def install_control_workflow(
     )
     staged = control_ruleset_payload(contract, staged=True)
     final = control_ruleset_payload(contract, staged=False)
+    successor = contract["control_workflow"]["successor_ruleset"]
+    if successor.get("name") != CONTROL_SUCCESSOR_RULESET_NAME:
+        raise PermitInputError("control-successor ruleset name drifted")
     listed = client.request("GET", "/orgs/Mindburn-Labs/rulesets?per_page=100")
     if not isinstance(listed.body, list):
         raise PermitInputError("GitHub control-ruleset list is malformed")
@@ -893,8 +916,16 @@ def install_control_workflow(
         for item in listed.body
         if isinstance(item, dict) and item.get("name") == CONTROL_RULESET_NAME
     ]
+    successor_matches = [
+        item
+        for item in listed.body
+        if isinstance(item, dict)
+        and item.get("name") == successor["name"]
+    ]
     if len(matches) > 1:
         raise PermitInputError("multiple immutable control rulesets exist")
+    if len(successor_matches) > 1:
+        raise PermitInputError("multiple control-successor rulesets exist")
     if matches:
         ruleset_id = matches[0].get("id")
     else:
@@ -909,6 +940,28 @@ def install_control_workflow(
         ruleset_id = created.get("id")
     if not isinstance(ruleset_id, int) or ruleset_id <= 0:
         raise PermitInputError("immutable control ruleset ID is invalid")
+
+    if successor_matches:
+        successor_ruleset_id = successor_matches[0].get("id")
+    else:
+        created_successor = require_object(
+            client.request(
+                "POST",
+                "/orgs/Mindburn-Labs/rulesets",
+                payload=successor,
+            ),
+            label="created control-successor ruleset",
+        )
+        successor_ruleset_id = created_successor.get("id")
+    if not isinstance(successor_ruleset_id, int) or successor_ruleset_id <= 0:
+        raise PermitInputError("control-successor ruleset ID is invalid")
+    successor_path = f"/orgs/Mindburn-Labs/rulesets/{successor_ruleset_id}"
+    confirmed_successor = require_object(
+        client.request("GET", successor_path),
+        label="confirmed control-successor ruleset",
+    )
+    if controlled_ruleset(confirmed_successor) != successor:
+        raise PermitInputError("control-successor ruleset did not lock exactly")
 
     ruleset_path = f"/orgs/Mindburn-Labs/rulesets/{ruleset_id}"
     current_response = client.request("GET", ruleset_path)
@@ -986,6 +1039,8 @@ def install_control_workflow(
         "schema": "mindburn.release-authority-control-installation/v1",
         "ruleset_id": ruleset_id,
         "ruleset_name": CONTROL_RULESET_NAME,
+        "successor_ruleset_id": successor_ruleset_id,
+        "successor_ruleset_name": successor["name"],
         "ref": CONTROL_REF,
         "sha": expected_sha,
         "observer": observed,

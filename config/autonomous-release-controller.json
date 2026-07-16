@@ -5,6 +5,11 @@
       "installation_id": 146576964,
       "slug": "helm-authority-approver"
     },
+    "control_updater": {
+      "app_id": null,
+      "installation_id": null,
+      "slug": "helm-authority-control-updater"
+    },
     "merger": {
       "app_id": null,
       "installation_id": null,

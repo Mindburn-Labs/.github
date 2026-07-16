@@ -15,8 +15,21 @@ from typing import Any
 
 
 PROFILE_SCHEMA = "mindburn.autonomous-release-gates/v2"
+MAX_PROTECTED_FILES = 64
 REPOSITORY_PATTERN = re.compile(r"^Mindburn-Labs/[A-Za-z0-9_.-]+$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+EMPTY_TOP_LEVEL_PERMISSIONS = re.compile(r"(?m)^permissions:\s*\{\s*\}\s*(?:#.*)?$")
+PRIVILEGED_WORKFLOW_MARKERS = (
+    re.compile(r"(?m)^\s*environment\s*:"),
+    re.compile(r"(?m)^\s*secrets\s*:"),
+    re.compile(r"\bsecrets\s*(?:\.|\[)"),
+    re.compile(r"\b(?:vars\.)?HELM_AUTHORITY_"),
+    re.compile(r"actions/create-github-app-token@"),
+    re.compile(r"\bid-token\s*:\s*[\"']?write\b"),
+    re.compile(r"\bwrite(?:-all)?\b"),
+)
+MAX_WORKFLOW_FILES = 128
+MAX_WORKFLOW_BYTES = 1024 * 1024
 
 
 class GateProfileError(ValueError):
@@ -114,10 +127,11 @@ def load_profiles(path: Path) -> dict[str, dict[str, Any]]:
         if (
             not isinstance(protected_files, dict)
             or not protected_files
-            or len(protected_files) > 32
+            or len(protected_files) > MAX_PROTECTED_FILES
         ):
             raise GateProfileError(
-                f"profile {repository} must protect 1-32 gate-definition files",
+                f"profile {repository} must protect 1-{MAX_PROTECTED_FILES} "
+                "gate-definition files",
             )
         validated_protected_files: dict[str, str] = {}
         for protected_path, digest in protected_files.items():
@@ -147,8 +161,44 @@ def verify_protected_files(target: Path, protected_files: dict[str, str]) -> Non
         actual_digest = hashlib.sha256(candidate.read_bytes()).hexdigest()
         if actual_digest != expected_digest:
             raise GateProfileError(
-                f"protected gate-definition file changed before its source-owned profile: "
+                "protected gate-definition file changed before its source-owned profile: "
                 f"{relative_path}",
+            )
+
+
+def verify_workflow_inventory(
+    target: Path,
+    protected_files: dict[str, str],
+) -> None:
+    workflow_dir = target / ".github" / "workflows"
+    if not workflow_dir.is_dir() or workflow_dir.is_symlink():
+        raise GateProfileError("GitHub workflow directory is missing or not regular")
+    workflows = sorted(
+        path
+        for path in workflow_dir.iterdir()
+        if path.suffix in {".yml", ".yaml"}
+    )
+    if not workflows or len(workflows) > MAX_WORKFLOW_FILES:
+        raise GateProfileError("GitHub workflow inventory is empty or exceeds its bound")
+    for workflow in workflows:
+        relative = workflow.relative_to(target).as_posix()
+        if workflow.is_symlink() or not workflow.is_file():
+            raise GateProfileError(f"workflow is missing or not regular: {relative}")
+        content = workflow.read_bytes()
+        if not content or len(content) > MAX_WORKFLOW_BYTES or b"\x00" in content:
+            raise GateProfileError(f"workflow has invalid bounded content: {relative}")
+        try:
+            text = content.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise GateProfileError(f"workflow is not UTF-8: {relative}") from exc
+        privileged = any(pattern.search(text) for pattern in PRIVILEGED_WORKFLOW_MARKERS)
+        if privileged and relative not in protected_files:
+            raise GateProfileError(
+                f"privileged workflow is outside the source-owned inventory: {relative}",
+            )
+        if not privileged and not EMPTY_TOP_LEVEL_PERMISSIONS.search(text):
+            raise GateProfileError(
+                f"unprivileged workflow must declare top-level permissions {{}}: {relative}",
             )
 
 
@@ -165,6 +215,8 @@ def resolve_commands(
         )
     profile = profiles[repository]
     verify_protected_files(target, profile["protected_files"])
+    if repository == "Mindburn-Labs/.github":
+        verify_workflow_inventory(target, profile["protected_files"])
     return "explicit", profile["commands"]
 
 

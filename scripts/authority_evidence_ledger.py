@@ -39,7 +39,7 @@ MAX_NAMESPACE_ENTRIES = (MAX_FILES * 2) + 1
 SEGMENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,119}\Z")
 RECORD_PHASES = {
     "ordinary-merge": {"intent", "closure"},
-    "authority-promotion": {"intent", "merged", "final"},
+    "authority-promotion": {"intent", "merged", "final", "successor"},
     "bootstrap": {"intent", "closure", "final"},
 }
 RECORD_TYPES = set(RECORD_PHASES)
