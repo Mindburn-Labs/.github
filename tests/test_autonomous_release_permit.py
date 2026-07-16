@@ -180,6 +180,9 @@ class AutonomousReleasePermitTests(unittest.TestCase):
             args = prepare_args(repo, base, head, merge, root / "permit-input")
             args.repository = args.workflow_repository.swapcase()
             args.workflow_sha = merge
+            args.workflow_ref = (
+                "Mindburn-Labs/.github/.github/workflows/ci.yml@refs/pull/42/merge"
+            )
             with self.assertRaisesRegex(
                 MODULE.PermitInputError,
                 "authority workflow cannot review its own head or merge commit",

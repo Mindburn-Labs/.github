@@ -152,7 +152,7 @@ def load_authority(args: argparse.Namespace) -> dict[str, Any]:
     return authority
 
 
-def normalize_workflow_ref(
+def parse_workflow_ref(
     workflow_ref: str,
     workflow_repository: str,
     workflow_path: str,
@@ -162,13 +162,17 @@ def normalize_workflow_ref(
         raise PermitInputError(
             "workflow_ref must bind the configured workflow repository and path",
         )
+    return ref
+
+
+def normalize_workflow_ref(ref: str) -> str:
     if not (ref.startswith("refs/heads/") or ref.startswith("refs/tags/")):
         raise PermitInputError("workflow_ref must name a branch or tag ref")
     return ref
 
 
 def prepare(args: argparse.Namespace) -> None:
-    workflow_ref = normalize_workflow_ref(
+    workflow_ref = parse_workflow_ref(
         args.workflow_ref,
         args.workflow_repository,
         args.workflow_path,
@@ -202,6 +206,8 @@ def prepare(args: argparse.Namespace) -> None:
         raise PermitInputError(
             "authority workflow cannot review its own head or merge commit",
         )
+
+    workflow_ref = normalize_workflow_ref(workflow_ref)
 
     merge_parents = run_git(
         target,
