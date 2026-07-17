@@ -98,19 +98,21 @@ end
 def checkout_path(workspace_root, repo, aliases)
   name = repo.fetch("name")
   alias_entry = aliases[name]
-  local_name = alias_entry ? alias_entry.fetch("local_path") : name
-  File.join(workspace_root, local_name)
+  return File.join(workspace_root, alias_entry.fetch("local_path")) if alias_entry&.key?("local_path")
+  return File.expand_path(alias_entry.fetch("external_path"), workspace_root) if alias_entry&.key?("external_path")
+
+  File.join(workspace_root, name)
 end
 
 def grep_ref(repo_dir, pattern)
   ref = ENV.fetch("HEADLESS_UI_REFERENCE_REF", "origin/main")
   out, err, status = Open3.capture3("git", "-C", repo_dir, "grep", "-n", "-I", "-E", pattern, ref, "--")
-  return [out, ref] if status.success?
+  return [out, ref] if status.exitstatus == 0
+  return ["", ref] if status.exitstatus == 1
 
   head_out, _head_err, head_status = Open3.capture3("git", "-C", repo_dir, "grep", "-n", "-I", "-E", pattern, "HEAD", "--")
-  return [head_out, "HEAD"] if head_status.success?
-
-  return ["", ref] if [0, 1].include?(status.exitstatus) || [0, 1].include?(head_status.exitstatus)
+  return [head_out, "HEAD"] if head_status.exitstatus == 0
+  return ["", "HEAD"] if head_status.exitstatus == 1
 
   warn "headless UI reference scan skipped #{repo_dir}: #{err.strip}"
   ["", ref]
