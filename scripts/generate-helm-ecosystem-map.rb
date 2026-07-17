@@ -137,7 +137,15 @@ def local_checkout_for(name, local_dirs, aliases)
   return "yes" if local_dirs.include?(name)
 
   alias_entry = aliases[name]
-  return "alias `#{alias_entry.fetch("local_path")}`" if alias_entry && local_dirs.include?(alias_entry.fetch("local_path"))
+  if alias_entry
+    local_path = alias_entry["local_path"]
+    return "alias `#{local_path}`" if local_path && local_dirs.include?(local_path)
+
+    external_path = alias_entry["external_path"]
+    if external_path && !Pathname.new(external_path).absolute? && File.directory?(File.expand_path(external_path, WORKSPACE_ROOT))
+      return "external alias `#{external_path}`"
+    end
+  end
 
   "no"
 end
@@ -221,7 +229,7 @@ def render_markdown(state)
   end
 
   manifest_names = manifest_repos.map { |repo| repo.fetch("name") }
-  alias_local_paths = aliases.values.map { |entry| entry.fetch("local_path") }
+  alias_local_paths = aliases.values.filter_map { |entry| entry["local_path"] }
   local_only_names = local_dirs.reject { |name| manifest_names.include?(name) }.sort
   local_only_rows = local_only_names.map do |name|
     [
@@ -414,11 +422,25 @@ def validate_state!(state, markdown)
 
   aliases.each do |manifest_name, policy|
     errors << "alias #{manifest_name} is not a manifest repo" unless manifest_names.include?(manifest_name)
-    errors << "alias #{manifest_name} local path #{policy.fetch("local_path")} is missing" unless local_dirs.include?(policy.fetch("local_path"))
+    local_path = policy["local_path"]
+    external_path = policy["external_path"]
+    if local_path && external_path
+      errors << "alias #{manifest_name} must define only one of local_path or external_path"
+    elsif local_path
+      errors << "alias #{manifest_name} local path #{local_path} is missing" unless local_dirs.include?(local_path)
+    elsif external_path
+      if Pathname.new(external_path).absolute?
+        errors << "alias #{manifest_name} external path must be relative to the workspace root"
+      elsif !File.directory?(File.expand_path(external_path, WORKSPACE_ROOT))
+        errors << "alias #{manifest_name} external path #{external_path} is missing"
+      end
+    else
+      errors << "alias #{manifest_name} must define local_path or external_path"
+    end
   end
 
   missing_manifest = manifest_names.reject do |name|
-    local_dirs.include?(name) || (aliases[name] && local_dirs.include?(aliases[name].fetch("local_path"))) || manifest_only_policy.key?(name)
+    local_checkout_for(name, local_dirs, aliases) != "no" || manifest_only_policy.key?(name)
   end
   errors << "manifest repos missing locally without policy: #{missing_manifest.join(", ")}" unless missing_manifest.empty?
 

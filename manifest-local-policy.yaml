@@ -2,8 +2,15 @@ aliases:
   .github:
     local_path: .github-repo
     reason: local checkout uses explicit alias
+  tempora:
+    external_path: ../Tempora
+    reason: separate dogfood product checkout is a sibling of the Mindburn workspace
 
 manifest_only:
+  contracts-autonomous-release-canary:
+    reason: release-authority fixture repository is intentionally not checked out in the canonical Mindburn workspace
+    owner: release-platform
+    expires: 2026-08-17
   helm-rollout-evidence:
     reason: release evidence repo not checked out locally
     owner: release-platform
