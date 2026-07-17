@@ -22,6 +22,18 @@ SPEC.loader.exec_module(MODULE)
 
 
 class PullRequestObjectTests(unittest.TestCase):
+    @staticmethod
+    def admission(*, base_sha: str, head_sha: str, merge_sha: str) -> dict[str, object]:
+        return {
+            "schema": "mindburn.authority-pr-admission/v1",
+            "repository": "Mindburn-Labs/.github",
+            "pr_number": 42,
+            "base": {"ref": "main", "sha": base_sha},
+            "head": {"repository": "Mindburn-Labs/.github", "sha": head_sha},
+            "merge_sha": merge_sha,
+            "workflow_run_head_sha": head_sha,
+        }
+
     def test_repository_and_sha_inputs_are_narrow(self) -> None:
         self.assertEqual(MODULE.require_repository("Mindburn-Labs/.github"), "Mindburn-Labs/.github")
         self.assertEqual(MODULE.require_sha("a" * 40, label="head"), "a" * 40)
@@ -33,6 +45,41 @@ class PullRequestObjectTests(unittest.TestCase):
             with self.subTest(value=value):
                 with self.assertRaises(MODULE.PullRequestObjectError):
                     MODULE.require_sha(value, label="head")
+
+    def test_admission_is_one_same_repository_main_snapshot(self) -> None:
+        valid = self.admission(base_sha="a" * 40, head_sha="b" * 40, merge_sha="c" * 40)
+        normalized = MODULE.normalize_admission(valid)
+        self.assertEqual(normalized["base"], {"ref": "main", "sha": "a" * 40})
+        self.assertEqual(normalized["head"], {"repository": "Mindburn-Labs/.github", "sha": "b" * 40})
+        self.assertEqual(normalized["workflow_run_head_sha"], "b" * 40)
+
+        invalid_cases = []
+        unknown = json.loads(json.dumps(valid))
+        unknown["extra"] = "untrusted"
+        invalid_cases.append(unknown)
+        fork = json.loads(json.dumps(valid))
+        fork["head"]["repository"] = "Mindburn-Labs/fork"
+        invalid_cases.append(fork)
+        wrong_base = json.loads(json.dumps(valid))
+        wrong_base["base"]["ref"] = "release"
+        invalid_cases.append(wrong_base)
+        mismatched_run = json.loads(json.dumps(valid))
+        mismatched_run["workflow_run_head_sha"] = "d" * 40
+        invalid_cases.append(mismatched_run)
+        invalid_cases.append({**valid, "pr_number": True})
+        for invalid in invalid_cases:
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(MODULE.PullRequestObjectError):
+                    MODULE.normalize_admission(invalid)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "admission.json"
+            path.write_text('{"schema": "one", "schema": "two"}', encoding="utf-8")
+            with self.assertRaises(MODULE.PullRequestObjectError):
+                MODULE.load_admission(path)
+            path.write_bytes(b"x" * (MODULE.MAX_ADMISSION_BYTES + 1))
+            with self.assertRaises(MODULE.PullRequestObjectError):
+                MODULE.load_admission(path)
 
     def test_fetch_refspec_and_remote_are_fixed_format(self) -> None:
         self.assertEqual(
@@ -162,27 +209,26 @@ class PullRequestObjectTests(unittest.TestCase):
                 side_effect=local_file_environment,
             ):
                 receipt = MODULE.prepare_store(
-                    repository="Mindburn-Labs/.github",
-                    base_sha=base_sha,
-                    head_sha=head_sha,
-                    merge_sha=merge_sha,
+                    admission=self.admission(
+                        base_sha=base_sha,
+                        head_sha=head_sha,
+                        merge_sha=merge_sha,
+                    ),
                     output=root / "candidate.git",
                     token="test-token",
                 )
+            receipt_path = root / "object-receipt.json"
+            receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
             verification = subprocess.run(
                 [
                     sys.executable,
                     str(ROOT / "scripts" / "verify_workflow_tree.py"),
                     "--parent-repository",
                     str(source),
-                    "--parent-sha",
-                    base_sha,
                     "--candidate-repository",
                     str(root / "candidate.git"),
-                    "--candidate-sha",
-                    head_sha,
-                    "--merge-sha",
-                    merge_sha,
+                    "--object-receipt",
+                    str(receipt_path),
                 ],
                 check=False,
                 stdout=subprocess.PIPE,
@@ -194,6 +240,7 @@ class PullRequestObjectTests(unittest.TestCase):
             self.assertEqual(admission["parent_sha"], base_sha)
             self.assertEqual(admission["candidate_sha"], head_sha)
             self.assertEqual(admission["merge_sha"], merge_sha)
+            self.assertEqual(admission["admission"]["pr_number"], 42)
 
         self.assertEqual(receipt["merge_parents"], [base_sha, head_sha])
 

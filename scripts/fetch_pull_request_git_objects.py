@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Fetch exact pull-request objects into a bare store without a checkout.
 
-This helper is for a trusted, default-branch broker. It accepts only commit
-identifiers, creates a new bare repository, and never checks out, executes, or
-sources candidate content. The caller must retain the resulting store locally;
-it is input for Git-object inspection, not an artifact to publish.
+This helper is for a trusted, default-branch broker. It accepts one strict PR
+admission document, creates a new bare repository, and never checks out,
+executes, or sources candidate content. The caller must retain the resulting
+store locally; it is input for Git-object inspection, not an artifact to
+publish.
 """
 
 from __future__ import annotations
@@ -24,6 +25,9 @@ REPOSITORY_PATTERN = re.compile(r"^Mindburn-Labs/[A-Za-z0-9_.-]+$")
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 FETCH_DEPTHS = {"base": 1, "head": 1, "merge": 2}
 SAFE_ENVIRONMENT_KEYS = ("HOME", "LANG", "LC_ALL", "LC_CTYPE", "PATH", "SYSTEMROOT", "TMPDIR")
+ADMISSION_SCHEMA = "mindburn.authority-pr-admission/v1"
+OBJECT_RECEIPT_SCHEMA = "mindburn.authority-bare-git-input/v2"
+MAX_ADMISSION_BYTES = 16 * 1024
 
 
 class PullRequestObjectError(ValueError):
@@ -40,6 +44,97 @@ def require_sha(value: str, *, label: str) -> str:
     if not SHA_PATTERN.fullmatch(value):
         raise PullRequestObjectError(f"{label} must be a lowercase 40-character SHA")
     return value
+
+
+def require_positive_integer(value: object, *, label: str) -> int:
+    if type(value) is not int or value <= 0:
+        raise PullRequestObjectError(f"{label} must be a positive integer")
+    return value
+
+
+def require_exact_mapping(value: object, *, label: str, keys: set[str]) -> dict[str, object]:
+    if not isinstance(value, dict) or set(value) != keys:
+        raise PullRequestObjectError(f"{label} must contain exactly {sorted(keys)}")
+    return value
+
+
+def reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise PullRequestObjectError(f"admission JSON contains duplicate key: {key}")
+        result[key] = value
+    return result
+
+
+def normalize_admission(value: object) -> dict[str, object]:
+    """Validate one broker-produced PR snapshot without consulting GitHub.
+
+    The future trusted broker must obtain these fields from one GitHub API/event
+    snapshot. This parser deliberately does not claim to authenticate that
+    snapshot; it only prevents independently supplied refs from being mixed.
+    """
+
+    admission = require_exact_mapping(
+        value,
+        label="admission",
+        keys={
+            "schema",
+            "repository",
+            "pr_number",
+            "base",
+            "head",
+            "merge_sha",
+            "workflow_run_head_sha",
+        },
+    )
+    if admission["schema"] != ADMISSION_SCHEMA:
+        raise PullRequestObjectError(f"admission.schema must equal {ADMISSION_SCHEMA}")
+    repository = require_repository(admission["repository"] if isinstance(admission["repository"], str) else "")
+    pr_number = require_positive_integer(admission["pr_number"], label="admission.pr_number")
+    base = require_exact_mapping(admission["base"], label="admission.base", keys={"ref", "sha"})
+    head = require_exact_mapping(admission["head"], label="admission.head", keys={"repository", "sha"})
+    if base["ref"] != "main":
+        raise PullRequestObjectError("admission.base.ref must equal main")
+    base_sha = require_sha(base["sha"] if isinstance(base["sha"], str) else "", label="admission.base.sha")
+    head_repository = require_repository(
+        head["repository"] if isinstance(head["repository"], str) else "",
+    )
+    if head_repository != repository:
+        raise PullRequestObjectError("admission.head.repository must equal admission.repository")
+    head_sha = require_sha(head["sha"] if isinstance(head["sha"], str) else "", label="admission.head.sha")
+    merge_sha = require_sha(
+        admission["merge_sha"] if isinstance(admission["merge_sha"], str) else "",
+        label="admission.merge_sha",
+    )
+    workflow_run_head_sha = require_sha(
+        admission["workflow_run_head_sha"] if isinstance(admission["workflow_run_head_sha"], str) else "",
+        label="admission.workflow_run_head_sha",
+    )
+    if workflow_run_head_sha != head_sha:
+        raise PullRequestObjectError("admission.workflow_run_head_sha must equal admission.head.sha")
+    return {
+        "schema": ADMISSION_SCHEMA,
+        "repository": repository,
+        "pr_number": pr_number,
+        "base": {"ref": "main", "sha": base_sha},
+        "head": {"repository": head_repository, "sha": head_sha},
+        "merge_sha": merge_sha,
+        "workflow_run_head_sha": workflow_run_head_sha,
+    }
+
+
+def load_admission(path: Path) -> dict[str, object]:
+    try:
+        if path.stat().st_size > MAX_ADMISSION_BYTES:
+            raise PullRequestObjectError("admission JSON exceeds the maximum size")
+        decoded = json.loads(
+            path.read_text(encoding="utf-8"),
+            object_pairs_hook=reject_duplicate_keys,
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise PullRequestObjectError("admission must be valid UTF-8 JSON") from exc
+    return normalize_admission(decoded)
 
 
 def require_token(environment_name: str) -> str:
@@ -145,17 +240,17 @@ def fetch_arguments(sha: str, *, label: str) -> tuple[str, ...]:
 
 def prepare_store(
     *,
-    repository: str,
-    base_sha: str,
-    head_sha: str,
-    merge_sha: str,
+    admission: dict[str, object],
     output: Path,
     token: str,
 ) -> dict[str, Any]:
-    repository = require_repository(repository)
-    base_sha = require_sha(base_sha, label="base_sha")
-    head_sha = require_sha(head_sha, label="head_sha")
-    merge_sha = require_sha(merge_sha, label="merge_sha")
+    admission = normalize_admission(admission)
+    repository = admission["repository"]
+    base_sha = admission["base"]["sha"]
+    head_sha = admission["head"]["sha"]
+    merge_sha = admission["merge_sha"]
+    if not all(isinstance(value, str) for value in (repository, base_sha, head_sha, merge_sha)):
+        raise PullRequestObjectError("normalized admission has invalid object bindings")
     if output.exists():
         raise PullRequestObjectError(f"candidate object store already exists: {output}")
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -206,11 +301,8 @@ def prepare_store(
     if observed_head != merge_sha:
         raise PullRequestObjectError("bare candidate store did not bind HEAD to merge SHA")
     return {
-        "schema": "mindburn.authority-bare-git-input/v1",
-        "repository": repository,
-        "base_sha": base_sha,
-        "head_sha": head_sha,
-        "merge_sha": merge_sha,
+        "schema": OBJECT_RECEIPT_SCHEMA,
+        "admission": admission,
         "merge_parents": parents,
     }
 
@@ -219,10 +311,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Bind exact PR Git objects in a bare repository without checkout",
     )
-    parser.add_argument("--repository", required=True)
-    parser.add_argument("--base-sha", required=True)
-    parser.add_argument("--head-sha", required=True)
-    parser.add_argument("--merge-sha", required=True)
+    parser.add_argument("--admission", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--receipt", type=Path)
     return parser
@@ -232,10 +321,7 @@ def main(argv: list[str]) -> int:
     try:
         args = build_parser().parse_args(argv)
         receipt = prepare_store(
-            repository=require_repository(args.repository),
-            base_sha=require_sha(args.base_sha, label="base_sha"),
-            head_sha=require_sha(args.head_sha, label="head_sha"),
-            merge_sha=require_sha(args.merge_sha, label="merge_sha"),
+            admission=load_admission(args.admission.resolve()),
             output=args.output.resolve(),
             token=require_token("GITHUB_TOKEN"),
         )

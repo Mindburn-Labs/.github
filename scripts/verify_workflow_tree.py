@@ -23,6 +23,10 @@ REGULAR_MODE = "100644"
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 WORKFLOW_FILE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*\.ya?ml$")
 SAFE_ENVIRONMENT_KEYS = ("HOME", "LANG", "LC_ALL", "LC_CTYPE", "PATH", "SYSTEMROOT", "TMPDIR")
+REPOSITORY_PATTERN = re.compile(r"^Mindburn-Labs/[A-Za-z0-9_.-]+$")
+ADMISSION_SCHEMA = "mindburn.authority-pr-admission/v1"
+OBJECT_RECEIPT_SCHEMA = "mindburn.authority-bare-git-input/v2"
+MAX_OBJECT_RECEIPT_BYTES = 16 * 1024
 
 
 class WorkflowTreeError(ValueError):
@@ -64,6 +68,141 @@ def require_sha(value: str, *, label: str) -> str:
     if not SHA_PATTERN.fullmatch(value):
         raise WorkflowTreeError(f"{label} must be a lowercase 40-character SHA")
     return value
+
+
+def require_repository(value: object, *, label: str) -> str:
+    if not isinstance(value, str) or not REPOSITORY_PATTERN.fullmatch(value):
+        raise WorkflowTreeError(f"{label} must be a Mindburn-Labs owner/name pair")
+    return value
+
+
+def require_positive_integer(value: object, *, label: str) -> int:
+    if type(value) is not int or value <= 0:
+        raise WorkflowTreeError(f"{label} must be a positive integer")
+    return value
+
+
+def require_exact_mapping(value: object, *, label: str, keys: set[str]) -> dict[str, object]:
+    if not isinstance(value, dict) or set(value) != keys:
+        raise WorkflowTreeError(f"{label} must contain exactly {sorted(keys)}")
+    return value
+
+
+def reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise WorkflowTreeError(f"object receipt JSON contains duplicate key: {key}")
+        result[key] = value
+    return result
+
+
+def normalize_admission(value: object) -> dict[str, object]:
+    admission = require_exact_mapping(
+        value,
+        label="object receipt admission",
+        keys={
+            "schema",
+            "repository",
+            "pr_number",
+            "base",
+            "head",
+            "merge_sha",
+            "workflow_run_head_sha",
+        },
+    )
+    if admission["schema"] != ADMISSION_SCHEMA:
+        raise WorkflowTreeError(f"object receipt admission.schema must equal {ADMISSION_SCHEMA}")
+    repository = require_repository(admission["repository"], label="object receipt admission.repository")
+    pr_number = require_positive_integer(
+        admission["pr_number"],
+        label="object receipt admission.pr_number",
+    )
+    base = require_exact_mapping(
+        admission["base"],
+        label="object receipt admission.base",
+        keys={"ref", "sha"},
+    )
+    head = require_exact_mapping(
+        admission["head"],
+        label="object receipt admission.head",
+        keys={"repository", "sha"},
+    )
+    if base["ref"] != "main":
+        raise WorkflowTreeError("object receipt admission.base.ref must equal main")
+    base_sha = require_sha(
+        base["sha"] if isinstance(base["sha"], str) else "",
+        label="object receipt admission.base.sha",
+    )
+    head_repository = require_repository(
+        head["repository"],
+        label="object receipt admission.head.repository",
+    )
+    if head_repository != repository:
+        raise WorkflowTreeError(
+            "object receipt admission.head.repository must equal admission.repository",
+        )
+    head_sha = require_sha(
+        head["sha"] if isinstance(head["sha"], str) else "",
+        label="object receipt admission.head.sha",
+    )
+    merge_sha = require_sha(
+        admission["merge_sha"] if isinstance(admission["merge_sha"], str) else "",
+        label="object receipt admission.merge_sha",
+    )
+    workflow_run_head_sha = require_sha(
+        admission["workflow_run_head_sha"]
+        if isinstance(admission["workflow_run_head_sha"], str)
+        else "",
+        label="object receipt admission.workflow_run_head_sha",
+    )
+    if workflow_run_head_sha != head_sha:
+        raise WorkflowTreeError(
+            "object receipt admission.workflow_run_head_sha must equal admission.head.sha",
+        )
+    return {
+        "schema": ADMISSION_SCHEMA,
+        "repository": repository,
+        "pr_number": pr_number,
+        "base": {"ref": "main", "sha": base_sha},
+        "head": {"repository": head_repository, "sha": head_sha},
+        "merge_sha": merge_sha,
+        "workflow_run_head_sha": workflow_run_head_sha,
+    }
+
+
+def load_object_receipt(path: Path) -> dict[str, object]:
+    try:
+        if path.stat().st_size > MAX_OBJECT_RECEIPT_BYTES:
+            raise WorkflowTreeError("object receipt JSON exceeds the maximum size")
+        decoded = json.loads(
+            path.read_text(encoding="utf-8"),
+            object_pairs_hook=reject_duplicate_keys,
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise WorkflowTreeError("object receipt must be valid UTF-8 JSON") from exc
+    receipt = require_exact_mapping(
+        decoded,
+        label="object receipt",
+        keys={"schema", "admission", "merge_parents"},
+    )
+    if receipt["schema"] != OBJECT_RECEIPT_SCHEMA:
+        raise WorkflowTreeError(f"object receipt schema must equal {OBJECT_RECEIPT_SCHEMA}")
+    admission = normalize_admission(receipt["admission"])
+    merge_parents = receipt["merge_parents"]
+    if not isinstance(merge_parents, list) or len(merge_parents) != 2:
+        raise WorkflowTreeError("object receipt merge_parents must contain exactly two SHAs")
+    parents = [
+        require_sha(value if isinstance(value, str) else "", label="object receipt merge parent")
+        for value in merge_parents
+    ]
+    base = admission["base"]
+    head = admission["head"]
+    if not isinstance(base, dict) or not isinstance(head, dict):
+        raise WorkflowTreeError("normalized object receipt admission has invalid bindings")
+    if parents != [base["sha"], head["sha"]]:
+        raise WorkflowTreeError("object receipt merge parents do not match admission base and head")
+    return {"admission": admission, "merge_parents": parents}
 
 
 def require_commit(repository: Path, revision: str, *, label: str) -> str:
@@ -203,13 +342,44 @@ def verify(
     }
 
 
+def verify_object_receipt(
+    *,
+    parent_repository: Path,
+    candidate_repository: Path,
+    object_receipt: Path,
+) -> dict[str, object]:
+    """Verify a candidate using the single object-binding receipt from fetch.
+
+    The receipt remains data, not authority: this function re-binds every
+    referenced Git object and merge parent before comparing workflow blobs.
+    """
+
+    receipt = load_object_receipt(object_receipt)
+    admission = receipt["admission"]
+    if not isinstance(admission, dict):
+        raise WorkflowTreeError("object receipt admission is invalid")
+    base = admission["base"]
+    head = admission["head"]
+    if not isinstance(base, dict) or not isinstance(head, dict):
+        raise WorkflowTreeError("object receipt admission bindings are invalid")
+    result = verify(
+        parent_repository=parent_repository,
+        parent_sha=base["sha"],
+        candidate_repository=candidate_repository,
+        candidate_sha=head["sha"],
+        merge_sha=admission["merge_sha"],
+    )
+    result["schema"] = "mindburn.authority-workflow-tree-admission/v2"
+    result["admission"] = admission
+    result["object_receipt_schema"] = OBJECT_RECEIPT_SCHEMA
+    return result
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Verify exact candidate workflow tree")
     parser.add_argument("--parent-repository", type=Path, required=True)
-    parser.add_argument("--parent-sha", required=True)
     parser.add_argument("--candidate-repository", type=Path, required=True)
-    parser.add_argument("--candidate-sha", required=True)
-    parser.add_argument("--merge-sha", required=True)
+    parser.add_argument("--object-receipt", type=Path, required=True)
     parser.add_argument("--output", type=Path)
     return parser
 
@@ -217,12 +387,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str]) -> int:
     try:
         args = build_parser().parse_args(argv)
-        result = verify(
+        result = verify_object_receipt(
             parent_repository=args.parent_repository.resolve(),
-            parent_sha=args.parent_sha,
             candidate_repository=args.candidate_repository.resolve(),
-            candidate_sha=args.candidate_sha,
-            merge_sha=args.merge_sha,
+            object_receipt=args.object_receipt.resolve(),
         )
         encoded = json.dumps(result, indent=2, sort_keys=True) + "\n"
         if args.output is not None:

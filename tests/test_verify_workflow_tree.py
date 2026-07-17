@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -81,6 +82,22 @@ def bare_store(root: Path, source: Path, *, head_ref: str = "main") -> Path:
     return store
 
 
+def object_receipt(*, base_sha: str, head_sha: str, merge_sha: str) -> dict[str, object]:
+    return {
+        "schema": "mindburn.authority-bare-git-input/v2",
+        "admission": {
+            "schema": "mindburn.authority-pr-admission/v1",
+            "repository": "Mindburn-Labs/.github",
+            "pr_number": 7,
+            "base": {"ref": "main", "sha": base_sha},
+            "head": {"repository": "Mindburn-Labs/.github", "sha": head_sha},
+            "merge_sha": merge_sha,
+            "workflow_run_head_sha": head_sha,
+        },
+        "merge_parents": [base_sha, head_sha],
+    }
+
+
 class WorkflowTreeTests(unittest.TestCase):
     def test_source_only_reads_git_objects_without_checkout_or_shell_execution(self) -> None:
         source = MODULE_PATH.read_text(encoding="utf-8")
@@ -107,6 +124,60 @@ class WorkflowTreeTests(unittest.TestCase):
         self.assertEqual(result["candidate_sha"], head_sha)
         self.assertEqual(result["merge_sha"], merge_sha)
         self.assertEqual(result["workflow_paths"], [".github/workflows/ci.yml", ".github/workflows/docs-truth.yml"])
+
+    def test_single_object_receipt_rejects_mixed_snapshot_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, base_sha, head_sha, merge_sha = create_pull_request_graph(root)
+            store = bare_store(root, source)
+            receipt_path = root / "object-receipt.json"
+            receipt = object_receipt(base_sha=base_sha, head_sha=head_sha, merge_sha=merge_sha)
+            receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+            result = MODULE.verify_object_receipt(
+                parent_repository=source,
+                candidate_repository=store,
+                object_receipt=receipt_path,
+            )
+            self.assertEqual(result["admission"]["workflow_run_head_sha"], head_sha)
+            self.assertEqual(result["object_receipt_schema"], "mindburn.authority-bare-git-input/v2")
+
+            invalid_cases = []
+            mismatched_run = json.loads(json.dumps(receipt))
+            mismatched_run["admission"]["workflow_run_head_sha"] = "a" * 40
+            invalid_cases.append(mismatched_run)
+            fork = json.loads(json.dumps(receipt))
+            fork["admission"]["head"]["repository"] = "Mindburn-Labs/fork"
+            invalid_cases.append(fork)
+            wrong_parents = json.loads(json.dumps(receipt))
+            wrong_parents["merge_parents"] = [head_sha, base_sha]
+            invalid_cases.append(wrong_parents)
+            unknown = json.loads(json.dumps(receipt))
+            unknown["unexpected"] = True
+            invalid_cases.append(unknown)
+            for index, invalid in enumerate(invalid_cases):
+                with self.subTest(index=index):
+                    receipt_path.write_text(json.dumps(invalid), encoding="utf-8")
+                    with self.assertRaises(MODULE.WorkflowTreeError):
+                        MODULE.verify_object_receipt(
+                            parent_repository=source,
+                            candidate_repository=store,
+                            object_receipt=receipt_path,
+                        )
+
+            receipt_path.write_text('{"schema": "one", "schema": "two"}', encoding="utf-8")
+            with self.assertRaises(MODULE.WorkflowTreeError):
+                MODULE.verify_object_receipt(
+                    parent_repository=source,
+                    candidate_repository=store,
+                    object_receipt=receipt_path,
+                )
+            receipt_path.write_bytes(b"x" * (MODULE.MAX_OBJECT_RECEIPT_BYTES + 1))
+            with self.assertRaises(MODULE.WorkflowTreeError):
+                MODULE.verify_object_receipt(
+                    parent_repository=source,
+                    candidate_repository=store,
+                    object_receipt=receipt_path,
+                )
 
     def test_candidate_workflow_add_delete_mutation_symlink_and_gitlink_fail_closed(self) -> None:
         def add(repository: Path) -> bool:
