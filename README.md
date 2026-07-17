@@ -11,6 +11,7 @@ Current verified state:
 - 50 repositories in the `Mindburn-Labs` GitHub organization.
 - 49 active repositories.
 - One repository (`orggenome-compiler`) is archived.
+- `tempora` is a separate dogfood product, not a HELM production release component.
 - Production release readiness is tracked in `integration-mindburn-platform/manifests/release-candidate.yaml`.
 - Final-state evidence is tracked in `integration-mindburn-platform/manifests/final-state-evidence.yaml`.
 

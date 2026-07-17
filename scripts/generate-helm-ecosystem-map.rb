@@ -130,6 +130,8 @@ def group_for(name)
     "Docs / Onboarding / Local Ops"
   when "ml-orggenome-compiler"
     "OrgGenome / ML"
+  when "tempora"
+    "Separate Product / Dogfood"
   else
     "Other Manifest Repository"
   end
