@@ -16,8 +16,14 @@ MANIFEST_LOCAL_POLICY_PATH = File.join(REPO_ROOT, "manifest-local-policy.yaml")
 COMPATIBILITY_POLICY_PATH = File.join(REPO_ROOT, "local-compatibility-policy.yaml")
 ESTATE_INVENTORY_PATH = File.join(WORKSPACE_ROOT, "production-readiness", "estate", "estate-inventory.json")
 MIGRATION_INDEX_PATH = File.join(WORKSPACE_ROOT, "production-readiness", "estate", "migration-index.json")
-TEAM_DOC_PATH = File.join(WORKSPACE_ROOT, "docs_for_team", "docs", "onboarding", "helm-ecosystem-directory-map.md")
-ROOT_DOC_PATH = File.join(WORKSPACE_ROOT, "docs", "architecture", "helm-ecosystem-directory-map.md")
+# Output overrides allow cross-repository generation to target clean worktrees
+# without mutating a developer's primary docs checkouts.
+TEAM_DOC_PATH = ENV.fetch("MINDBURN_TEAM_DOC_PATH") do
+  File.join(WORKSPACE_ROOT, "docs_for_team", "docs", "onboarding", "helm-ecosystem-directory-map.md")
+end
+ROOT_DOC_PATH = ENV.fetch("MINDBURN_ROOT_DOC_PATH") do
+  File.join(WORKSPACE_ROOT, "docs", "architecture", "helm-ecosystem-directory-map.md")
+end
 ROUTING_DOC_PATH = File.join(WORKSPACE_ROOT, "docs_for_team", "docs", "onboarding", "helm-task-routing.md")
 
 OPTIONS = {

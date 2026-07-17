@@ -39,3 +39,7 @@ Repository inventory does not prove production readiness. When there is a confli
 ```bash
 make lint
 ```
+
+For an isolated cross-repository generated-map check, set
+`MINDBURN_TEAM_DOC_PATH` and `MINDBURN_ROOT_DOC_PATH` to the corresponding
+clean docs worktrees before running `scripts/generate-helm-ecosystem-map.rb`.
