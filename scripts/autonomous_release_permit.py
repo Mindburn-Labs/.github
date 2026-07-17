@@ -157,12 +157,15 @@ def parse_workflow_ref(
     workflow_repository: str,
     workflow_path: str,
 ) -> str:
-    source, separator, ref = workflow_ref.rpartition("@")
-    if separator != "@" or source != f"{workflow_repository}/{workflow_path}":
+    source_prefix = f"{workflow_repository}/{workflow_path}@"
+    if not workflow_ref.startswith(source_prefix):
         raise PermitInputError(
             "workflow_ref must bind the configured workflow repository and path",
         )
-    return ref
+    # Git permits `@` inside a refname (except as a bare ref or before `{`),
+    # so split only at the fixed workflow-source boundary rather than at the
+    # final `@` in the complete reference.
+    return workflow_ref[len(source_prefix) :]
 
 
 def normalize_workflow_ref(ref: str) -> str:
