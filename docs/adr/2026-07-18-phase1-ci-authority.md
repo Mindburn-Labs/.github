@@ -103,21 +103,20 @@
 
 ## Review-gated source containment set
 
-The following draft pull requests make an accidental workflow re-enable fail
-closed at the source layer. Each removes automatic events from a token-bearing
-workflow, retains only `workflow_dispatch`, runs a no-token containment job
-that exits non-zero, and leaves the original privileged job unreachable behind
-an unconfigured authority-restoration event. None is merged or evidence of a
-safe CI, release, or production lane.
+The following draft pull requests remove the automatic `pull_request` event
+from a token-bearing workflow. They are intentionally narrow: they preserve
+the existing trusted-main and manual behavior while the workflow remains
+manually disabled. None is merged or evidence of a safe CI, release, or
+production lane.
 
-- `svc-helm-control-plane#194` at `8bf1596`: Continuous Integration and Docs
+- `svc-helm-control-plane#194` at `32ef5e4`: Continuous Integration and Docs
   Truth.
-- `svc-agent-sandbox-runner#11` at `96e5284`: Continuous Integration and Docs
+- `svc-agent-sandbox-runner#11` at `c9d50f1`: Continuous Integration and Docs
   Truth.
-- `helm-ai-kernel#607` at `4039e264`: Docs Truth.
-- `integration-mindburn-platform#129` at `4b65562`: Continuous Integration.
-- `gitops-apps#45` at `5f5bee2`: Continuous Integration.
-- `gitops-platform#142` at `a467c44`: Continuous Integration.
+- `helm-ai-kernel#607` at `34725714`: Docs Truth.
+- `integration-mindburn-platform#129` at `b36b082`: Continuous Integration.
+- `gitops-apps#45` at `f671ef6`: Continuous Integration.
+- `gitops-platform#142` at `fb6d247`: Continuous Integration.
 
 All six branches passed local `actionlint` and `git diff --check` before
 push. A live state poll after push found every tracked P0 workflow manually
