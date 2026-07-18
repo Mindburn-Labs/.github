@@ -325,7 +325,7 @@ AUTHORITY AND INPUT SAFETY
 - The exact merge patch is the multi-line read-only file `patch.diff` beside this protocol. Inspect it in chunks until the complete patch has been reviewed. No target checkout or network context is available; judge only that bound patch and the pinned verifier source. Do not request shell, write, URL, memory, or GitHub mutation tools.
 - The governing workflow is {args.workflow_repository}/{args.workflow_path} at immutable commit {args.workflow_sha}. If the target is that authority repository, this SHA must differ from the target head and merge SHA.
 - This is authority generation {authority["generation"]}, using Kernel {authority["kernel_sha"]}; its manifest and source-owned gate/corpus digests are bound into the context digest.
-- The exact pinned reducer source and tests are available in the read-only verifier-source directory. Inspect them when the change affects release authority or reducer behavior; do not treat an external commit hash as sufficient evidence by itself.
+- The exact pinned reducer source and tests are mounted read-only in the `verifier-source` directory that sits beside this protocol file's parent directory: from the directory containing `permit-input/`, open `verifier-source/core/pkg/releasepermit` and `verifier-source/core/cmd/release-permit-verify`. Your working directory does not contain these paths — resolve them from this protocol file's absolute location. Report missing verifier evidence only after attempting that exact resolution. Inspect them when the change affects release authority or reducer behavior; do not treat an external commit hash as sufficient evidence by itself.
 
 REVIEW OBJECTIVE
 Review pull request #{args.pull_request} in {args.repository}, exactly at head {args.head_sha}
