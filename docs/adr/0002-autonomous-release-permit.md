@@ -342,7 +342,8 @@ but is not an approval identity.
    Verify effective coverage with live required-workflow runs. Because GitHub
    currently returns an upgrade error for paid private/internal rule suites,
    the enforcing stable rule is explicitly scoped to the three proven public
-   repositories; private/internal human gates remain unchanged.
+   repositories; selected commercial repositories may join the evaluate-only
+   candidate proof set, while private/internal human gates remain unchanged.
 3. Prove `ALLOW` on an exact merge tree, structured `DENY` for stale context,
    provider duplication and blocking findings, and a failed check for a missing
    reviewer, malformed response, or model outage.

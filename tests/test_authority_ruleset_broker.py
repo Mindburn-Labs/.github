@@ -146,6 +146,15 @@ class AuthorityRulesetBrokerTests(unittest.TestCase):
         )
         self.assertNotIn("repository_name", conditions)
 
+    def test_commercial_repositories_are_candidate_only(self) -> None:
+        commercial = {1250513264, 1282018161}
+        candidate = set(MODULE.CANDIDATE_REPOSITORY_IDS)
+        legacy = set(MODULE.LEGACY_CANDIDATE_REPOSITORY_IDS)
+        stable = set(MODULE.PUBLIC_AUTONOMOUS_REPOSITORY_IDS)
+        self.assertLessEqual(commercial, candidate)
+        self.assertTrue(commercial.isdisjoint(legacy))
+        self.assertTrue(commercial.isdisjoint(stable))
+
     def test_advance_observe_rebind_then_activate_preserves_safe_order(self) -> None:
         client = FakeClient(
             ruleset("stable", PARENT_SHA, MODULE.MAIN_REF),
