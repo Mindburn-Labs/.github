@@ -36,3 +36,15 @@
   active during the Phase 1 containment sweep and immediately returned to
   `disabled_manually`. The post-containment check found zero queued and zero
   in-progress runs. This is containment evidence, not a safe CI-lane proof.
+- At 17:49Z the same workflow reactivated and started candidate PR run
+  `29654669183` (`az/admin-staff-email-domain`,
+  `7ca56992f42279facc5cc6dc1521288e4fc73ee4`). The monitor manually disabled
+  the workflow and canceled the run; it completed `cancelled` at 17:52:38Z
+  with zero queued or in-progress runs and no uploaded artifacts.
+- The canceled `preflight-checks` job had already completed its dependency
+  token verification and both sibling-repository checkout steps. Cancellation
+  therefore does **not** prove non-exposure. The owner decision is to review
+  GitHub audit/run evidence and rotate or revoke the potentially exposed
+  cross-repository read secret through the approved secret-management path
+  after dependency-impact review. This monitor did not read, create, expose,
+  or rotate any credential, and the workflow remains disabled.
