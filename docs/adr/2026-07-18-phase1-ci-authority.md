@@ -29,3 +29,10 @@
   this document.
 - Control Plane dependency-lock work is evidence-only until the module
   distribution and trust lanes above are live-proven.
+
+## Evidence checkpoint
+
+- On 2026-07-18, `svc-helm-control-plane` CI workflow `283675528` was found
+  active during the Phase 1 containment sweep and immediately returned to
+  `disabled_manually`. The post-containment check found zero queued and zero
+  in-progress runs. This is containment evidence, not a safe CI-lane proof.
