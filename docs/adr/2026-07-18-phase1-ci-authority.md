@@ -81,3 +81,7 @@
   exfiltration. The owner must preserve the audit/run evidence, halt the
   enable path, and perform approved secret-impact review before any credential
   retirement or replacement. The workflow remains manually disabled.
+- Owner attribution clarification: `peycheff-com` is Ivan's core-team GitHub
+  account. This is owner-side workflow-state drift rather than an unknown
+  external actor; it does not make the candidate credential path safe or
+  authorize re-enabling the workflow.
