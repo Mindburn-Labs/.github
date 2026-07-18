@@ -48,3 +48,14 @@
   cross-repository read secret through the approved secret-management path
   after dependency-impact review. This monitor did not read, create, expose,
   or rotate any credential, and the workflow remains disabled.
+- GitHub audit evidence identifies human org/repository admin `Hirama` (not
+  Actions) as the actor for repeated `workflows.enable_workflow` actions on
+  workflow `283675528` at 14:42:52Z, 17:49:09Z, and 17:53:25Z. The latter two
+  reactivations occurred during containment and admitted further runs through
+  18:20Z. The two retained run records (`29655570053` and `29655674784`) also
+  completed dependency-token verification and both sibling checkouts before
+  cancellation; neither uploaded artifacts. Audit data provides no reason or
+  client origin. The owner decision is to identify and halt this enable path;
+  if it cannot be stopped, review the actor's workflow-enable authority
+  through the normal admin process, while preserving manual disable. This
+  monitor made no access-control or account mutation.
