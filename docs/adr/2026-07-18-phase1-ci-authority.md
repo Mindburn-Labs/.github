@@ -30,6 +30,17 @@
 - Control Plane dependency-lock work is evidence-only until the module
   distribution and trust lanes above are live-proven.
 
+## Owner authorization checkpoint
+
+- On 2026-07-18, the owner approved the recommended secure remediation path.
+  That approval records the intended direction; it does not itself enable a
+  contained workflow, merge a pull request, deploy or publish, or grant,
+  copy, reveal, or rotate a credential.
+- The GitHub App or other trusted-broker identity, its repository scope, and
+  any secret-management action remain normal owner-admin changes. Source-owned
+  CI work resumes only after their immutable identity and permission evidence,
+  followed by the versioned module and no-credential canaries, are available.
+
 ## Evidence checkpoint
 
 - On 2026-07-18, `svc-helm-control-plane` CI workflow `283675528` was found
