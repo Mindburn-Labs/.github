@@ -85,3 +85,9 @@
   account. This is owner-side workflow-state drift rather than an unknown
   external actor; it does not make the candidate credential path safe or
   authorize re-enabling the workflow.
+- At 20:44:44Z the same owner account enabled the workflow again. The monitor
+  found it active before any queued or in-progress run and restored
+  `disabled_manually`. No new run record was created during that short window.
+  This is not GitHub `concurrency` cancellation behavior; it is repeated
+  owner-side workflow-state drift and must be stopped at its source rather
+  than countered by an auto-enable or retry workflow.
