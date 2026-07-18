@@ -70,3 +70,14 @@
   if it cannot be stopped, review the actor's workflow-enable authority
   through the normal admin process, while preserving manual disable. This
   monitor made no access-control or account mutation.
+- At 20:34:52Z the audit log recorded another enable action by
+  `peycheff-com`. At 20:39Z the monitor found workflow `283675528` active and
+  returned it to `disabled_manually` with zero queued and zero in-progress
+  runs. Five runs from the active window completed successfully:
+  `29655008227`, `29655016274`, `29655321084`, `29655570053`, and
+  `29655674784`. Their `preflight-checks` jobs completed the dependency-token
+  verification and both sibling-repository checkout steps. This proves the
+  candidate credential path executed; it does not prove credential
+  exfiltration. The owner must preserve the audit/run evidence, halt the
+  enable path, and perform approved secret-impact review before any credential
+  retirement or replacement. The workflow remains manually disabled.
