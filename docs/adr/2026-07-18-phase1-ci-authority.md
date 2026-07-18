@@ -100,3 +100,27 @@
   automatic candidate path remains executable whenever workflow state drifts;
   it does not identify the actor or make those successful runs merge, release,
   or production proof.
+
+## Review-gated source containment set
+
+The following draft pull requests make an accidental workflow re-enable fail
+closed at the source layer. Each removes automatic events from a token-bearing
+workflow, retains only `workflow_dispatch`, runs a no-token containment job
+that exits non-zero, and leaves the original privileged job unreachable behind
+an unconfigured authority-restoration event. None is merged or evidence of a
+safe CI, release, or production lane.
+
+- `svc-helm-control-plane#194` at `8bf1596`: Continuous Integration and Docs
+  Truth.
+- `svc-agent-sandbox-runner#11` at `96e5284`: Continuous Integration and Docs
+  Truth.
+- `helm-ai-kernel#607` at `4039e264`: Docs Truth.
+- `integration-mindburn-platform#129` at `4b65562`: Continuous Integration.
+- `gitops-apps#45` at `5f5bee2`: Continuous Integration.
+- `gitops-platform#142` at `a467c44`: Continuous Integration.
+
+All six branches passed local `actionlint` and `git diff --check` before
+push. A live state poll after push found every tracked P0 workflow manually
+disabled. `dev-orchestration` remains contained without an additional source
+patch: its current default-branch Docs Truth workflow is callable/manual only,
+and the former `docs-truth-self.yml` no longer exists on that branch.
