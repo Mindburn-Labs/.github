@@ -6,78 +6,24 @@
         ["make", "test"]
       ],
       "protected_files": {
-        ".github/workflows/ci.yml": "f9266c13a022e8e98496c33325b5a83eef3c317b102183354bbde8a2f953de1e",
-        ".github/workflows/promote-authority.yml": "0914ef852abe56260980594cee986deb02267f3f6e0f487f7748b00f3d7c4056",
-        "Makefile": "4559934af490cb54f61405c8471fca1e9d287ea5c719ff90192d33c1ec180925",
-        "config/autonomous-release-bootstrap-v1.json": "d5b2012cadd4fbf8e24bfe4f8ed69c620cf9d6481dc9f488852aa855fe1712b6",
-        "config/autonomous-release-control-plane.json": "33f3ab3cd2ac122c2df43e316f476a82d2a86e3fe633a318b60446ce85d00de7",
-        "scripts/atomic_merge_authority.py": "37e2cf0c80872e95de9d2b8ebf634f738c5f28a9fb82d6f4902c93667b607af9",
-        "scripts/authority_ruleset_broker.py": "6230345d92dbd62300ab3622799595171f66a71641ae84aa3875d3acf3ca9711",
-        "scripts/autonomous_release_permit.py": "6fee80634332c775e98e4e33564938b786768062e33623073f20423221d67067",
-        "scripts/bootstrap_authority.py": "bf06c5dbe45c14f07e67a7b8bb3c7421bb28823243bf0383bc762139df461b10",
-        "scripts/configure_machine_approval_gates.py": "f15ded2d6bce76c197fdf9e70e56d27476fa37b311e11241e8c27757aead3773",
-        "scripts/observe_authority_promotion.py": "04a4767e4a641fdcca809e6a185a502dcb53cdd6c47519df979a0f08fdcf773a",
-        "scripts/run_autonomous_release_gates.py": "e9ab0ed2d91923e93df3e7c148f2ea15381cff9ceb6f4360d3b1fd258ae26f31",
-        "scripts/submit_machine_approval.py": "75182669a8f31e5afd45b5532faad3dc67872df3d855211425ac3f0d18177e50",
-        "scripts/verify_authority_promotion.py": "4d5f079ffc21ee350799eb93374a7ce95e0926b151a10b2015105642c7622f5b",
-        "scripts/verify_control_plane.py": "553463ba6e9d534d4cf56f28b0fabdee0b39852c41fffadcb34274d0d9eda912",
-        "scripts/wait_for_authority_canary.py": "81652f3ccb717e438b50c6db0e6d5d50325cae1503ada9106c7b4f21c74082b2",
-        "scripts/wait_for_authority_suite.py": "f32b48065cfe72017533db2cfcf64dcef9477add00fc563e6f0384b1a3cfc4d6",
-        "tests/test_atomic_merge_authority.py": "b3ea82bce75286de904549c8bb60b07fa392f6ccab668791194ced806308fe73",
-        "tests/test_authority_ruleset_broker.py": "2c5192b8a95ad57397675c9a05d7e527c91e463cadf69fc70f9e0e907c2eebba",
-        "tests/test_authority_promotion_workflow.py": "0a49e783a2013c7fabbb82b44348e37630462ae2b90cdbaff9422b50fc6718ac",
-        "tests/test_autonomous_release_permit.py": "9fc3463f83be650e8c871dfa8b1a0d33dc136745d044e18a92472ed543b16a4e",
-        "tests/test_bootstrap_authority.py": "371a9cf1a8ce979808e1d04ebbece750fb8e056bf2645ac1472de84058044a52",
-        "tests/test_observe_authority_promotion.py": "3ea6c9824b7c3d20738b2c31d198d618a59a985c688dfa39694713756fb5aadd",
-        "tests/test_configure_machine_approval_gates.py": "25181d6567ee2921fabe4aa0d38589d7157b204e188d339faabfbb4f1d054308",
-        "tests/test_submit_machine_approval.py": "2ae7cadbaf038946b4ff0ca0180993b174e37796a37d687c9835189f487fc28c",
-        "tests/test_verify_authority_promotion.py": "9c5e4e8732984faa2375738df908273614f40dcb49d127a0f96a8be3acf503af",
-        "tests/test_verify_control_plane.py": "75ea25ac513c4cb4804322a0a0697cf66036b03c6eafb4f0183bde7804ab1a51",
-        "tests/test_wait_for_authority_canary.py": "7e60e90b4ab6b597dfb202a4f4c6b5edae23d0a6dddd1a2b1f2f3adc7bc12181",
-        "tests/test_wait_for_authority_suite.py": "7c1b4ebedf1741530c9805cd9903cfe4e43301a40506b95abc64ae1fdb53ba0f",
-        "tools/offline-attest/attest.mjs": "21c544e689f472039cbd5fd621fab34b801bdd40b92fb68745948253ce621144",
-        "tools/offline-attest/package-lock.json": "a4b898bac65ba7ccbf1b6871d5ec5c6fdcf83d8d38fa976b52ad11bad29ac135"
-      }
-    },
-    "Mindburn-Labs/app-helm-console": {
-      "commands": [
-        ["npm", "ci"],
-        ["npx", "playwright", "install", "--with-deps", "chromium"],
-        ["npm", "run", "gen:api"],
-        ["git", "diff", "--exit-code", "--", "lib/api"],
-        ["npm", "run", "sync:ds:check"],
-        ["npm", "run", "lint"],
-        ["npm", "test"],
-        ["npm", "run", "test:e2e"],
-        ["npm", "run", "build"],
-        ["npm", "audit", "--omit=dev", "--audit-level=moderate"]
-      ],
-      "protected_files": {
-        "package.json": "8a3b483b1c9c300f896029e048ef923ca25975d5d5db1a1cfa4c0f4f096bdd6c"
-      }
-    },
-    "Mindburn-Labs/app-helm-docs": {
-      "commands": [
-        ["git", "init", "helm-ai-kernel-source"],
-        ["git", "-C", "helm-ai-kernel-source", "remote", "add", "origin", "https://github.com/Mindburn-Labs/helm-ai-kernel.git"],
-        ["git", "-C", "helm-ai-kernel-source", "fetch", "--depth=1", "origin", "57e2e518b15a452ea4bed6c9189f092d0f4d7d04"],
-        ["git", "-C", "helm-ai-kernel-source", "checkout", "--detach", "FETCH_HEAD"],
-        ["npm", "ci"],
-        ["npm", "audit", "--audit-level=high"],
-        ["npm", "run", "ci"]
-      ],
-      "protected_files": {
-        "package.json": "93b1f51b7edaee4e5498ad189aff8a05bf3e35decfa0e3e147435b3182bbf117"
-      }
-    },
-    "Mindburn-Labs/app-mindburn-web": {
-      "commands": [
-        ["npm", "ci"],
-        ["npm", "audit", "--audit-level=high"],
-        ["npm", "run", "ci"]
-      ],
-      "protected_files": {
-        "package.json": "cedddab487eef9361782ee578ace4482c9c994bf6b0d2d855797fe8873142abc"
+        "Makefile": "4559934af490cb54f61405c8471fca1e9d287ea5c719ff90192d33c1ec180925"
+      },
+      "protected_trees": {
+        "config": {
+          "exclude": [
+            "autonomous-release-authority.json",
+            "autonomous-release-gates.json"
+          ],
+          "sha256": "e8b69644a12a5adca77d315b589d3ebee697758bc3c9b904e891aa0b5697f270"
+        },
+        "scripts": {
+          "exclude": [],
+          "sha256": "88f2818ebd4b081c3ac1abd8492a4ed476b0328420c801650293252ad1ec4d17"
+        },
+        "tests": {
+          "exclude": [],
+          "sha256": "d4527d7c849dda8e4e51fd4bcbb867c81af7a075837a88bd08a554f4000bae36"
+        }
       }
     },
     "Mindburn-Labs/contracts-autonomous-release-lab": {
@@ -86,63 +32,17 @@
         ["python3", "scripts/validate_lab.py"],
         ["python3", "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"]
       ],
-      "protected_files": {
-        "Makefile": "b9b2550692109833c5912a6259d03dd0697742616e3b266f1fd3bc99efc67b6e"
-      }
-    },
-    "Mindburn-Labs/helm-agent-integrations": {
-      "commands": [
-        ["npm", "ci", "--prefix", "packages/js/helm-tool-wrapper"],
-        ["npm", "test", "--prefix", "packages/js/helm-tool-wrapper"],
-        ["python3", "-m", "unittest", "discover", "packages/python/helm_tool_wrapper/tests"],
-        ["python3", "scripts/generate_samples.py", "--check"],
-        ["python3", "scripts/verify_samples.py"]
-      ],
-      "protected_files": {
-        "packages/js/helm-tool-wrapper/package.json": "bf38d3578a378bf91fedcabfe2641458e87f6b71e2976e29cad2d5655f4a59ea"
-      }
-    },
-    "Mindburn-Labs/helm-ai-kernel": {
-      "commands": [
-        ["go", "-C", "core", "vet", "./..."],
-        ["go", "-C", "core", "test", "-count=1", "./..."]
-      ],
-      "protected_files": {
-        "Makefile": "534a2a6edcb7a9e3c9e6620d77040c278cb47a18399e055d297235df75af9edd"
-      }
-    },
-    "Mindburn-Labs/helm-desktop": {
-      "commands": [
-        ["npm", "ci"],
-        ["cargo", "fmt", "--manifest-path", "src-tauri/Cargo.toml", "--", "--check"],
-        ["cargo", "test", "--locked", "--manifest-path", "src-tauri/Cargo.toml"],
-        ["cargo", "check", "--locked", "--manifest-path", "src-tauri/Cargo.toml"]
-      ],
-      "protected_files": {
-        "package.json": "569f02340f717b093568c93bc91b32378bc550095a4064d7f94381266af7bdf4"
-      }
-    },
-    "Mindburn-Labs/pkg-mindburn-helm-ds": {
-      "commands": [
-        ["npm", "ci"],
-        ["npm", "run", "typecheck"],
-        ["npm", "run", "test:security"]
-      ],
-      "protected_files": {
-        "package.json": "b17c7cfb0bf7ce65b893947fb8574cff0bb3ee3010eb3f37a60f42a2abf8cd17"
-      }
-    },
-    "Mindburn-Labs/tempora": {
-      "commands": [
-        ["npm", "ci"],
-        ["npm", "run", "typecheck"],
-        ["npm", "test"],
-        ["npm", "run", "build"]
-      ],
-      "protected_files": {
-        "package.json": "844a94818f764e7d35fe502938d4d46a9cd9597b348dfe39a4794603c61e8735"
+      "protected_trees": {
+        "scripts": {
+          "exclude": [],
+          "sha256": "62c10bc41f2ebebe5dbf20bf27de9cd58feab08475253ee06e0aff492a4a9b13"
+        },
+        "tests": {
+          "exclude": [],
+          "sha256": "c31c0be338f96b52b2b8a1a70784b4c304125f2cd1165d890b413ce7e5f6e309"
+        }
       }
     }
   },
-  "schema": "mindburn.autonomous-release-gates/v2"
+  "schema": "mindburn.autonomous-release-gates/v3"
 }

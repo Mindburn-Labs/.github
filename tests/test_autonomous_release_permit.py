@@ -127,6 +127,14 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertEqual(context["merge_sha"], merge)
         self.assertEqual(len(context["merge_tree_sha"]), 40)
         self.assertEqual(context["schema"], "mindburn.release-permit-context/v2")
+        self.assertEqual(
+            context["authority"],
+            json.loads(
+                (ROOT / "config" / "autonomous-release-authority.json").read_text(
+                    encoding="utf-8",
+                ),
+            ),
+        )
         self.assertEqual(context["authority"]["generation"], 2)
         self.assertEqual(
             context["authority"]["parent"],
@@ -499,6 +507,17 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertIn("needs.model-review.result == 'success'", workflow)
         self.assertIn("HELM_AUTHORITY_APPROVER_TOKEN", workflow)
         self.assertIn("permission-pull-requests: write", workflow)
+        model_review = workflow[
+            workflow.index("Run isolated read-only model review") : workflow.index(
+                "Upload commit-bound review envelope",
+            )
+        ]
+        self.assertIn(
+            '< "$GITHUB_WORKSPACE/permit-input/review-prompt.txt"',
+            model_review,
+        )
+        self.assertNotIn("copilot -p", model_review)
+        self.assertNotIn("--prompt", model_review)
         self.assertIn("No target checkout or network context is available", helper)
         self.assertIn("name: HELM Autonomous Release Permit", workflow)
         self.assertIn("name: local-validation", workflow)
