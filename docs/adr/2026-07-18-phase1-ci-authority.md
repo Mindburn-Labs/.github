@@ -91,3 +91,12 @@
   This is not GitHub `concurrency` cancellation behavior; it is repeated
   owner-side workflow-state drift and must be stopped at its source rather
   than countered by an auto-enable or retry workflow.
+- At 21:36Z a live workflow-state poll again found `283675528` active. The
+  monitor immediately restored `disabled_manually`; a follow-up query found
+  zero queued and zero in-progress runs. The latest admitted runs included
+  successful push run `29661391187` for `b098f44830d9c9dc74b873fcba1548420624cdc8`
+  and successful pull-request run `29661358781` for
+  `44206473a5d9b1ebcd40e8341047cac94d580721`. This confirms that the
+  automatic candidate path remains executable whenever workflow state drifts;
+  it does not identify the actor or make those successful runs merge, release,
+  or production proof.
