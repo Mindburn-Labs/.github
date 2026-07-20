@@ -32,6 +32,13 @@ class FakeClient:
         self.merged = False
 
     def request(self, method: str, path: str, *, payload=None):
+        if path == "/installation":
+            return {
+                "app_id": MODULE.APPROVER_APP_ID,
+                "id": MODULE.APPROVER_INSTALLATION_ID,
+                "permissions": {"pull_requests": "write"},
+                "account": {"login": "Mindburn-Labs"},
+            }
         if path.startswith("/installation/repositories"):
             return {"repositories": [{"full_name": REPOSITORY}]}
         if path == "/repos/Mindburn-Labs/.github/pulls/36":
@@ -230,6 +237,25 @@ class SubmitMachineApprovalTests(unittest.TestCase):
                 metadata_client=client,
             )
         self.assertEqual(client.posts, 0)
+
+    def test_does_not_call_unsupported_installation_introspection(self) -> None:
+        client = FakeClient()
+        original = client.request
+
+        def request(method: str, path: str, *, payload=None):
+            if path == "/installation":
+                raise AssertionError("unsupported installation-token endpoint")
+            return original(method, path, payload=payload)
+
+        client.request = request  # type: ignore[method-assign]
+        with mock.patch.object(MODULE, "verify_permit", return_value=self.permit()):
+            MODULE.submit_machine_approval(
+                arguments(),
+                client,
+                attestation_token="observer",
+                metadata_client=client,
+            )
+        self.assertEqual(client.posts, 1)
 
     def test_wrong_action_identity_fails_closed_before_review(self) -> None:
         client = FakeClient()

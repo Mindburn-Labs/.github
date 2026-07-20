@@ -3,13 +3,29 @@ name: Promote HELM Release Authority
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: Tick ordinary controller or resume one authority promotion
+        required: true
+        default: tick
+        type: choice
+        options:
+          - tick
+          - promote
       permit_run_attempt:
         description: Exact attempt of the parent-authority permit run
-        required: true
+        required: false
         type: string
       permit_run_id:
         description: Exact parent-authority permit run to promote
-        required: true
+        required: false
+        type: string
+      ledger_generation:
+        description: Source-discovered successor generation for durable recovery
+        required: false
+        type: string
+      ledger_merge_sha:
+        description: Source-discovered successor merge SHA for durable recovery
+        required: false
         type: string
 
 permissions: {}
@@ -19,8 +35,866 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  tick-guard:
+    name: Verify fail-closed controller activation
+    if: inputs.mode == 'tick'
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      enabled: ${{ steps.status.outputs.enabled }}
+    steps:
+      - name: Checkout immutable controller
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+          path: broker
+
+      - name: Validate source-owned activation contract without credentials
+        id: status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PERMIT_RUN_ATTEMPT: ${{ inputs.permit_run_attempt }}
+          PERMIT_RUN_ID: ${{ inputs.permit_run_id }}
+          LEDGER_GENERATION: ${{ inputs.ledger_generation }}
+          LEDGER_MERGE_SHA: ${{ inputs.ledger_merge_sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/authority/control-v1"
+          test "$GITHUB_SHA" = "$GITHUB_WORKFLOW_SHA"
+          test -z "$PERMIT_RUN_ATTEMPT"
+          test -z "$PERMIT_RUN_ID"
+          test -z "$LEDGER_GENERATION"
+          test -z "$LEDGER_MERGE_SHA"
+          test "$(git -C broker rev-parse HEAD)" = "$GITHUB_WORKFLOW_SHA"
+          python3 broker/scripts/autonomous_release_controller.py validate-contract \
+            --contract broker/config/autonomous-release-controller.json \
+            --output controller-status.json
+          python3 broker/scripts/autonomous_release_controller.py verify-bootstrap \
+            --contract broker/config/autonomous-release-controller.json \
+            --control-sha "$GITHUB_WORKFLOW_SHA" \
+            --output bootstrap-final.json
+          enabled="$(jq -er '.enabled | tostring' controller-status.json)"
+          test "$(jq -er '.merger_configured | tostring' controller-status.json)" = "$enabled"
+          test "$(jq -er '.control_updater_configured | tostring' controller-status.json)" = "$enabled"
+          echo "enabled=$enabled" >> "$GITHUB_OUTPUT"
+
+  tick-plan:
+    name: Independently plan one bounded autonomous action
+    needs: tick-guard
+    if: needs.tick-guard.outputs.enabled == 'true'
+    environment: authority-observer
+    permissions:
+      actions: read
+      attestations: write
+      contents: read
+      id-token: write
+      pull-requests: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      github_selected: ${{ steps.selection.outputs.github_selected }}
+      kernel_selected: ${{ steps.selection.outputs.kernel_selected }}
+      promotion_selected: ${{ steps.selection.outputs.promotion_selected }}
+    steps:
+      - name: Checkout immutable controller
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          path: broker
+
+      - name: Mint exact read-only observer token
+        id: observer-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.HELM_AUTHORITY_OBSERVER_CLIENT_ID }}
+          private-key: ${{ secrets.HELM_AUTHORITY_OBSERVER_PRIVATE_KEY }}
+          owner: Mindburn-Labs
+          repositories: |
+            .github
+            helm-ai-kernel
+            contracts-autonomous-release-lab
+            contracts-autonomous-release-canary
+          permission-actions: read
+          permission-attestations: read
+          permission-contents: read
+          permission-organization-administration: write
+          permission-pull-requests: read
+
+      - name: Bind exact observer App identity
+        env:
+          APP_SLUG: ${{ steps.observer-token.outputs.app-slug }}
+          INSTALLATION_ID: ${{ steps.observer-token.outputs.installation-id }}
+        run: |
+          set -euo pipefail
+          test "$APP_SLUG" = "helm-authority-observer"
+          test "$INSTALLATION_ID" = "146542079"
+
+      - name: Discover independently observed active authority
+        id: discovery
+        env:
+          GH_TOKEN: ${{ steps.observer-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/autonomous_release_controller.py discover \
+            --contract broker/config/autonomous-release-controller.json \
+            --control-sha "$GITHUB_WORKFLOW_SHA" \
+            --observer-app-slug "${{ steps.observer-token.outputs.app-slug }}" \
+            --observer-installation-id "${{ steps.observer-token.outputs.installation-id }}" \
+            --output controller-discovery.json
+          active_workflow_sha="$(jq -er '.active_workflow_sha' controller-discovery.json)"
+          kernel_sha="$(jq -er '.kernel_sha' controller-discovery.json)"
+          echo "active_workflow_sha=$active_workflow_sha" >> "$GITHUB_OUTPUT"
+          echo "kernel_sha=$kernel_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout exact active authority tree
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ steps.discovery.outputs.active_workflow_sha }}
+          persist-credentials: false
+          path: active-authority
+
+      - name: Checkout exact active Kernel
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: Mindburn-Labs/helm-ai-kernel
+          ref: ${{ steps.discovery.outputs.kernel_sha }}
+          persist-credentials: false
+          path: active-kernel
+
+      - name: Set up exact active Kernel toolchain
+        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00
+        with:
+          go-version-file: active-kernel/core/go.mod
+
+      - name: Build exact active permit verifier
+        working-directory: active-kernel/core
+        run: go build -trimpath -o "$GITHUB_WORKSPACE/active-permit-verify" ./cmd/release-permit-verify
+
+      - name: Recompute all permit evidence and select at most one PR per repository
+        id: selection
+        env:
+          GH_TOKEN: ${{ steps.observer-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          test "$(git -C broker rev-parse HEAD)" = "$GITHUB_WORKFLOW_SHA"
+          test "$(git -C active-authority rev-parse HEAD)" = "${{ steps.discovery.outputs.active_workflow_sha }}"
+          python3 broker/scripts/autonomous_release_controller.py plan \
+            --contract broker/config/autonomous-release-controller.json \
+            --authority active-authority/config/autonomous-release-authority.json \
+            --kernel-verifier "$GITHUB_WORKSPACE/active-permit-verify" \
+            --control-sha "$GITHUB_WORKFLOW_SHA" \
+            --active-workflow-sha "${{ steps.discovery.outputs.active_workflow_sha }}" \
+            --observer-app-slug "${{ steps.observer-token.outputs.app-slug }}" \
+            --observer-installation-id "${{ steps.observer-token.outputs.installation-id }}" \
+            --output-dir controller-plan \
+            --output controller-plan/controller-plan.json
+          for pair in \
+            "github_selected Mindburn-Labs/.github" \
+            "kernel_selected Mindburn-Labs/helm-ai-kernel"; do
+            key="${pair%% *}"
+            repository="${pair#* }"
+            count="$(jq --arg repository "$repository" '[.ordinary[] | select(.repository == $repository)] | length' controller-plan/controller-plan.json)"
+            test "$count" -le 1
+            if [[ "$count" = "1" ]]; then selected=true; else selected=false; fi
+            echo "$key=$selected" >> "$GITHUB_OUTPUT"
+          done
+          promotion_count="$(jq '.promotions | length' controller-plan/controller-plan.json)"
+          test "$promotion_count" -le 1
+          if [[ "$promotion_count" = "1" ]]; then selected=true; else selected=false; fi
+          echo "promotion_selected=$selected" >> "$GITHUB_OUTPUT"
+          cp controller-discovery.json controller-plan/controller-discovery.json
+
+      - name: Set up pinned attestation runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "24.15.0"
+          cache: npm
+          cache-dependency-path: broker/tools/offline-attest/package-lock.json
+
+      - name: Sign the complete controller plan
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund --prefix broker/tools/offline-attest
+          node broker/tools/offline-attest/attest.mjs \
+            controller-plan/controller-plan.json \
+            controller-plan/controller-plan.attestation.json
+
+      - name: Retain plan, replay evidence, and raw model transcripts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: helm-autonomous-controller-plan
+          path: controller-plan
+          if-no-files-found: error
+          retention-days: 90
+
+  tick-dispatch-promotion:
+    name: Dispatch one independently selected authority recovery or promotion
+    needs: tick-plan
+    if: needs.tick-plan.outputs.promotion_selected == 'true'
+    permissions:
+      actions: write
+      attestations: read
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download signed controller plan
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-autonomous-controller-plan
+          path: controller-plan
+
+      - name: Verify plan provenance and dispatch exact permit lineage
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_SHA" = "$GITHUB_WORKFLOW_SHA"
+          gh attestation verify controller-plan/controller-plan.json \
+            --bundle controller-plan/controller-plan.attestation.json \
+            --repo Mindburn-Labs/.github \
+            --signer-workflow Mindburn-Labs/.github/.github/workflows/promote-authority.yml \
+            --signer-digest "$GITHUB_WORKFLOW_SHA" \
+            --source-digest "$GITHUB_SHA" \
+            --deny-self-hosted-runners
+          test "$(jq '.promotions | length' controller-plan/controller-plan.json)" = "1"
+          test "$(jq -er '.promotions[0].repository' controller-plan/controller-plan.json)" = "Mindburn-Labs/.github"
+          run_id="$(jq -er '.promotions[0].run_id' controller-plan/controller-plan.json)"
+          run_attempt="$(jq -er '.promotions[0].run_attempt' controller-plan/controller-plan.json)"
+          if [[ "$(jq -er '.promotions[0].recovery' controller-plan/controller-plan.json)" = "true" ]]; then
+            merge_sha="$(jq -er '.promotions[0].merge_sha' controller-plan/controller-plan.json)"
+            generation="$(gh api \
+              -H 'Accept: application/vnd.github.raw+json' \
+              "repos/Mindburn-Labs/.github/contents/config/autonomous-release-authority.json?ref=$merge_sha" \
+              | jq -er '.generation | select(type == "number" and . >= 3)')"
+            gh api --method POST \
+              repos/Mindburn-Labs/.github/actions/workflows/promote-authority.yml/dispatches \
+              -f ref=authority/control-v1 \
+              -f 'inputs[mode]=promote' \
+              -f "inputs[permit_run_id]=$run_id" \
+              -f "inputs[permit_run_attempt]=$run_attempt" \
+              -f "inputs[ledger_generation]=$generation" \
+              -f "inputs[ledger_merge_sha]=$merge_sha"
+          else
+            gh api --method POST \
+              repos/Mindburn-Labs/.github/actions/workflows/promote-authority.yml/dispatches \
+              -f ref=authority/control-v1 \
+              -f 'inputs[mode]=promote' \
+              -f "inputs[permit_run_id]=$run_id" \
+              -f "inputs[permit_run_attempt]=$run_attempt"
+          fi
+
+  tick-approve:
+    name: Approve selected ordinary PR (${{ matrix.slug }})
+    needs: tick-plan
+    environment: authority-approval
+    permissions:
+      actions: read
+      attestations: write
+      contents: read
+      id-token: write
+      pull-requests: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repository: Mindburn-Labs/.github
+            repository_name: .github
+            selected: ${{ needs.tick-plan.outputs.github_selected }}
+            slug: github-authority
+          - repository: Mindburn-Labs/helm-ai-kernel
+            repository_name: helm-ai-kernel
+            selected: ${{ needs.tick-plan.outputs.kernel_selected }}
+            slug: helm-ai-kernel
+    steps:
+      - name: Download signed controller plan
+        if: matrix.selected == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-autonomous-controller-plan
+          path: controller-plan
+
+      - name: Checkout immutable approval broker
+        if: matrix.selected == 'true'
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          path: broker
+
+      - name: Verify signed plan and recover exact active Kernel identity
+        if: matrix.selected == 'true'
+        id: metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh attestation verify controller-plan/controller-plan.json \
+            --bundle controller-plan/controller-plan.attestation.json \
+            --repo Mindburn-Labs/.github \
+            --signer-workflow Mindburn-Labs/.github/.github/workflows/promote-authority.yml \
+            --signer-digest "$GITHUB_WORKFLOW_SHA" \
+            --source-digest "$GITHUB_SHA" \
+            --deny-self-hosted-runners
+          test "$(jq -er '.controller_sha' controller-plan/controller-plan.json)" = "$GITHUB_WORKFLOW_SHA"
+          active_workflow_sha="$(jq -er '.active_workflow_sha' controller-plan/controller-plan.json)"
+          test "$(jq -er '.active_workflow_sha' controller-plan/controller-discovery.json)" = "$active_workflow_sha"
+          kernel_sha="$(jq -er '.kernel_sha' controller-plan/controller-discovery.json)"
+          echo "kernel_sha=$kernel_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout exact active Kernel
+        if: matrix.selected == 'true'
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: Mindburn-Labs/helm-ai-kernel
+          ref: ${{ steps.metadata.outputs.kernel_sha }}
+          persist-credentials: false
+          path: active-kernel
+
+      - name: Set up exact active Kernel toolchain
+        if: matrix.selected == 'true'
+        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00
+        with:
+          go-version-file: active-kernel/core/go.mod
+
+      - name: Build exact active permit verifier
+        if: matrix.selected == 'true'
+        working-directory: active-kernel/core
+        run: go build -trimpath -o "$GITHUB_WORKSPACE/active-permit-verify" ./cmd/release-permit-verify
+
+      - name: Mint exact one-repository approval token
+        if: matrix.selected == 'true'
+        id: approver-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.HELM_AUTHORITY_APPROVER_CLIENT_ID }}
+          private-key: ${{ secrets.HELM_AUTHORITY_APPROVER_PRIVATE_KEY }}
+          owner: Mindburn-Labs
+          repositories: ${{ matrix.repository_name }}
+          permission-pull-requests: write
+
+      - name: Bind exact approval App identity
+        if: matrix.selected == 'true'
+        env:
+          APP_SLUG: ${{ steps.approver-token.outputs.app-slug }}
+          INSTALLATION_ID: ${{ steps.approver-token.outputs.installation-id }}
+        run: |
+          set -euo pipefail
+          test "$APP_SLUG" = "helm-authority-approver"
+          test "$INSTALLATION_ID" = "$(jq -er '.apps.approver.installation_id' broker/config/autonomous-release-controller.json)"
+
+      - name: Submit only the exact signed-permit approval
+        if: matrix.selected == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HELM_AUTHORITY_APPROVER_TOKEN: ${{ steps.approver-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/autonomous_release_controller.py approve \
+            --contract broker/config/autonomous-release-controller.json \
+            --plan controller-plan/controller-plan.json \
+            --evidence-root controller-plan \
+            --kernel-verifier "$GITHUB_WORKSPACE/active-permit-verify" \
+            --control-sha "$GITHUB_WORKFLOW_SHA" \
+            --repository "${{ matrix.repository }}" \
+            --approver-app-slug "${{ steps.approver-token.outputs.app-slug }}" \
+            --approver-installation-id "${{ steps.approver-token.outputs.installation-id }}" \
+            --output ordinary-approval.json
+
+      - name: Set up pinned attestation runtime
+        if: matrix.selected == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "24.15.0"
+          cache: npm
+          cache-dependency-path: broker/tools/offline-attest/package-lock.json
+
+      - name: Sign isolated ordinary approval receipt
+        if: matrix.selected == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund --prefix broker/tools/offline-attest
+          node broker/tools/offline-attest/attest.mjs \
+            ordinary-approval.json ordinary-approval.attestation.json
+
+      - name: Retain isolated ordinary approval receipt
+        if: matrix.selected == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: helm-ordinary-approval-${{ matrix.slug }}
+          path: |
+            ordinary-approval.json
+            ordinary-approval.attestation.json
+          if-no-files-found: error
+          retention-days: 90
+
+  tick-intent:
+    name: Persist ordinary merge intent (${{ matrix.slug }})
+    needs:
+      - tick-plan
+      - tick-approve
+    environment: authority-merge
+    permissions:
+      actions: read
+      attestations: read
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repository: Mindburn-Labs/.github
+            selected: ${{ needs.tick-plan.outputs.github_selected }}
+            slug: github-authority
+          - repository: Mindburn-Labs/helm-ai-kernel
+            selected: ${{ needs.tick-plan.outputs.kernel_selected }}
+            slug: helm-ai-kernel
+    steps:
+      - name: Download signed controller plan
+        if: matrix.selected == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-autonomous-controller-plan
+          path: controller-plan
+
+      - name: Download isolated ordinary approval
+        if: matrix.selected == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-ordinary-approval-${{ matrix.slug }}
+          path: approval
+
+      - name: Checkout immutable evidence writer
+        if: matrix.selected == 'true'
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          path: broker
+
+      - name: Verify plan and approval provenance
+        if: matrix.selected == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for subject in \
+            controller-plan/controller-plan.json \
+            approval/ordinary-approval.json; do
+            gh attestation verify "$subject" \
+              --bundle "${subject%.json}.attestation.json" \
+              --repo Mindburn-Labs/.github \
+              --signer-workflow Mindburn-Labs/.github/.github/workflows/promote-authority.yml \
+              --signer-digest "$GITHUB_WORKFLOW_SHA" \
+              --source-digest "$GITHUB_SHA" \
+              --deny-self-hosted-runners
+          done
+
+      - name: Build deterministic intent evidence
+        if: matrix.selected == 'true'
+        id: intent
+        env:
+          REPOSITORY: ${{ matrix.repository }}
+        run: |
+          set -euo pipefail
+          mkdir ledger-input
+          jq -e --arg repository "$REPOSITORY" \
+            '[.ordinary[] | select(.repository == $repository)] |
+             if length == 1 then (.[0] | .recovery = false)
+             else error("expected one ordinary entry") end' \
+            controller-plan/controller-plan.json > ledger-input/entry.json
+          cp approval/ordinary-approval.json ledger-input/approval.json
+          evidence_path="$(jq -er '.evidence' ledger-input/entry.json)"
+          case "$evidence_path" in evidence/*) ;; *) exit 1 ;; esac
+          test -d "controller-plan/$evidence_path"
+          mkdir -p "ledger-input/$evidence_path"
+          cp -R "controller-plan/$evidence_path/." "ledger-input/$evidence_path/"
+          pull_request="$(jq -er '.pull_request' ledger-input/entry.json)"
+          merge_sha="$(jq -er '.merge_sha' ledger-input/entry.json)"
+          workflow_sha="$(jq -er '.workflow_sha' ledger-input/entry.json)"
+          run_id="$(jq -er '.run_id' ledger-input/entry.json)"
+          run_attempt="$(jq -er '.run_attempt' ledger-input/entry.json)"
+          expected_parent_sha="$(jq -er '.merge_interlock.evidence_ledger_head_sha' controller-plan/controller-plan.json)"
+          {
+            echo "evidence_path=$evidence_path"
+            echo "expected_parent_sha=$expected_parent_sha"
+            echo "namespace=ordinary/${{ matrix.slug }}/pr-$pull_request/$merge_sha/intent"
+            echo "run_attempt=$run_attempt"
+            echo "run_id=$run_id"
+            echo "workflow_sha=$workflow_sha"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Mint exact central-ledger writer token
+        if: matrix.selected == 'true'
+        id: ledger-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.HELM_AUTHORITY_MERGER_CLIENT_ID }}
+          private-key: ${{ secrets.HELM_AUTHORITY_MERGER_PRIVATE_KEY }}
+          owner: Mindburn-Labs
+          repositories: .github
+          permission-contents: write
+
+      - name: Bind exact ledger writer identity and repository scope
+        if: matrix.selected == 'true'
+        env:
+          APP_SLUG: ${{ steps.ledger-token.outputs.app-slug }}
+          GH_TOKEN: ${{ steps.ledger-token.outputs.token }}
+          INSTALLATION_ID: ${{ steps.ledger-token.outputs.installation-id }}
+        run: |
+          set -euo pipefail
+          test "$APP_SLUG" = "helm-authority-merger"
+          test "$INSTALLATION_ID" = "$(jq -er '.apps.merger.installation_id' broker/config/autonomous-release-controller.json)"
+          test "$(gh api /installation/repositories?per_page=100 --jq '.repositories | map(.full_name) | sort | join(",")')" = "Mindburn-Labs/.github"
+
+      - name: Append intent before any main-ref mutation
+        if: matrix.selected == 'true'
+        env:
+          GH_TOKEN: ${{ steps.ledger-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/authority_evidence_ledger.py append \
+            --namespace "${{ steps.intent.outputs.namespace }}" \
+            --record-type ordinary-merge \
+            --phase intent \
+            --workflow-sha "${{ steps.intent.outputs.workflow_sha }}" \
+            --run-id "${{ steps.intent.outputs.run_id }}" \
+            --run-attempt "${{ steps.intent.outputs.run_attempt }}" \
+            --expected-parent-sha "${{ steps.intent.outputs.expected_parent_sha }}" \
+            --input-root ledger-input \
+            --include entry.json \
+            --include approval.json \
+            --include-tree "${{ steps.intent.outputs.evidence_path }}" \
+            --output ordinary-intent.json
+
+      - name: Retain intent append receipt
+        if: matrix.selected == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: helm-ordinary-intent-${{ matrix.slug }}
+          path: ordinary-intent.json
+          if-no-files-found: error
+          retention-days: 90
+
+  tick-merge:
+    name: Atomically merge selected ordinary PR (${{ matrix.slug }})
+    needs:
+      - tick-plan
+      - tick-approve
+      - tick-intent
+    environment: authority-merge
+    permissions:
+      actions: read
+      attestations: write
+      contents: read
+      id-token: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repository: Mindburn-Labs/.github
+            repository_name: .github
+            selected: ${{ needs.tick-plan.outputs.github_selected }}
+            slug: github-authority
+          - repository: Mindburn-Labs/helm-ai-kernel
+            repository_name: helm-ai-kernel
+            selected: ${{ needs.tick-plan.outputs.kernel_selected }}
+            slug: helm-ai-kernel
+    steps:
+      - name: Download signed controller plan
+        if: matrix.selected == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-autonomous-controller-plan
+          path: controller-plan
+
+      - name: Download isolated ordinary approval
+        if: matrix.selected == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-ordinary-approval-${{ matrix.slug }}
+          path: approval
+
+      - name: Download durable intent receipt
+        if: matrix.selected == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-ordinary-intent-${{ matrix.slug }}
+          path: ledger-intent
+
+      - name: Checkout immutable merge broker
+        if: matrix.selected == 'true'
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          path: broker
+
+      - name: Verify plan and isolated approval provenance
+        if: matrix.selected == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for subject in \
+            controller-plan/controller-plan.json \
+            approval/ordinary-approval.json; do
+            bundle="${subject%.json}.attestation.json"
+            gh attestation verify "$subject" \
+              --bundle "$bundle" \
+              --repo Mindburn-Labs/.github \
+              --signer-workflow Mindburn-Labs/.github/.github/workflows/promote-authority.yml \
+              --signer-digest "$GITHUB_WORKFLOW_SHA" \
+              --source-digest "$GITHUB_SHA" \
+              --deny-self-hosted-runners
+          done
+          test "$(jq -er '.controller_sha' controller-plan/controller-plan.json)" = "$GITHUB_WORKFLOW_SHA"
+          test "$(jq -er '.controller_sha' approval/ordinary-approval.json)" = "$GITHUB_WORKFLOW_SHA"
+          test "$(jq -er '.repository' approval/ordinary-approval.json)" = "${{ matrix.repository }}"
+          test "$(jq -er '.record_type' ledger-intent/ordinary-intent.json)" = "ordinary-merge"
+          test "$(jq -er '.phase' ledger-intent/ordinary-intent.json)" = "intent"
+
+      - name: Require source-owned merger App activation
+        if: matrix.selected == 'true'
+        id: merger-contract
+        run: |
+          set -euo pipefail
+          contract=broker/config/autonomous-release-controller.json
+          test "$(jq -er '.enabled' "$contract")" = "true"
+          app_id="$(jq -er '.apps.merger.app_id | select(type == "number" and . > 0)' "$contract")"
+          installation_id="$(jq -er '.apps.merger.installation_id | select(type == "number" and . > 0)' "$contract")"
+          test "$(jq -er '.apps.merger.slug' "$contract")" = "helm-authority-merger"
+          echo "app_id=$app_id" >> "$GITHUB_OUTPUT"
+          echo "installation_id=$installation_id" >> "$GITHUB_OUTPUT"
+
+      - name: Mint exact one-repository merge token
+        if: matrix.selected == 'true'
+        id: merger-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.HELM_AUTHORITY_MERGER_CLIENT_ID }}
+          private-key: ${{ secrets.HELM_AUTHORITY_MERGER_PRIVATE_KEY }}
+          owner: Mindburn-Labs
+          repositories: ${{ matrix.repository_name }}
+          permission-contents: write
+          permission-pull-requests: read
+
+      - name: Bind exact merger App identity
+        if: matrix.selected == 'true'
+        env:
+          APP_SLUG: ${{ steps.merger-token.outputs.app-slug }}
+          EXPECTED_INSTALLATION_ID: ${{ steps.merger-contract.outputs.installation_id }}
+          INSTALLATION_ID: ${{ steps.merger-token.outputs.installation-id }}
+        run: |
+          set -euo pipefail
+          test "$APP_SLUG" = "helm-authority-merger"
+          test "$INSTALLATION_ID" = "$EXPECTED_INSTALLATION_ID"
+
+      - name: Atomically advance main to the exact reviewed merge commit
+        if: matrix.selected == 'true'
+        env:
+          GH_TOKEN: ${{ steps.merger-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/autonomous_release_controller.py merge \
+            --contract broker/config/autonomous-release-controller.json \
+            --plan controller-plan/controller-plan.json \
+            --approvals approval/ordinary-approval.json \
+            --control-sha "$GITHUB_WORKFLOW_SHA" \
+            --repository "${{ matrix.repository }}" \
+            --merger-app-slug "${{ steps.merger-token.outputs.app-slug }}" \
+            --merger-installation-id "${{ steps.merger-token.outputs.installation-id }}" \
+            --output ordinary-merge.json
+
+      - name: Set up pinned attestation runtime
+        if: matrix.selected == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "24.15.0"
+          cache: npm
+          cache-dependency-path: broker/tools/offline-attest/package-lock.json
+
+      - name: Sign exact ordinary merge receipt
+        if: matrix.selected == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund --prefix broker/tools/offline-attest
+          node broker/tools/offline-attest/attest.mjs \
+            ordinary-merge.json ordinary-merge.attestation.json
+
+      - name: Retain exact ordinary merge receipt
+        if: matrix.selected == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: helm-ordinary-merge-${{ matrix.slug }}
+          path: |
+            ordinary-merge.json
+            ordinary-merge.attestation.json
+          if-no-files-found: error
+          retention-days: 90
+
+  tick-closure:
+    name: Persist ordinary merge closure (${{ matrix.slug }})
+    needs:
+      - tick-plan
+      - tick-intent
+      - tick-merge
+    environment: authority-merge
+    permissions:
+      actions: read
+      attestations: read
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repository: Mindburn-Labs/.github
+            selected: ${{ needs.tick-plan.outputs.github_selected }}
+            slug: github-authority
+          - repository: Mindburn-Labs/helm-ai-kernel
+            selected: ${{ needs.tick-plan.outputs.kernel_selected }}
+            slug: helm-ai-kernel
+    steps:
+      - name: Download signed controller plan
+        if: matrix.selected == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-autonomous-controller-plan
+          path: controller-plan
+
+      - name: Download durable intent receipt
+        if: matrix.selected == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-ordinary-intent-${{ matrix.slug }}
+          path: ledger-intent
+
+      - name: Download exact merge receipt
+        if: matrix.selected == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-ordinary-merge-${{ matrix.slug }}
+          path: merge
+
+      - name: Checkout immutable evidence writer
+        if: matrix.selected == 'true'
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          path: broker
+
+      - name: Verify merge provenance and build deterministic closure
+        if: matrix.selected == 'true'
+        id: closure
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ matrix.repository }}
+        run: |
+          set -euo pipefail
+          gh attestation verify merge/ordinary-merge.json \
+            --bundle merge/ordinary-merge.attestation.json \
+            --repo Mindburn-Labs/.github \
+            --signer-workflow Mindburn-Labs/.github/.github/workflows/promote-authority.yml \
+            --signer-digest "$GITHUB_WORKFLOW_SHA" \
+            --source-digest "$GITHUB_SHA" \
+            --deny-self-hosted-runners
+          mkdir closure-input
+          python3 broker/scripts/authority_evidence_ledger.py descriptor \
+            --receipt ledger-intent/ordinary-intent.json \
+            --output closure-input/intent-descriptor.json
+          jq -e '.closure | select(.schema == "mindburn.autonomous-release-merge-closure/v1")' \
+            merge/ordinary-merge.json > closure-input/ordinary-merge-closure.json
+          jq -e --arg repository "$REPOSITORY" \
+            '[.ordinary[] | select(.repository == $repository)] |
+             if length == 1 then .[0] else error("expected one ordinary entry") end' \
+            controller-plan/controller-plan.json > closure-entry.json
+          pull_request="$(jq -er '.pull_request' closure-entry.json)"
+          merge_sha="$(jq -er '.merge_sha' closure-entry.json)"
+          workflow_sha="$(jq -er '.workflow_sha' closure-entry.json)"
+          run_id="$(jq -er '.run_id' closure-entry.json)"
+          run_attempt="$(jq -er '.run_attempt' closure-entry.json)"
+          expected_parent_sha="$(jq -er '.ledger_head_sha' ledger-intent/ordinary-intent.json)"
+          test "$(jq -er '.merges[0].merge_commit_sha' closure-input/ordinary-merge-closure.json)" = "$merge_sha"
+          {
+            echo "namespace=ordinary/${{ matrix.slug }}/pr-$pull_request/$merge_sha/closure"
+            echo "expected_parent_sha=$expected_parent_sha"
+            echo "run_attempt=$run_attempt"
+            echo "run_id=$run_id"
+            echo "workflow_sha=$workflow_sha"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Mint exact central-ledger writer token
+        if: matrix.selected == 'true'
+        id: ledger-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.HELM_AUTHORITY_MERGER_CLIENT_ID }}
+          private-key: ${{ secrets.HELM_AUTHORITY_MERGER_PRIVATE_KEY }}
+          owner: Mindburn-Labs
+          repositories: .github
+          permission-contents: write
+
+      - name: Bind exact ledger writer identity and repository scope
+        if: matrix.selected == 'true'
+        env:
+          APP_SLUG: ${{ steps.ledger-token.outputs.app-slug }}
+          GH_TOKEN: ${{ steps.ledger-token.outputs.token }}
+          INSTALLATION_ID: ${{ steps.ledger-token.outputs.installation-id }}
+        run: |
+          set -euo pipefail
+          test "$APP_SLUG" = "helm-authority-merger"
+          test "$INSTALLATION_ID" = "$(jq -er '.apps.merger.installation_id' broker/config/autonomous-release-controller.json)"
+          test "$(gh api /installation/repositories?per_page=100 --jq '.repositories | map(.full_name) | sort | join(",")')" = "Mindburn-Labs/.github"
+
+      - name: Append closure after exact GitHub reconciliation
+        if: matrix.selected == 'true'
+        env:
+          GH_TOKEN: ${{ steps.ledger-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/authority_evidence_ledger.py append \
+            --namespace "${{ steps.closure.outputs.namespace }}" \
+            --record-type ordinary-merge \
+            --phase closure \
+            --workflow-sha "${{ steps.closure.outputs.workflow_sha }}" \
+            --run-id "${{ steps.closure.outputs.run_id }}" \
+            --run-attempt "${{ steps.closure.outputs.run_attempt }}" \
+            --expected-parent-sha "${{ steps.closure.outputs.expected_parent_sha }}" \
+            --input-root closure-input \
+            --include intent-descriptor.json \
+            --include ordinary-merge-closure.json \
+            --output ordinary-closure.json
+
+      - name: Retain closure append receipt
+        if: matrix.selected == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: helm-ordinary-closure-${{ matrix.slug }}
+          path: ordinary-closure.json
+          if-no-files-found: error
+          retention-days: 90
+
   verify-candidate:
     name: Verify previous-generation ratification
+    if: inputs.mode == 'promote'
     permissions:
       actions: read
       attestations: read
@@ -38,12 +912,55 @@ jobs:
       candidate_tree_sha: ${{ steps.candidate-tree.outputs.candidate_tree_sha }}
       control_sha: ${{ steps.metadata.outputs.control_sha }}
       current_main_sha: ${{ steps.metadata.outputs.current_main_sha }}
+      durable_final: ${{ steps.closure.outputs.durable_final }}
       merge_sha: ${{ steps.metadata.outputs.merge_sha }}
       parent_kernel_sha: ${{ steps.metadata.outputs.kernel_sha }}
       parent_generation: ${{ steps.metadata.outputs.parent_generation }}
       parent_sha: ${{ steps.metadata.outputs.parent_sha }}
     steps:
+      - name: Checkout immutable control ledger reader
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+          path: control-broker
+
+      - name: Bind forward or durable-recovery input mode
+        env:
+          LEDGER_GENERATION: ${{ inputs.ledger_generation }}
+          LEDGER_MERGE_SHA: ${{ inputs.ledger_merge_sha }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$LEDGER_GENERATION" && -z "$LEDGER_MERGE_SHA" ]]; then
+            exit 0
+          fi
+          [[ "$LEDGER_GENERATION" =~ ^[1-9][0-9]*$ ]]
+          test "$LEDGER_GENERATION" -ge 3
+          [[ "$LEDGER_MERGE_SHA" =~ ^[0-9a-f]{40}$ ]]
+
+      - name: Materialize immutable promotion intent from the ledger
+        if: inputs.ledger_generation != '' && inputs.ledger_merge_sha != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LEDGER_GENERATION: ${{ inputs.ledger_generation }}
+          LEDGER_MERGE_SHA: ${{ inputs.ledger_merge_sha }}
+        run: |
+          set -euo pipefail
+          python3 control-broker/scripts/authority_evidence_ledger.py read \
+            --namespace "promotions/generation-$LEDGER_GENERATION/$LEDGER_MERGE_SHA/intent" \
+            --record-type authority-promotion \
+            --phase intent \
+            --output-dir ledger-intent-materialized \
+            --output ledger-intent-read.json
+          test "$(jq -er '.record_type' ledger-intent-read.json)" = "authority-promotion"
+          test "$(jq -er '.phase' ledger-intent-read.json)" = "intent"
+          test "$(jq -er '.merge_sha' ledger-intent-materialized/entry.json)" = "$LEDGER_MERGE_SHA"
+          test -d ledger-intent-materialized/promotion
+          mkdir promotion
+          cp -R ledger-intent-materialized/promotion/. promotion/
+
       - name: Download triggering permit artifact
+        if: inputs.ledger_generation == '' && inputs.ledger_merge_sha == ''
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: helm-autonomous-release-permit
@@ -52,6 +969,7 @@ jobs:
           run-id: ${{ inputs.permit_run_id }}
 
       - name: Download triggering trusted permit context
+        if: inputs.ledger_generation == '' && inputs.ledger_merge_sha == ''
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: release-permit-input
@@ -60,6 +978,7 @@ jobs:
           run-id: ${{ inputs.permit_run_id }}
 
       - name: Download triggering raw review evidence
+        if: inputs.ledger_generation == '' && inputs.ledger_merge_sha == ''
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           pattern: release-review-*
@@ -74,6 +993,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TRIGGER_RUN_ATTEMPT: ${{ inputs.permit_run_attempt }}
           TRIGGER_RUN_ID: ${{ inputs.permit_run_id }}
+          LEDGER_GENERATION: ${{ inputs.ledger_generation }}
+          LEDGER_MERGE_SHA: ${{ inputs.ledger_merge_sha }}
         run: |
           set -euo pipefail
           control_ref=refs/heads/authority/control-v1
@@ -83,19 +1004,23 @@ jobs:
           test "$(gh api repos/Mindburn-Labs/.github/git/ref/heads/authority/control-v1 --jq '.object.sha')" = "$GITHUB_WORKFLOW_SHA"
           [[ "$TRIGGER_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           [[ "$TRIGGER_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
-          trigger_completed=0
-          for _ in $(seq 1 60); do
-            gh api "repos/Mindburn-Labs/.github/actions/runs/$TRIGGER_RUN_ID" \
-              > promotion/trigger-run.json
-            test "$(jq -er '.id | tostring' promotion/trigger-run.json)" = "$TRIGGER_RUN_ID"
-            test "$(jq -er '.run_attempt | tostring' promotion/trigger-run.json)" = "$TRIGGER_RUN_ATTEMPT"
-            if [[ "$(jq -er '.status' promotion/trigger-run.json)" = "completed" ]]; then
-              trigger_completed=1
-              break
-            fi
-            sleep 2
-          done
-          test "$trigger_completed" = "1"
+          if [[ -z "$LEDGER_GENERATION" ]]; then
+            trigger_completed=0
+            for _ in $(seq 1 60); do
+              gh api "repos/Mindburn-Labs/.github/actions/runs/$TRIGGER_RUN_ID" \
+                > promotion/trigger-run.json
+              test "$(jq -er '.id | tostring' promotion/trigger-run.json)" = "$TRIGGER_RUN_ID"
+              test "$(jq -er '.run_attempt | tostring' promotion/trigger-run.json)" = "$TRIGGER_RUN_ATTEMPT"
+              if [[ "$(jq -er '.status' promotion/trigger-run.json)" = "completed" ]]; then
+                trigger_completed=1
+                break
+              fi
+              sleep 2
+            done
+            test "$trigger_completed" = "1"
+          else
+            test -f promotion/trigger-run.json
+          fi
           test "$(jq -er '.id | tostring' promotion/trigger-run.json)" = "$TRIGGER_RUN_ID"
           test "$(jq -er '.run_attempt | tostring' promotion/trigger-run.json)" = "$TRIGGER_RUN_ATTEMPT"
           test "$(jq -er '.status' promotion/trigger-run.json)" = "completed"
@@ -132,6 +1057,13 @@ jobs:
           [[ "$merge_tree_sha" =~ ^[0-9a-f]{40}$ ]]
           [[ "$kernel_sha" =~ ^[0-9a-f]{40}$ ]]
           [[ "$candidate_pr" =~ ^[1-9][0-9]*$ ]]
+          if [[ -n "$LEDGER_GENERATION" ]]; then
+            test "$((parent_generation + 1))" = "$LEDGER_GENERATION"
+            test "$merge_sha" = "$LEDGER_MERGE_SHA"
+            test "$(jq -er '.recovery' ledger-intent-materialized/entry.json)" = "false"
+            test "$(jq -er '.run_id | tostring' ledger-intent-materialized/entry.json)" = "$TRIGGER_RUN_ID"
+            test "$(jq -er '.run_attempt | tostring' ledger-intent-materialized/entry.json)" = "$TRIGGER_RUN_ATTEMPT"
+          fi
           current_main="$(gh api repos/Mindburn-Labs/.github/git/ref/heads/main --jq '.object.sha')"
           gh api "repos/Mindburn-Labs/.github/pulls/$candidate_pr" > promotion/pull-request.json
           test "$(jq -er '.pull_requests[0].number' promotion/trigger-run.json)" = "$candidate_pr"
@@ -177,6 +1109,37 @@ jobs:
             echo "parent_generation=$parent_generation"
             echo "parent_sha=$parent_sha"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Discover a fully verified durable-final recovery boundary
+        id: closure
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LEDGER_GENERATION: ${{ inputs.ledger_generation }}
+          LEDGER_MERGE_SHA: ${{ inputs.ledger_merge_sha }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$LEDGER_GENERATION" ]]; then
+            echo "durable_final=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          set +e
+          detail="$(python3 control-broker/scripts/authority_evidence_ledger.py read \
+            --namespace "promotions/generation-$LEDGER_GENERATION/$LEDGER_MERGE_SHA/final" \
+            --record-type authority-promotion \
+            --phase final \
+            --output-dir recovered-promotion-final \
+            --output recovered-promotion-final.json 2>&1)"
+          status=$?
+          set -e
+          if [[ "$status" = "0" ]]; then
+            test "$(jq -er '.phase' recovered-promotion-final.json)" = "final"
+            echo "durable_final=true" >> "$GITHUB_OUTPUT"
+          elif [[ "$detail" = "authority-evidence-ledger: evidence ledger record is absent" ]]; then
+            echo "durable_final=false" >> "$GITHUB_OUTPUT"
+          else
+            printf '%s\n' "$detail" >&2
+            exit "$status"
+          fi
 
       - name: Verify GitHub-signed parent-workflow provenance
         env:
@@ -247,6 +1210,22 @@ jobs:
         working-directory: kernel/core
         run: go build -trimpath -o "$GITHUB_WORKSPACE/release-permit-verify" ./cmd/release-permit-verify
 
+      - name: Verify parent-authorized Kernel transition
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          candidate_kernel_sha="$(jq -er '.kernel_sha' candidate/config/autonomous-release-authority.json)"
+          python3 broker/scripts/autonomous_release_controller.py verify-kernel-transition \
+            --contract broker/config/autonomous-release-controller.json \
+            --kernel-verifier "$GITHUB_WORKSPACE/release-permit-verify" \
+            --control-sha "${{ steps.metadata.outputs.control_sha }}" \
+            --parent-workflow-sha "${{ steps.metadata.outputs.parent_sha }}" \
+            --parent-kernel-sha "${{ steps.metadata.outputs.kernel_sha }}" \
+            --candidate-kernel-sha "$candidate_kernel_sha" \
+            --output-dir promotion/kernel-transition-evidence \
+            --output promotion/kernel-transition.json
+
       - name: Verify exact successor tree and authority lineage
         env:
           CANDIDATE_PR: ${{ steps.metadata.outputs.candidate_pr }}
@@ -266,6 +1245,7 @@ jobs:
             --candidate-repository candidate \
             --candidate-sha "$CANDIDATE_SHA" \
             --candidate-pr "$CANDIDATE_PR" \
+            --kernel-transition promotion/kernel-transition.json \
             --expected-run-id "$TRIGGER_RUN_ID" \
             --expected-run-attempt "$TRIGGER_RUN_ATTEMPT" \
             --expected-parent-generation "$PARENT_GENERATION" \
@@ -296,17 +1276,31 @@ jobs:
             promotion/parent-rebuilt-reviews
             promotion/parent-recomputed-permit.json
             promotion/authority-promotion.json
+            promotion/kernel-transition.json
+            promotion/kernel-transition-evidence
             promotion/candidate-authority.json
             promotion/parent-authority.json
             promotion/permit-authority.json
             promotion/pull-request.json
+            promotion/trigger-run.json
             control-plane-parent.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Retain recovered durable-final receipt
+        if: steps.closure.outputs.durable_final == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: helm-authority-recovered-final
+          path: recovered-promotion-final.json
           if-no-files-found: error
           retention-days: 90
 
   reconcile:
     name: Reconcile promotion state before credentialed work
-    needs: verify-candidate
+    needs:
+      - verify-candidate
+      - persist_promotion_intent
     environment: authority-promotion
     permissions:
       contents: read
@@ -343,7 +1337,6 @@ jobs:
           private-key: ${{ secrets.HELM_AUTHORITY_PROMOTER_PRIVATE_KEY }}
           owner: Mindburn-Labs
           repositories: .github
-          permission-contents: read
           permission-organization-administration: write
 
       - name: Bind exact promoter App identity
@@ -370,7 +1363,9 @@ jobs:
         id: reconcile
         env:
           CANDIDATE_REF: ${{ needs.verify-candidate.outputs.candidate_ref }}
+          DURABLE_FINAL: ${{ needs.verify-candidate.outputs.durable_final }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          LEDGER_GENERATION: ${{ inputs.ledger_generation }}
         run: |
           set -euo pipefail
           python3 broker/scripts/authority_ruleset_broker.py reconcile \
@@ -379,14 +1374,26 @@ jobs:
             --candidate-ref "$CANDIDATE_REF" \
             --merge-sha "${{ needs.verify-candidate.outputs.merge_sha }}" \
             --output ruleset-reconcile.json
-          echo "rulesets_active=$(jq -er '.rulesets_active' ruleset-reconcile.json)" >> "$GITHUB_OUTPUT"
-          echo "state=$(jq -er '.state' ruleset-reconcile.json)" >> "$GITHUB_OUTPUT"
+          rulesets_active="$(jq -er '.rulesets_active' ruleset-reconcile.json)"
+          state="$(jq -er '.state' ruleset-reconcile.json)"
+          if [[ -n "$LEDGER_GENERATION" && "$DURABLE_FINAL" != "true" && "$state" = "active" ]]; then
+            python3 broker/scripts/authority_ruleset_broker.py restore \
+              --parent-sha "${{ needs.verify-candidate.outputs.parent_sha }}" \
+              --candidate-sha "${{ needs.verify-candidate.outputs.candidate_sha }}" \
+              --candidate-ref "$CANDIDATE_REF" \
+              --merge-sha "${{ needs.verify-candidate.outputs.merge_sha }}" \
+              --output ruleset-reconcile-restore.json
+            rulesets_active=false
+            state=post-merge-retry
+          fi
+          echo "rulesets_active=$rulesets_active" >> "$GITHUB_OUTPUT"
+          echo "state=$state" >> "$GITHUB_OUTPUT"
 
       - name: Upload reconciliation receipt
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: helm-authority-reconciliation
-          path: ruleset-reconcile.json
+          path: ruleset-reconcile*.json
           if-no-files-found: error
           retention-days: 90
 
@@ -445,6 +1452,18 @@ jobs:
         working-directory: parent-kernel/core
         run: go build -trimpath -o "$GITHUB_WORKSPACE/parent-permit-verify" ./cmd/release-permit-verify
 
+      - name: Checkout exact candidate Kernel for differential conformance
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: Mindburn-Labs/helm-ai-kernel
+          ref: ${{ needs.verify-candidate.outputs.candidate_kernel_sha }}
+          persist-credentials: false
+          path: candidate-kernel
+
+      - name: Build exact candidate permit verifier
+        working-directory: candidate-kernel/core
+        run: go build -trimpath -o "$GITHUB_WORKSPACE/candidate-permit-verify" ./cmd/release-permit-verify
+
       - name: Mint least-privilege short-lived promoter token
         id: app-token
         # At this exact action SHA, action.yml defines client-id and deprecates app-id.
@@ -453,9 +1472,7 @@ jobs:
           client-id: ${{ vars.HELM_AUTHORITY_PROMOTER_CLIENT_ID }}
           private-key: ${{ secrets.HELM_AUTHORITY_PROMOTER_PRIVATE_KEY }}
           owner: Mindburn-Labs
-          repositories: |
-            .github
-            contracts-autonomous-release-lab
+          repositories: contracts-autonomous-release-lab
           permission-actions: read
           permission-attestations: read
           permission-organization-administration: write
@@ -547,12 +1564,77 @@ jobs:
             --expected-workflow-sha "${{ needs.verify-candidate.outputs.candidate_sha }}" \
             --expected-authority promotion/candidate-authority.json \
             --kernel-verifier "$GITHUB_WORKSPACE/parent-permit-verify" \
+            --candidate-kernel-verifier "$GITHUB_WORKSPACE/candidate-permit-verify" \
             --output-dir promotion/suite \
             --receipt promotion/authority-suite.json
 
-      - name: Mint isolated approval-only App token
+      - name: Upload staged authority evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: helm-authority-promotion-stage
+          path: promotion
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Restore parent rulesets after failed staging
+        if: ${{ failure() && steps.advance.outcome == 'success' }}
+        env:
+          CANDIDATE_REF: ${{ needs.verify-candidate.outputs.candidate_ref }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/authority_ruleset_broker.py restore \
+            --parent-sha "${{ needs.verify-candidate.outputs.parent_sha }}" \
+            --candidate-sha "${{ needs.verify-candidate.outputs.candidate_sha }}" \
+            --candidate-ref "$CANDIDATE_REF" \
+            --output promotion/ruleset-restore.json
+
+  approve:
+    name: Submit isolated exact-head App approval
+    needs:
+      - verify-candidate
+      - stage
+    environment: authority-approval
+    permissions:
+      actions: read
+      attestations: read
+      contents: read
+      pull-requests: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout immutable parent approval broker
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ needs.verify-candidate.outputs.parent_sha }}
+          persist-credentials: false
+          path: broker
+
+      - name: Download staged authority evidence
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-authority-promotion-stage
+          path: promotion
+
+      - name: Checkout exact parent Kernel for approval verification
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: Mindburn-Labs/helm-ai-kernel
+          ref: ${{ needs.verify-candidate.outputs.parent_kernel_sha }}
+          persist-credentials: false
+          path: parent-kernel
+
+      - name: Set up parent Kernel toolchain
+        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00
+        with:
+          go-version-file: parent-kernel/core/go.mod
+
+      - name: Build exact parent permit verifier
+        working-directory: parent-kernel/core
+        run: go build -trimpath -o "$GITHUB_WORKSPACE/parent-permit-verify" ./cmd/release-permit-verify
+
+      - name: Mint approval-only App token
         id: approver-token
-        # At this exact action SHA, action.yml defines client-id and deprecates app-id.
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           client-id: ${{ vars.HELM_AUTHORITY_APPROVER_CLIENT_ID }}
@@ -588,38 +1670,167 @@ jobs:
             --approver-app-slug "${{ steps.approver-token.outputs.app-slug }}" \
             --approver-installation-id "${{ steps.approver-token.outputs.installation-id }}" \
             --allow-merged-resume \
-            --output promotion/machine-approval.json
+            --output machine-approval.json
 
-      - name: Upload staged authority evidence
+      - name: Retain isolated approval receipt
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: helm-authority-promotion-stage
-          path: promotion
+          name: helm-authority-approval
+          path: machine-approval.json
           if-no-files-found: error
           retention-days: 90
 
-      - name: Restore parent rulesets after failed staging
-        if: ${{ failure() && steps.advance.outcome == 'success' }}
+  persist_promotion_intent:
+    name: Persist authority-promotion intent before any mutation
+    needs: verify-candidate
+    if: needs.verify-candidate.outputs.durable_final != 'true'
+    environment: authority-merge
+    permissions:
+      actions: read
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      ledger_head_sha: ${{ steps.bind.outputs.ledger_head_sha }}
+      namespace: ${{ steps.bind.outputs.namespace }}
+    steps:
+      - name: Checkout immutable parent evidence writer
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ needs.verify-candidate.outputs.parent_sha }}
+          persist-credentials: false
+          path: broker
+
+      - name: Download verified promotion evidence for a forward transition
+        if: inputs.ledger_generation == '' && inputs.ledger_merge_sha == ''
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: verified-authority-promotion
+          path: verified-promotion
+
+      - name: Build deterministic forward intent inputs
+        if: inputs.ledger_generation == '' && inputs.ledger_merge_sha == ''
         env:
-          CANDIDATE_REF: ${{ needs.verify-candidate.outputs.candidate_ref }}
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          CANDIDATE_GENERATION: ${{ needs.verify-candidate.outputs.candidate_generation }}
+          MERGE_SHA: ${{ needs.verify-candidate.outputs.merge_sha }}
         run: |
           set -euo pipefail
-          python3 broker/scripts/authority_ruleset_broker.py restore \
-            --parent-sha "${{ needs.verify-candidate.outputs.parent_sha }}" \
-            --candidate-sha "${{ needs.verify-candidate.outputs.candidate_sha }}" \
-            --candidate-ref "$CANDIDATE_REF" \
-            --output promotion/ruleset-restore.json
+          mkdir -p ledger-input/promotion
+          cp -R verified-promotion/. ledger-input/promotion/
+          jq -S -n \
+            --slurpfile permit verified-promotion/release-permit.json \
+            '{
+              repository: $permit[0].repository,
+              pull_request: $permit[0].pull_request,
+              base_sha: $permit[0].base_sha,
+              head_sha: $permit[0].head_sha,
+              merge_sha: $permit[0].merge_sha,
+              merge_tree_sha: $permit[0].merge_tree_sha,
+              permit_id: $permit[0].permit_id,
+              run_id: $permit[0].run_id,
+              run_attempt: $permit[0].run_attempt,
+              workflow_sha: $permit[0].workflow_sha,
+              evidence: "promotion",
+              merge_method: "merge",
+              recovery: false
+            }' > ledger-input/entry.json
+          test "$(jq -er '.repository' ledger-input/entry.json)" = "Mindburn-Labs/.github"
+          test "$(jq -er '.merge_sha' ledger-input/entry.json)" = "$MERGE_SHA"
+          test "$(jq -er '.candidate_generation' verified-promotion/authority-promotion.json)" = "$CANDIDATE_GENERATION"
+
+      - name: Mint exact central-ledger writer token
+        if: inputs.ledger_generation == '' && inputs.ledger_merge_sha == ''
+        id: ledger-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.HELM_AUTHORITY_MERGER_CLIENT_ID }}
+          private-key: ${{ secrets.HELM_AUTHORITY_MERGER_PRIVATE_KEY }}
+          owner: Mindburn-Labs
+          repositories: .github
+          permission-contents: write
+
+      - name: Bind exact ledger writer identity, permissions, and repository
+        if: inputs.ledger_generation == '' && inputs.ledger_merge_sha == ''
+        env:
+          APP_SLUG: ${{ steps.ledger-token.outputs.app-slug }}
+          GH_TOKEN: ${{ steps.ledger-token.outputs.token }}
+          INSTALLATION_ID: ${{ steps.ledger-token.outputs.installation-id }}
+        run: |
+          set -euo pipefail
+          test "$APP_SLUG" = "helm-authority-merger"
+          test "$INSTALLATION_ID" = "$(jq -er '.apps.merger.installation_id' broker/config/autonomous-release-controller.json)"
+          test "$(gh api /installation/repositories?per_page=100 --jq '.repositories | map(.full_name) | sort | join(",")')" = "Mindburn-Labs/.github"
+
+      - name: Append forward intent before any main-ref mutation
+        if: inputs.ledger_generation == '' && inputs.ledger_merge_sha == ''
+        env:
+          CANDIDATE_GENERATION: ${{ needs.verify-candidate.outputs.candidate_generation }}
+          GH_TOKEN: ${{ steps.ledger-token.outputs.token }}
+          MERGE_SHA: ${{ needs.verify-candidate.outputs.merge_sha }}
+        run: |
+          set -euo pipefail
+          expected_parent_sha="$(gh api repos/Mindburn-Labs/.github/git/ref/heads/authority/evidence-v1 --jq '.object.sha')"
+          python3 broker/scripts/authority_evidence_ledger.py append \
+            --namespace "promotions/generation-$CANDIDATE_GENERATION/$MERGE_SHA/intent" \
+            --record-type authority-promotion \
+            --phase intent \
+            --workflow-sha "$(jq -er '.workflow_sha' ledger-input/entry.json)" \
+            --run-id "$(jq -er '.run_id' ledger-input/entry.json)" \
+            --run-attempt "$(jq -er '.run_attempt' ledger-input/entry.json)" \
+            --expected-parent-sha "$expected_parent_sha" \
+            --input-root ledger-input \
+            --include entry.json \
+            --include-tree promotion \
+            --output promotion-intent.json
+
+      - name: Read and verify existing intent for durable recovery
+        if: inputs.ledger_generation != '' && inputs.ledger_merge_sha != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LEDGER_GENERATION: ${{ inputs.ledger_generation }}
+          LEDGER_MERGE_SHA: ${{ inputs.ledger_merge_sha }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/authority_evidence_ledger.py read \
+            --namespace "promotions/generation-$LEDGER_GENERATION/$LEDGER_MERGE_SHA/intent" \
+            --record-type authority-promotion \
+            --phase intent \
+            --output-dir recovered-promotion-intent \
+            --output promotion-intent.json
+
+      - name: Bind durable intent receipt
+        id: bind
+        env:
+          CANDIDATE_GENERATION: ${{ needs.verify-candidate.outputs.candidate_generation }}
+          MERGE_SHA: ${{ needs.verify-candidate.outputs.merge_sha }}
+        run: |
+          set -euo pipefail
+          namespace="promotions/generation-$CANDIDATE_GENERATION/$MERGE_SHA/intent"
+          test "$(jq -er '.namespace' promotion-intent.json)" = "$namespace"
+          test "$(jq -er '.record_type' promotion-intent.json)" = "authority-promotion"
+          test "$(jq -er '.phase' promotion-intent.json)" = "intent"
+          echo "ledger_head_sha=$(jq -er '.ledger_head_sha' promotion-intent.json)" >> "$GITHUB_OUTPUT"
+          echo "namespace=$namespace" >> "$GITHUB_OUTPUT"
+
+      - name: Retain durable promotion-intent receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: helm-authority-promotion-intent
+          path: promotion-intent.json
+          if-no-files-found: error
+          retention-days: 90
 
   merge:
     name: Atomically merge ratified authority
     needs:
       - verify-candidate
       - stage
+      - approve
+      - persist_promotion_intent
+    environment: authority-merge
     permissions:
       actions: read
-      contents: write
-      pull-requests: write
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -639,10 +1850,49 @@ jobs:
           name: helm-authority-promotion-stage
           path: promotion
 
+      - name: Download isolated approval receipt
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-authority-approval
+          path: approval
+
+      - name: Require source-owned merger App activation
+        id: merger-contract
+        run: |
+          set -euo pipefail
+          contract=broker/config/autonomous-release-controller.json
+          test "$(jq -er '.enabled' "$contract")" = "true"
+          app_id="$(jq -er '.apps.merger.app_id | select(type == "number" and . > 0)' "$contract")"
+          installation_id="$(jq -er '.apps.merger.installation_id | select(type == "number" and . > 0)' "$contract")"
+          test "$(jq -er '.apps.merger.slug' "$contract")" = "helm-authority-merger"
+          echo "app_id=$app_id" >> "$GITHUB_OUTPUT"
+          echo "installation_id=$installation_id" >> "$GITHUB_OUTPUT"
+
+      - name: Mint merge-only App token
+        id: merger-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.HELM_AUTHORITY_MERGER_CLIENT_ID }}
+          private-key: ${{ secrets.HELM_AUTHORITY_MERGER_PRIVATE_KEY }}
+          owner: Mindburn-Labs
+          repositories: .github
+          permission-contents: write
+          permission-pull-requests: read
+
+      - name: Bind exact merger App identity
+        env:
+          APP_SLUG: ${{ steps.merger-token.outputs.app-slug }}
+          EXPECTED_INSTALLATION_ID: ${{ steps.merger-contract.outputs.installation_id }}
+          INSTALLATION_ID: ${{ steps.merger-token.outputs.installation-id }}
+        run: |
+          set -euo pipefail
+          test "$APP_SLUG" = "helm-authority-merger"
+          test "$INSTALLATION_ID" = "$EXPECTED_INSTALLATION_ID"
+
       - name: Atomically advance main to the exact ratified merge commit
         id: merge
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.merger-token.outputs.token }}
         run: |
           set -euo pipefail
           merge_sha="$(jq -er '.merge_sha' promotion/release-permit.json)"
@@ -652,6 +1902,11 @@ jobs:
             --head-sha "${{ needs.verify-candidate.outputs.candidate_sha }}" \
             --merge-sha "$merge_sha" \
             --tree-sha "${{ needs.verify-candidate.outputs.candidate_tree_sha }}" \
+            --approval-receipt approval/machine-approval.json \
+            --permit promotion/release-permit.json \
+            --merger-app-slug "${{ steps.merger-token.outputs.app-slug }}" \
+            --merger-installation-id "${{ steps.merger-token.outputs.installation-id }}" \
+            --merger-app-id "${{ steps.merger-contract.outputs.app_id }}" \
             --output promotion/merge-response.json
           merge_tree_sha="$(jq -er '.merge_tree_sha' promotion/merge-response.json)"
           echo "merge_sha=$merge_sha" >> "$GITHUB_OUTPUT"
@@ -665,12 +1920,132 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+  persist_promotion_merged:
+    name: Persist reconciled authority merge before rebind
+    needs:
+      - verify-candidate
+      - persist_promotion_intent
+      - approve
+      - merge
+    environment: authority-merge
+    permissions:
+      actions: read
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      ledger_head_sha: ${{ steps.bind.outputs.ledger_head_sha }}
+      namespace: ${{ steps.bind.outputs.namespace }}
+    steps:
+      - name: Checkout immutable parent evidence writer
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ needs.verify-candidate.outputs.parent_sha }}
+          persist-credentials: false
+          path: broker
+
+      - name: Download durable intent receipt
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-authority-promotion-intent
+          path: durable-intent
+
+      - name: Download isolated approval receipt
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-authority-approval
+          path: approval
+
+      - name: Download exact merge receipt
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-authority-merge
+          path: merge
+
+      - name: Build deterministic merged-phase inputs
+        run: |
+          set -euo pipefail
+          mkdir merged-input
+          python3 broker/scripts/authority_evidence_ledger.py descriptor \
+            --receipt durable-intent/promotion-intent.json \
+            --output merged-input/intent-descriptor.json
+          cp approval/machine-approval.json merged-input/approval.json
+          cp merge/merge-response.json merged-input/merge-response.json
+
+      - name: Mint exact central-ledger writer token
+        id: ledger-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.HELM_AUTHORITY_MERGER_CLIENT_ID }}
+          private-key: ${{ secrets.HELM_AUTHORITY_MERGER_PRIVATE_KEY }}
+          owner: Mindburn-Labs
+          repositories: .github
+          permission-contents: write
+
+      - name: Bind exact ledger writer identity, permissions, and repository
+        env:
+          APP_SLUG: ${{ steps.ledger-token.outputs.app-slug }}
+          GH_TOKEN: ${{ steps.ledger-token.outputs.token }}
+          INSTALLATION_ID: ${{ steps.ledger-token.outputs.installation-id }}
+        run: |
+          set -euo pipefail
+          test "$APP_SLUG" = "helm-authority-merger"
+          test "$INSTALLATION_ID" = "$(jq -er '.apps.merger.installation_id' broker/config/autonomous-release-controller.json)"
+          test "$(gh api /installation/repositories?per_page=100 --jq '.repositories | map(.full_name) | sort | join(",")')" = "Mindburn-Labs/.github"
+
+      - name: Append merged phase after exact GitHub reconciliation
+        env:
+          CANDIDATE_GENERATION: ${{ needs.verify-candidate.outputs.candidate_generation }}
+          GH_TOKEN: ${{ steps.ledger-token.outputs.token }}
+          MERGE_SHA: ${{ needs.verify-candidate.outputs.merge_sha }}
+          PARENT_SHA: ${{ needs.verify-candidate.outputs.parent_sha }}
+          PERMIT_RUN_ATTEMPT: ${{ inputs.permit_run_attempt }}
+          PERMIT_RUN_ID: ${{ inputs.permit_run_id }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/authority_evidence_ledger.py append \
+            --namespace "promotions/generation-$CANDIDATE_GENERATION/$MERGE_SHA/merged" \
+            --record-type authority-promotion \
+            --phase merged \
+            --workflow-sha "$PARENT_SHA" \
+            --run-id "$PERMIT_RUN_ID" \
+            --run-attempt "$PERMIT_RUN_ATTEMPT" \
+            --expected-parent-sha "$(jq -er '.ledger_head_sha' durable-intent/promotion-intent.json)" \
+            --input-root merged-input \
+            --include intent-descriptor.json \
+            --include approval.json \
+            --include merge-response.json \
+            --output promotion-merged.json
+
+      - name: Bind durable merged receipt
+        id: bind
+        env:
+          CANDIDATE_GENERATION: ${{ needs.verify-candidate.outputs.candidate_generation }}
+          MERGE_SHA: ${{ needs.verify-candidate.outputs.merge_sha }}
+        run: |
+          set -euo pipefail
+          namespace="promotions/generation-$CANDIDATE_GENERATION/$MERGE_SHA/merged"
+          test "$(jq -er '.namespace' promotion-merged.json)" = "$namespace"
+          test "$(jq -er '.record_type' promotion-merged.json)" = "authority-promotion"
+          test "$(jq -er '.phase' promotion-merged.json)" = "merged"
+          echo "ledger_head_sha=$(jq -er '.ledger_head_sha' promotion-merged.json)" >> "$GITHUB_OUTPUT"
+          echo "namespace=$namespace" >> "$GITHUB_OUTPUT"
+
+      - name: Retain durable merged-phase receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: helm-authority-promotion-merged
+          path: promotion-merged.json
+          if-no-files-found: error
+          retention-days: 90
+
   rebind:
     name: Rebind candidate authority after isolated merge
     needs:
       - verify-candidate
       - stage
       - merge
+      - persist_promotion_merged
     environment: authority-promotion
     permissions:
       actions: read
@@ -716,14 +2091,8 @@ jobs:
           client-id: ${{ vars.HELM_AUTHORITY_PROMOTER_CLIENT_ID }}
           private-key: ${{ secrets.HELM_AUTHORITY_PROMOTER_PRIVATE_KEY }}
           owner: Mindburn-Labs
-          repositories: |
-            .github
-            contracts-autonomous-release-lab
-          permission-actions: read
-          permission-attestations: read
-          permission-contents: read
+          repositories: .github
           permission-organization-administration: write
-          permission-pull-requests: write
 
       - name: Bind exact promoter App identity
         env:
@@ -845,10 +2214,9 @@ jobs:
             --effective-only \
             --output promotion/control-plane-pre-observer.json
 
-      # The observer token deliberately omits organization Administration.
-      # Its code proves the write-gated org-ruleset GET returns HTTP 403, then
-      # observes only effective repository rules and immutable evidence.
-      - name: Mint mechanically read-only observer token
+      # GitHub requires organization Administration write even for ruleset GET.
+      # The immutable observer code exposes GET only and never issues mutations.
+      - name: Mint provider-overgranted token for immutable GET-only observer
         id: observer-token
         # At this exact action SHA, action.yml defines client-id and deprecates app-id.
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
@@ -858,10 +2226,13 @@ jobs:
           owner: Mindburn-Labs
           repositories: |
             .github
+            helm-ai-kernel
             contracts-autonomous-release-lab
+            contracts-autonomous-release-canary
           permission-actions: read
           permission-attestations: read
           permission-contents: read
+          permission-organization-administration: write
           permission-pull-requests: read
 
       - name: Bind exact observer App identity
@@ -901,6 +2272,18 @@ jobs:
         working-directory: parent-kernel/core
         run: go build -trimpath -o "$GITHUB_WORKSPACE/parent-permit-verify" ./cmd/release-permit-verify
 
+      - name: Checkout exact candidate Kernel for differential observation
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: Mindburn-Labs/helm-ai-kernel
+          ref: ${{ needs.verify-candidate.outputs.candidate_kernel_sha }}
+          persist-credentials: false
+          path: candidate-kernel
+
+      - name: Build exact candidate permit verifier
+        working-directory: candidate-kernel/core
+        run: go build -trimpath -o "$GITHUB_WORKSPACE/candidate-permit-verify" ./cmd/release-permit-verify
+
       - name: Independently reverify every candidate proof case
         env:
           GH_TOKEN: ${{ steps.observer-token.outputs.token }}
@@ -913,6 +2296,7 @@ jobs:
             --expected-workflow-sha "${{ needs.verify-candidate.outputs.candidate_sha }}" \
             --expected-authority promotion/candidate-authority.json \
             --kernel-verifier "$GITHUB_WORKSPACE/parent-permit-verify" \
+            --candidate-kernel-verifier "$GITHUB_WORKSPACE/candidate-permit-verify" \
             --output-dir observed-suite \
             --receipt observed-authority-suite.json \
             --timeout-seconds 60 \
@@ -1038,7 +2422,7 @@ jobs:
             --arg phase "$EXPECTED_OBSERVER_PHASE" \
             --argjson attempt "$GITHUB_RUN_ATTEMPT" \
             --argjson run "$GITHUB_RUN_ID" \
-            '.schema == "mindburn.release-authority-observer-receipt/v3" and
+            '.schema == "mindburn.release-authority-observer-receipt/v4" and
              .phase == $phase and .decision == "ALLOW" and
              .control_workflow_sha == $control and
              .parent_workflow_sha == $parent and
@@ -1055,13 +2439,9 @@ jobs:
           client-id: ${{ vars.HELM_AUTHORITY_PROMOTER_CLIENT_ID }}
           private-key: ${{ secrets.HELM_AUTHORITY_PROMOTER_PRIVATE_KEY }}
           owner: Mindburn-Labs
-          repositories: |
-            .github
-            contracts-autonomous-release-lab
-          permission-actions: read
+          repositories: .github
           permission-attestations: read
           permission-organization-administration: write
-          permission-pull-requests: write
 
       - name: Bind exact promoter App identity
         env:
@@ -1143,10 +2523,9 @@ jobs:
             --effective-only \
             --output promotion/control-plane-final-observer.json
 
-      # The observer token deliberately omits organization Administration.
-      # Its code proves the write-gated org-ruleset GET returns HTTP 403, then
-      # observes only effective repository rules and immutable evidence.
-      - name: Mint mechanically read-only observer token
+      # GitHub requires organization Administration write even for ruleset GET.
+      # The immutable observer code exposes GET only and never issues mutations.
+      - name: Mint provider-overgranted token for immutable GET-only observer
         id: observer-token
         # At this exact action SHA, action.yml defines client-id and deprecates app-id.
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
@@ -1156,10 +2535,13 @@ jobs:
           owner: Mindburn-Labs
           repositories: |
             .github
+            helm-ai-kernel
             contracts-autonomous-release-lab
+            contracts-autonomous-release-canary
           permission-actions: read
           permission-attestations: read
           permission-contents: read
+          permission-organization-administration: write
           permission-pull-requests: read
 
       - name: Bind exact observer App identity
@@ -1253,18 +2635,491 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+  persist_promotion_final:
+    name: Persist final independently observed authority closure
+    needs:
+      - verify-candidate
+      - persist_promotion_merged
+      - activate
+      - observe_final
+      - observe_pre_activation
+      - stage
+    environment: authority-merge
+    permissions:
+      actions: read
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout immutable parent evidence writer
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ needs.verify-candidate.outputs.parent_sha }}
+          persist-credentials: false
+          path: broker
+
+      - name: Download durable merged receipt
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-authority-promotion-merged
+          path: durable-merged
+
+      - name: Download signed final observer evidence
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-authority-promotion-receipt
+          path: final-observation
+
+      - name: Download complete staged adversarial-suite evidence
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-authority-promotion-stage
+          path: durable-stage
+
+      - name: Download signed pre-activation observer evidence
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-authority-pre-activation-observer
+          path: pre-observation
+
+      - name: Download exact promotion execution evidence
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-authority-promotion-execution
+          path: execution
+
+      - name: Download activation transition
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-authority-activation
+          path: activation
+
+      - name: Build deterministic final-phase inputs
+        run: |
+          set -euo pipefail
+          mkdir final-input
+          python3 broker/scripts/authority_evidence_ledger.py descriptor \
+            --receipt durable-merged/promotion-merged.json \
+            --output final-input/merged-descriptor.json
+          cp final-observation/final-observer-receipt.json final-input/final-observer-receipt.json
+          cp final-observation/final-observer-receipt.attestation.json final-input/final-observer-receipt.attestation.json
+          cp pre-observation/pre-activation-observer-receipt.json final-input/pre-activation-observer-receipt.json
+          cp pre-observation/pre-activation-observer-receipt.attestation.json final-input/pre-activation-observer-receipt.attestation.json
+          cp execution/authority-promotion-execution.json final-input/authority-promotion-execution.json
+          cp activation/ruleset-activate.json final-input/ruleset-activate.json
+          cp durable-stage/authority-suite.json final-input/authority-suite.json
+          cp durable-stage/suite-trigger.json final-input/suite-trigger.json
+          cp durable-stage/kernel-transition.json final-input/kernel-transition.json
+          cp -R durable-stage/suite final-input/suite
+          cp -R final-observation/observer-replay-final final-input/observer-replay-final
+
+      - name: Verify final observer provenance before persistence
+        env:
+          CONTROL_SHA: ${{ needs.verify-candidate.outputs.control_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh attestation verify final-input/final-observer-receipt.json \
+            --bundle final-input/final-observer-receipt.attestation.json \
+            --repo Mindburn-Labs/.github \
+            --signer-workflow Mindburn-Labs/.github/.github/workflows/promote-authority.yml \
+            --signer-digest "$CONTROL_SHA" \
+            --source-digest "$CONTROL_SHA" \
+            --deny-self-hosted-runners
+
+      - name: Mint exact central-ledger writer token
+        id: ledger-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.HELM_AUTHORITY_MERGER_CLIENT_ID }}
+          private-key: ${{ secrets.HELM_AUTHORITY_MERGER_PRIVATE_KEY }}
+          owner: Mindburn-Labs
+          repositories: .github
+          permission-contents: write
+
+      - name: Bind exact ledger writer identity, permissions, and repository
+        env:
+          APP_SLUG: ${{ steps.ledger-token.outputs.app-slug }}
+          GH_TOKEN: ${{ steps.ledger-token.outputs.token }}
+          INSTALLATION_ID: ${{ steps.ledger-token.outputs.installation-id }}
+        run: |
+          set -euo pipefail
+          test "$APP_SLUG" = "helm-authority-merger"
+          test "$INSTALLATION_ID" = "$(jq -er '.apps.merger.installation_id' broker/config/autonomous-release-controller.json)"
+          test "$(gh api /installation/repositories?per_page=100 --jq '.repositories | map(.full_name) | sort | join(",")')" = "Mindburn-Labs/.github"
+
+      - name: Append final closure after independent observer ALLOW
+        env:
+          CANDIDATE_GENERATION: ${{ needs.verify-candidate.outputs.candidate_generation }}
+          GH_TOKEN: ${{ steps.ledger-token.outputs.token }}
+          MERGE_SHA: ${{ needs.verify-candidate.outputs.merge_sha }}
+          PARENT_SHA: ${{ needs.verify-candidate.outputs.parent_sha }}
+          PERMIT_RUN_ATTEMPT: ${{ inputs.permit_run_attempt }}
+          PERMIT_RUN_ID: ${{ inputs.permit_run_id }}
+        run: |
+          set -euo pipefail
+          test "$(jq -er '.decision' final-input/final-observer-receipt.json)" = "ALLOW"
+          test "$(jq -er '.phase' final-input/final-observer-receipt.json)" = "final"
+          python3 broker/scripts/authority_evidence_ledger.py append \
+            --namespace "promotions/generation-$CANDIDATE_GENERATION/$MERGE_SHA/final" \
+            --record-type authority-promotion \
+            --phase final \
+            --workflow-sha "$PARENT_SHA" \
+            --run-id "$PERMIT_RUN_ID" \
+            --run-attempt "$PERMIT_RUN_ATTEMPT" \
+            --expected-parent-sha "$(jq -er '.ledger_head_sha' durable-merged/promotion-merged.json)" \
+            --input-root final-input \
+            --include merged-descriptor.json \
+            --include final-observer-receipt.json \
+            --include final-observer-receipt.attestation.json \
+            --include pre-activation-observer-receipt.json \
+            --include pre-activation-observer-receipt.attestation.json \
+            --include authority-promotion-execution.json \
+            --include authority-suite.json \
+            --include suite-trigger.json \
+            --include kernel-transition.json \
+            --include ruleset-activate.json \
+            --include-tree suite \
+            --include-tree observer-replay-final \
+            --output promotion-final.json
+
+      - name: Bind exact durable final closure
+        env:
+          CANDIDATE_GENERATION: ${{ needs.verify-candidate.outputs.candidate_generation }}
+          MERGE_SHA: ${{ needs.verify-candidate.outputs.merge_sha }}
+        run: |
+          set -euo pipefail
+          test "$(jq -er '.namespace' promotion-final.json)" = "promotions/generation-$CANDIDATE_GENERATION/$MERGE_SHA/final"
+          test "$(jq -er '.record_type' promotion-final.json)" = "authority-promotion"
+          test "$(jq -er '.phase' promotion-final.json)" = "final"
+
+      - name: Retain durable final-closure receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: helm-authority-promotion-final
+          path: promotion-final.json
+          if-no-files-found: error
+          retention-days: 90
+
+  advance_control:
+    name: Advance exact durable-final controller successor
+    if: >-
+      always() &&
+      needs.verify-candidate.result == 'success' &&
+      (needs.verify-candidate.outputs.durable_final == 'true' ||
+       needs.persist_promotion_final.result == 'success')
+    needs:
+      - verify-candidate
+      - persist_promotion_final
+    environment: authority-control
+    permissions:
+      actions: read
+      attestations: read
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout immutable parent control updater
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ needs.verify-candidate.outputs.parent_sha }}
+          persist-credentials: false
+          path: broker
+
+      - name: Download forward durable-final receipt
+        if: needs.verify-candidate.outputs.durable_final != 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-authority-promotion-final
+          path: durable-final
+
+      - name: Download recovered durable-final receipt
+        if: needs.verify-candidate.outputs.durable_final == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-authority-recovered-final
+          path: durable-final
+
+      - name: Normalize durable-final receipt name
+        run: |
+          set -euo pipefail
+          if [[ -f durable-final/recovered-promotion-final.json ]]; then
+            mv durable-final/recovered-promotion-final.json durable-final/promotion-final.json
+          fi
+          test "$(jq -er '.phase' durable-final/promotion-final.json)" = "final"
+
+      - name: Mint exclusive control-updater token
+        id: control-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.HELM_AUTHORITY_CONTROL_UPDATER_CLIENT_ID }}
+          private-key: ${{ secrets.HELM_AUTHORITY_CONTROL_UPDATER_PRIVATE_KEY }}
+          owner: Mindburn-Labs
+          repositories: .github
+          permission-attestations: read
+          permission-contents: write
+
+      - name: Bind exact control-updater App identity and repository scope
+        env:
+          APP_SLUG: ${{ steps.control-token.outputs.app-slug }}
+          GH_TOKEN: ${{ steps.control-token.outputs.token }}
+          INSTALLATION_ID: ${{ steps.control-token.outputs.installation-id }}
+        run: |
+          set -euo pipefail
+          test "$APP_SLUG" = "helm-authority-control-updater"
+          test "$INSTALLATION_ID" = "$(jq -er '.control_workflow.successor_app.installation_id' broker/config/autonomous-release-control-plane.json)"
+          test "$(gh api /installation/repositories?per_page=100 --jq '.repositories | map(.full_name) | sort | join(",")')" = "Mindburn-Labs/.github"
+
+      - name: Compare-and-swap only the ratified control successor
+        env:
+          GH_TOKEN: ${{ steps.control-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/advance_authority_control.py \
+            --control-contract broker/config/autonomous-release-control-plane.json \
+            --final-receipt durable-final/promotion-final.json \
+            --generation "${{ needs.verify-candidate.outputs.candidate_generation }}" \
+            --parent-control-sha "${{ needs.verify-candidate.outputs.parent_sha }}" \
+            --successor-sha "${{ needs.verify-candidate.outputs.merge_sha }}" \
+            --updater-app-slug "${{ steps.control-token.outputs.app-slug }}" \
+            --updater-app-id "$(jq -er '.control_workflow.successor_app.app_id' broker/config/autonomous-release-control-plane.json)" \
+            --updater-installation-id "${{ steps.control-token.outputs.installation-id }}" \
+            --output control-transition.json
+
+      - name: Retain control-successor transition
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: helm-authority-control-transition
+          path: control-transition.json
+          if-no-files-found: error
+          retention-days: 90
+
+  observe_control_successor:
+    name: Independently observe exact control successor
+    needs:
+      - verify-candidate
+      - advance_control
+    environment: authority-observer
+    permissions:
+      actions: read
+      attestations: write
+      contents: read
+      id-token: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout immutable parent control observer
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ needs.verify-candidate.outputs.parent_sha }}
+          persist-credentials: false
+          path: broker
+
+      - name: Mint exact read-only observer token
+        id: observer-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.HELM_AUTHORITY_OBSERVER_CLIENT_ID }}
+          private-key: ${{ secrets.HELM_AUTHORITY_OBSERVER_PRIVATE_KEY }}
+          owner: Mindburn-Labs
+          repositories: .github
+          permission-attestations: read
+          permission-contents: read
+          permission-organization-administration: write
+
+      - name: Bind exact observer App identity and repository scope
+        env:
+          APP_SLUG: ${{ steps.observer-token.outputs.app-slug }}
+          GH_TOKEN: ${{ steps.observer-token.outputs.token }}
+          INSTALLATION_ID: ${{ steps.observer-token.outputs.installation-id }}
+        run: |
+          set -euo pipefail
+          test "$APP_SLUG" = "helm-authority-observer"
+          test "$INSTALLATION_ID" = "146542079"
+          test "$(gh api /installation/repositories?per_page=100 --jq '.repositories | map(.full_name) | sort | join(",")')" = "Mindburn-Labs/.github"
+
+      - name: Verify full live successor control plane
+        env:
+          GH_TOKEN: ${{ steps.observer-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/verify_control_plane.py \
+            --contract broker/config/autonomous-release-control-plane.json \
+            --adversarial-corpus broker/tests/fixtures/autonomous-release-adversarial.json \
+            --output control-observer.json
+          test "$(jq -er '.live | tostring' control-observer.json)" = "true"
+          test "$(jq -er '.control_workflow.sha' control-observer.json)" = "${{ needs.verify-candidate.outputs.merge_sha }}"
+
+      - name: Set up pinned attestation runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "24.15.0"
+          cache: npm
+          cache-dependency-path: broker/tools/offline-attest/package-lock.json
+
+      - name: Install integrity-locked offline attestation signer
+        run: npm ci --ignore-scripts --no-audit --no-fund --prefix broker/tools/offline-attest
+
+      - name: Sign exact live control observation
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node broker/tools/offline-attest/attest.mjs \
+            control-observer.json \
+            control-observer.attestation.json
+
+      - name: Retain signed control observation
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: helm-authority-control-observer
+          path: |
+            control-observer.json
+            control-observer.attestation.json
+          if-no-files-found: error
+          retention-days: 90
+
+  persist_promotion_successor:
+    name: Persist durable control-successor closure
+    needs:
+      - verify-candidate
+      - advance_control
+      - observe_control_successor
+    environment: authority-merge
+    permissions:
+      actions: read
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout immutable parent evidence writer
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ needs.verify-candidate.outputs.parent_sha }}
+          persist-credentials: false
+          path: broker
+
+      - name: Download forward durable-final receipt
+        if: needs.verify-candidate.outputs.durable_final != 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-authority-promotion-final
+          path: durable-final
+
+      - name: Download recovered durable-final receipt
+        if: needs.verify-candidate.outputs.durable_final == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-authority-recovered-final
+          path: durable-final
+
+      - name: Download exact control transition
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-authority-control-transition
+          path: transition
+
+      - name: Download signed control observation
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: helm-authority-control-observer
+          path: observation
+
+      - name: Build exact successor-phase inputs
+        run: |
+          set -euo pipefail
+          mkdir successor-input
+          if [[ -f durable-final/recovered-promotion-final.json ]]; then
+            mv durable-final/recovered-promotion-final.json durable-final/promotion-final.json
+          fi
+          python3 broker/scripts/authority_evidence_ledger.py descriptor \
+            --receipt durable-final/promotion-final.json \
+            --output successor-input/final-descriptor.json
+          cp transition/control-transition.json successor-input/control-transition.json
+          cp observation/control-observer.json successor-input/control-observer.json
+          cp observation/control-observer.attestation.json successor-input/control-observer.attestation.json
+
+      - name: Verify control-observer provenance before persistence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh attestation verify successor-input/control-observer.json \
+            --bundle successor-input/control-observer.attestation.json \
+            --repo Mindburn-Labs/.github \
+            --signer-workflow Mindburn-Labs/.github/.github/workflows/promote-authority.yml \
+            --signer-digest "$GITHUB_WORKFLOW_SHA" \
+            --source-digest "$GITHUB_WORKFLOW_SHA" \
+            --deny-self-hosted-runners
+
+      - name: Mint exact central-ledger writer token
+        id: ledger-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.HELM_AUTHORITY_MERGER_CLIENT_ID }}
+          private-key: ${{ secrets.HELM_AUTHORITY_MERGER_PRIVATE_KEY }}
+          owner: Mindburn-Labs
+          repositories: .github
+          permission-contents: write
+
+      - name: Bind exact ledger writer identity and repository scope
+        env:
+          APP_SLUG: ${{ steps.ledger-token.outputs.app-slug }}
+          GH_TOKEN: ${{ steps.ledger-token.outputs.token }}
+          INSTALLATION_ID: ${{ steps.ledger-token.outputs.installation-id }}
+        run: |
+          set -euo pipefail
+          test "$APP_SLUG" = "helm-authority-merger"
+          test "$INSTALLATION_ID" = "$(jq -er '.apps.merger.installation_id' broker/config/autonomous-release-controller.json)"
+          test "$(gh api /installation/repositories?per_page=100 --jq '.repositories | map(.full_name) | sort | join(",")')" = "Mindburn-Labs/.github"
+
+      - name: Append exact control-successor closure
+        env:
+          CANDIDATE_GENERATION: ${{ needs.verify-candidate.outputs.candidate_generation }}
+          GH_TOKEN: ${{ steps.ledger-token.outputs.token }}
+          MERGE_SHA: ${{ needs.verify-candidate.outputs.merge_sha }}
+        run: |
+          set -euo pipefail
+          expected_parent_sha="$(gh api repos/Mindburn-Labs/.github/git/ref/heads/authority/evidence-v1 --jq '.object.sha')"
+          python3 broker/scripts/authority_evidence_ledger.py append \
+            --namespace "promotions/generation-$CANDIDATE_GENERATION/$MERGE_SHA/successor" \
+            --record-type authority-promotion \
+            --phase successor \
+            --workflow-sha "$GITHUB_WORKFLOW_SHA" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --expected-parent-sha "$expected_parent_sha" \
+            --input-root successor-input \
+            --include final-descriptor.json \
+            --include control-transition.json \
+            --include control-observer.json \
+            --include control-observer.attestation.json \
+            --output promotion-successor.json
+
+      - name: Retain durable successor-closure receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: helm-authority-promotion-successor
+          path: promotion-successor.json
+          if-no-files-found: error
+          retention-days: 90
+
   recover:
     name: Converge rulesets after an incomplete promotion
     if: >-
       always() &&
-      needs.stage.result == 'success' &&
-      (needs.merge.result != 'success' ||
+      needs.persist_promotion_intent.result == 'success' &&
+      (needs.reconcile.result != 'success' ||
+       needs.stage.result != 'success' ||
+       needs.merge.result != 'success' ||
        needs.rebind.result != 'success' ||
        needs.observe_pre_activation.result != 'success' ||
        needs.activate.result != 'success' ||
        needs.observe_final.result != 'success')
     needs:
       - verify-candidate
+      - persist_promotion_intent
+      - reconcile
       - stage
       - merge
       - rebind
@@ -1296,10 +3151,10 @@ jobs:
             --effective-only \
             --output control-plane-recovery.json
 
-      - name: Download signed promotion evidence
+      - name: Download verified immutable promotion evidence
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: helm-authority-promotion-stage
+          name: verified-authority-promotion
           path: promotion
 
       - name: Mint least-privilege short-lived promoter token
@@ -1310,13 +3165,9 @@ jobs:
           client-id: ${{ vars.HELM_AUTHORITY_PROMOTER_CLIENT_ID }}
           private-key: ${{ secrets.HELM_AUTHORITY_PROMOTER_PRIVATE_KEY }}
           owner: Mindburn-Labs
-          repositories: |
-            .github
-            contracts-autonomous-release-lab
-          permission-actions: read
+          repositories: .github
           permission-attestations: read
           permission-organization-administration: write
-          permission-pull-requests: write
 
       - name: Bind exact promoter App identity
         env:

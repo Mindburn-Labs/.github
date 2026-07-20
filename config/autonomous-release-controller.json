@@ -1,0 +1,56 @@
+{
+  "apps": {
+    "approver": {
+      "app_id": 4298283,
+      "installation_id": 146576964,
+      "slug": "helm-authority-approver"
+    },
+    "control_updater": {
+      "app_id": null,
+      "installation_id": null,
+      "slug": "helm-authority-control-updater"
+    },
+    "merger": {
+      "app_id": null,
+      "installation_id": null,
+      "slug": "helm-authority-merger"
+    },
+    "observer": {
+      "app_id": 4296957,
+      "installation_id": 146542079,
+      "slug": "helm-authority-observer"
+    }
+  },
+  "enabled": false,
+  "evidence_ledger": {
+    "baseline_main": {
+      "Mindburn-Labs/helm-ai-kernel": "586a5d62239fee43d5e0b251674644ac8a90fc8a"
+    },
+    "bootstrap_pr": 36,
+    "ref": "refs/heads/authority/evidence-v1",
+    "repository": "Mindburn-Labs/.github"
+  },
+  "repositories": [
+    {
+      "authority_changes": "promotion-only",
+      "merge_method": "merge",
+      "repository": "Mindburn-Labs/.github"
+    },
+    {
+      "authority_changes": "not-applicable",
+      "merge_method": "merge",
+      "repository": "Mindburn-Labs/helm-ai-kernel"
+    },
+    {
+      "authority_changes": "proof-only",
+      "merge_method": "merge",
+      "repository": "Mindburn-Labs/contracts-autonomous-release-lab"
+    },
+    {
+      "authority_changes": "interlock-canary-only",
+      "merge_method": "merge",
+      "repository": "Mindburn-Labs/contracts-autonomous-release-canary"
+    }
+  ],
+  "schema": "mindburn.autonomous-release-controller/v1"
+}

@@ -56,21 +56,26 @@ review envelopes and require the immutable parent Kernel to reproduce the
 candidate's `ALLOW` or `DENY` permit byte for byte; a candidate-authored summary
 cannot stand in for reduction evidence.
 The permit workflow has no App secret. It dispatches promotion only for an
-exact next-generation authority change, and the secret-bearing transaction can
-run only from the permanently locked `authority/control-v1` workflow ref.
-Organization rules deny creation, update, and deletion of that ref with no
-bypass actors. Both authority environments disable administrator bypass and
-admit only that ref, so neither a pull request nor mutable `main` can load the
-promoter, observer, or approver credentials.
+exact next-generation authority change. `authority/control-v1` is the
+non-creatable, non-deletable, non-force-push parent control ref. A distinct
+`helm-authority-control-updater` App can make only a parent-to-successor
+non-force CAS after it verifies the parent's durable final receipt; an
+independent observer must verify and durably close the successor before the
+next control state is usable. Neither a pull request nor mutable `main` can
+load the promoter, observer, approver, merger, or control-updater credential.
 Credentialed jobs also bind the pinned token action's live App slug and
 installation ID before use; the approval broker independently checks exact
 repository scope and the persisted GitHub review actor.
 
+This repository currently contains a disabled candidate/proof configuration:
+the controller is `enabled: false`, and the merger and control-updater App IDs
+are unset. Do not describe an autonomous public scope as live until every App,
+environment, ruleset, and bootstrap receipt has been independently read back.
 The enforcing rule is intentionally public-only while GitHub's paid
 private/internal required-workflow entitlement returns an upgrade error.
-Private/internal human approvals remain in place. This code-merge authority is
-not deployment, customer-production, billing, or migration authority; those
-effects require separate bounded permits and receipts.
+Private/internal human approvals therefore remain in place. This code-merge
+authority is not deployment, customer-production, billing, access, or migration
+authority; those effects require separate bounded permits and receipts.
 
 ## Validation
 

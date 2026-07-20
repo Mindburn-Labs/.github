@@ -33,7 +33,6 @@ from wait_for_authority_canary import (
     artifact_for_run,
     extract_attested_permit,
     extract_trusted_context,
-    require_get_forbidden,
     verify_candidate_permit,
     verify_permit_reduction,
     write_model_reviews,
@@ -41,7 +40,7 @@ from wait_for_authority_canary import (
 
 
 EXECUTION_SCHEMA = "mindburn.release-authority-promotion-execution/v2"
-OBSERVER_SCHEMA = "mindburn.release-authority-observer-receipt/v3"
+OBSERVER_SCHEMA = "mindburn.release-authority-observer-receipt/v4"
 AUTHORITY_REPOSITORY = "Mindburn-Labs/.github"
 CANARY_REPOSITORY = "Mindburn-Labs/contracts-autonomous-release-lab"
 CANARY_PULL_REQUEST = 8
@@ -49,6 +48,7 @@ PUBLIC_STABLE_REPOSITORIES = (
     "Mindburn-Labs/.github",
     "Mindburn-Labs/helm-ai-kernel",
     "Mindburn-Labs/contracts-autonomous-release-lab",
+    "Mindburn-Labs/contracts-autonomous-release-canary",
 )
 STABLE_RULESET_WRITE_PROBE = f"/orgs/Mindburn-Labs/rulesets/{STABLE_RULESET_ID}"
 EXECUTION_KEYS = {
@@ -240,11 +240,9 @@ def observe(
     *,
     attestation_token: str,
 ) -> dict[str, Any]:
-    require_get_forbidden(
-        read_client,
-        STABLE_RULESET_WRITE_PROBE,
-        label="observer organization-ruleset write scope",
-    )
+    stable_ruleset = read_client.get_json(STABLE_RULESET_WRITE_PROBE)
+    if stable_ruleset.get("id") != STABLE_RULESET_ID:
+        raise PermitInputError("observer read the wrong stable organization ruleset")
     execution = validate_execution(
         load_json(args.execution, label="promotion execution")
     )
@@ -550,7 +548,9 @@ def observe(
         "stable_effective_repositories": stable_effective_repositories,
         "candidate_ruleset_id": CANDIDATE_RULESET_ID,
         "candidate_workflow_binding_sha": execution["merged_workflow_sha"],
-        "observer_ruleset_write_scope": "denied",
+        "observer_ruleset_entitlement": (
+            "provider_write_entitlement_get_only_immutable_client"
+        ),
         "decision": "ALLOW",
     }
 

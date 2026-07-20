@@ -4,7 +4,11 @@ This runbook is valid only for the transition from authority generation 1 to
 generation 2. Later generations are dispatched by the permit workflow and
 executed only by
 `authority/control-v1:.github/workflows/promote-authority.yml`; the copy on
-mutable `main` is not the credential entrypoint.
+mutable `main` is not the credential entrypoint. `control-v1` is the parent
+control ref, not a permanently frozen program: only the separately scoped
+control-updater App may make a non-force parent-to-successor CAS after a
+durable final receipt, and a separate observer must durably close that successor
+before it becomes usable.
 
 The bootstrap is not a human approval. The only approval inputs are the exact
 generation-1 signed 2-of-2 permit and the fresh generation-2 proof receipts.
@@ -36,8 +40,10 @@ The local credential may execute those inputs but cannot make a DENY acceptable.
   the `authority-promotion` environment. Observer material exists only in
   `authority-observer`; none of these values exists at organization or
   repository Actions scope.
-- Both authority environments use custom branch policies, have administrator
-  bypass disabled, and currently contain zero deployment branch policies.
+- All five authority environments (`authority-observer`, `authority-approval`,
+  `authority-merge`, `authority-promotion`, and `authority-control`) use custom
+  branch policies, have administrator bypass disabled, and currently contain
+  zero deployment branch policies.
   This zero-admission state is required before `prepare`; do not point either
   environment at `main` or the candidate branch.
 - The bootstrap administrator may change `.github` repository settings. After
@@ -49,12 +55,13 @@ The local credential may execute those inputs but cannot make a DENY acceptable.
 ## Close the credential environments
 
 Before `prepare`, set the source-owned no-bypass state and delete every current
-deployment branch policy from both environments. The empty custom-policy set is
-intentional: no workflow can load an App key until `finalize` has locked and
-independently verified the controller.
+deployment branch policy from all five authority environments. The empty
+custom-policy set is intentional: no workflow can load an App key until
+`finalize` has bound and independently verified the parent control ref and its
+successor-only update lane.
 
 ```bash
-for environment in authority-observer authority-promotion; do
+for environment in authority-observer authority-approval authority-merge authority-promotion authority-control; do
   gh api --method PUT \
     "repos/Mindburn-Labs/.github/environments/$environment" \
     -F wait_timer=0 \
@@ -148,27 +155,30 @@ python3 scripts/bootstrap_authority.py finalize \
 `finalize` re-verifies every bound digest, signed permit, and exact-head App
 approval; confirms the public approval cutover remains protected by both the
 workflow and machine-review interlocks; creates
-`authority/control-v1` at the exact reviewed merge SHA behind a staged
-update/deletion ban; adds the no-bypass creation ban; independently reads back
-the ref, workflow file, active rules, and SHA; and only then adds that one
-branch to both credential environments. It then atomically moves
+`authority/control-v1` at the exact reviewed merge SHA behind creation,
+deletion, and non-fast-forward protections; installs the separately scoped
+successor-update lane; independently reads back the ref, workflow file, active
+rules, and SHA; and only then admits that one branch to all credential
+environments. It then atomically moves
 `main` from the exact base SHA to the live PR's current GitHub-generated,
 reviewed two-parent merge commit using an exact `beforeOid`/`afterOid`
 compare-and-swap, and binds both rulesets to the merged `main` SHA. A stale or
 regenerated PR merge fails before the update. It is safe to rerun after an exact
 merge or partial ruleset finalization.
 
-Completion requires all of the following live readbacks:
+Completion requires all of the following live readbacks. This is a bootstrap
+checklist, not a claim that the currently committed disabled configuration has
+already reached this state:
 
 - `.github/main` equals `bootstrap-final.json`'s `merge_sha`;
 - `refs/heads/authority/control-v1` equals that same reviewed merge SHA and
   contains `.github/workflows/promote-authority.yml`;
 - `HELM Immutable Authority Controller` is active for only that ref in only the
-  `.github` repository, has no bypass actors, and denies creation, update, and
-  deletion;
-- `authority-promotion` and `authority-observer` disable administrator bypass,
-  have no required human reviewers, and admit only
-  `authority/control-v1`;
+  `.github` repository, has no bypass actors, and denies creation, deletion,
+  and non-fast-forward updates; `HELM Authority Control Successor` permits the
+  separately scoped updater only through its parent-bound non-force CAS;
+- all five authority environments disable administrator bypass, have no
+  required human reviewers, and admit only `authority/control-v1`;
 - stable ruleset `18924515` is active, has no bypass actors, covers only the
   three proven public repository IDs, and binds the merged workflow on `main`;
 - candidate ruleset `18927405` remains evaluate-only and binds the same merged
@@ -184,6 +194,7 @@ Completion requires all of the following live readbacks:
   reason to remove their human gates.
 
 After the final receipt is persisted and independently copied, revoke the
-temporary bootstrap executor, observer, and approver installation tokens and
-delete any one-time local App PEM copies. Environment-held App keys remain the
-only steady-state credential copies used by Actions.
+temporary bootstrap executor, observer, approver, merger, and control-updater
+installation tokens and delete any one-time local App PEM copies.
+Environment-held App keys remain the only steady-state credential copies used
+by Actions.

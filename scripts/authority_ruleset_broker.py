@@ -26,7 +26,7 @@ STABLE_RULESET_NAME = "HELM Autonomous Release Permit"
 CANDIDATE_RULESET_NAME = "HELM Autonomous Release Permit Candidate Shadow"
 WORKFLOW_PATH = ".github/workflows/ci.yml"
 MAIN_REF = "refs/heads/main"
-CANDIDATE_REPOSITORY_IDS = (
+LEGACY_CANDIDATE_REPOSITORY_IDS = (
     1158479649,
     1159255601,
     1250514808,
@@ -35,10 +35,16 @@ CANDIDATE_REPOSITORY_IDS = (
     1286471668,
     1300498536,
 )
+CANDIDATE_REPOSITORY_IDS = tuple(
+    sorted(
+        (*LEGACY_CANDIDATE_REPOSITORY_IDS, 1250513264, 1282018161, 1301786253)
+    )
+)
 PUBLIC_AUTONOMOUS_REPOSITORY_IDS = (
     1158479649,
     1159255601,
     1300498536,
+    1301786253,
 )
 LEGACY_STABLE_WORKFLOW_SHA = "8500b6549a61a9c1caf7575964132651ffb754c8"
 LEGACY_PARENT_WORKFLOW_SHA = "52a1ef42118e618e811bce48204f4a49a41b8bca"
@@ -159,6 +165,15 @@ def legacy_stable_conditions() -> dict[str, Any]:
     return {
         "ref_name": {"exclude": [], "include": ["~DEFAULT_BRANCH"]},
         "repository_name": {"exclude": [], "include": ["~ALL"]},
+    }
+
+
+def legacy_candidate_conditions() -> dict[str, Any]:
+    return {
+        "ref_name": {"exclude": [], "include": ["~DEFAULT_BRANCH"]},
+        "repository_id": {
+            "repository_ids": list(LEGACY_CANDIDATE_REPOSITORY_IDS),
+        },
     }
 
 
@@ -455,6 +470,7 @@ def transition(args: argparse.Namespace, client: GitHubRulesetClient) -> dict[st
                     kind="candidate",
                     expected_sha=LEGACY_PARENT_WORKFLOW_SHA,
                     expected_ref=LEGACY_WORKFLOW_REF,
+                    expected_coverage=legacy_candidate_conditions(),
                 )
             else:
                 return receipt(
@@ -465,6 +481,7 @@ def transition(args: argparse.Namespace, client: GitHubRulesetClient) -> dict[st
                 candidate,
                 workflow_sha=candidate_sha,
                 workflow_ref=candidate_ref,
+                conditions=expected_conditions("candidate"),
             )
             validate_ruleset(
                 updated.body,
@@ -488,12 +505,14 @@ def transition(args: argparse.Namespace, client: GitHubRulesetClient) -> dict[st
                 candidate,
                 workflow_sha=LEGACY_PARENT_WORKFLOW_SHA,
                 workflow_ref=LEGACY_WORKFLOW_REF,
+                conditions=legacy_candidate_conditions(),
             )
             validate_ruleset(
                 updated.body,
                 kind="candidate",
                 expected_sha=LEGACY_PARENT_WORKFLOW_SHA,
                 expected_ref=LEGACY_WORKFLOW_REF,
+                expected_coverage=legacy_candidate_conditions(),
             )
             return receipt(
                 args.operation, parent_sha, candidate_sha, candidate_ref, None

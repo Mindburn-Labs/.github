@@ -146,6 +146,15 @@ class AuthorityRulesetBrokerTests(unittest.TestCase):
         )
         self.assertNotIn("repository_name", conditions)
 
+    def test_commercial_repositories_are_candidate_only(self) -> None:
+        commercial = {1250513264, 1282018161}
+        candidate = set(MODULE.CANDIDATE_REPOSITORY_IDS)
+        legacy = set(MODULE.LEGACY_CANDIDATE_REPOSITORY_IDS)
+        stable = set(MODULE.PUBLIC_AUTONOMOUS_REPOSITORY_IDS)
+        self.assertLessEqual(commercial, candidate)
+        self.assertTrue(commercial.isdisjoint(legacy))
+        self.assertTrue(commercial.isdisjoint(stable))
+
     def test_advance_observe_rebind_then_activate_preserves_safe_order(self) -> None:
         client = FakeClient(
             ruleset("stable", PARENT_SHA, MODULE.MAIN_REF),
@@ -349,6 +358,7 @@ class AuthorityRulesetBrokerTests(unittest.TestCase):
                 "candidate",
                 MODULE.LEGACY_PARENT_WORKFLOW_SHA,
                 MODULE.LEGACY_WORKFLOW_REF,
+                conditions=MODULE.legacy_candidate_conditions(),
             ),
         )
         bootstrap_args = argparse.Namespace(
@@ -360,6 +370,10 @@ class AuthorityRulesetBrokerTests(unittest.TestCase):
         )
         MODULE.transition(bootstrap_args, client)
         self.assertEqual(client.puts, [MODULE.CANDIDATE_RULESET_ID])
+        self.assertEqual(
+            client.current[MODULE.CANDIDATE_RULESET_ID]["conditions"],
+            MODULE.expected_conditions("candidate"),
+        )
 
         bootstrap_args.operation = "bootstrap-enforce"
         MODULE.transition(bootstrap_args, client)
@@ -421,6 +435,44 @@ class AuthorityRulesetBrokerTests(unittest.TestCase):
         binding = MODULE.workflow_binding(client.current[MODULE.CANDIDATE_RULESET_ID])
         self.assertEqual(
             (binding["sha"], binding["ref"]), (CANDIDATE_SHA, candidate_ref)
+        )
+
+    def test_bootstrap_stage_restore_stage_is_exactly_retryable(self) -> None:
+        candidate_ref = "refs/heads/codex/autonomous-release-gen2-bootstrap"
+        client = FakeClient(
+            ruleset(
+                "stable",
+                MODULE.LEGACY_STABLE_WORKFLOW_SHA,
+                MODULE.LEGACY_WORKFLOW_REF,
+                enforcement="evaluate",
+                conditions=MODULE.legacy_stable_conditions(),
+            ),
+            ruleset(
+                "candidate",
+                MODULE.LEGACY_PARENT_WORKFLOW_SHA,
+                MODULE.LEGACY_WORKFLOW_REF,
+                conditions=MODULE.legacy_candidate_conditions(),
+            ),
+        )
+        bootstrap_args = argparse.Namespace(
+            operation="bootstrap-stage",
+            parent_sha=MODULE.LEGACY_PARENT_WORKFLOW_SHA,
+            candidate_sha=CANDIDATE_SHA,
+            candidate_ref=candidate_ref,
+            merge_sha=None,
+        )
+        MODULE.transition(bootstrap_args, client)
+        bootstrap_args.operation = "bootstrap-restore"
+        MODULE.transition(bootstrap_args, client)
+        self.assertEqual(
+            client.current[MODULE.CANDIDATE_RULESET_ID]["conditions"],
+            MODULE.legacy_candidate_conditions(),
+        )
+        bootstrap_args.operation = "bootstrap-stage"
+        MODULE.transition(bootstrap_args, client)
+        self.assertEqual(
+            client.current[MODULE.CANDIDATE_RULESET_ID]["conditions"],
+            MODULE.expected_conditions("candidate"),
         )
 
     def test_bootstrap_retry_repairs_confirmation_lost_forward_state(self) -> None:

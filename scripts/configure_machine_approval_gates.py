@@ -19,10 +19,10 @@ from autonomous_release_permit import (
     require_exact_keys,
     require_sha,
 )
+from authority_evidence_ledger import LEDGER_REF, REPOSITORY as LEDGER_REPOSITORY
 from authority_ruleset_broker import (
     API_VERSION,
     ORGANIZATION,
-    PUBLIC_AUTONOMOUS_REPOSITORY_IDS,
     STABLE_RULESET_ID,
     validate_ref,
     validate_ruleset,
@@ -35,13 +35,85 @@ from submit_machine_approval import (
 )
 
 
-BOOTSTRAP_SCHEMA = "mindburn.release-authority-bootstrap/v2"
+BOOTSTRAP_SCHEMA = "mindburn.release-authority-bootstrap/v3"
 CONFIGURATION_SCHEMA = "mindburn.release-authority-machine-gates/v1"
 HUMAN_RULESET_ID = 17911735
 HUMAN_RULESET_NAME = "Mindburn default branch approval gate"
 MACHINE_RULESET_NAME = "HELM Machine Approval Interlock"
+UPDATER_RULESET_NAME = "HELM Exclusive Main Updater"
+PROOF_REF_RULESET_NAME = "HELM Immutable Proof Fixtures"
+EVIDENCE_HISTORY_RULESET_NAME = "HELM Append-Only Evidence History"
+EVIDENCE_UPDATER_RULESET_NAME = "HELM Exclusive Evidence Appender"
 AUTHORITY_REPOSITORY_ID = 1159255601
 KERNEL_REPOSITORY_ID = 1158479649
+LAB_REPOSITORY_ID = 1300498536
+CANARY_REPOSITORY_ID = 1301786253
+LAB_MAIN_SHA = "e183c28646d3b577b3ce472d98e832e6bc668330"
+UPDATE_INTERLOCK_REPOSITORY_IDS = (
+    KERNEL_REPOSITORY_ID,
+    AUTHORITY_REPOSITORY_ID,
+    CANARY_REPOSITORY_ID,
+)
+KERNEL_QUALITY_RULESET_ID = 16024605
+KERNEL_QUALITY_RULESET_NAME = "main protection"
+AUTONOMOUS_REPOSITORIES = (
+    "Mindburn-Labs/.github",
+    "Mindburn-Labs/helm-ai-kernel",
+    "Mindburn-Labs/contracts-autonomous-release-canary",
+)
+ATOMIC_MERGE_SETTINGS = {
+    "allow_merge_commit": True,
+    "allow_squash_merge": False,
+    "allow_rebase_merge": False,
+    "delete_branch_on_merge": False,
+}
+KERNEL_REQUIRED_STATUS_CONTEXTS = (
+    "Quality PR profile",
+    "hygiene",
+    "kernel",
+    "python-sdk",
+    "ts-sdk",
+    "rust-sdk",
+    "java-sdk",
+    "contract-drift",
+    "deployment-smoke",
+    "kind-smoke",
+    "release-smoke",
+    "Coverage and truth",
+    "OpenSSF Scorecard",
+    "CodeQL (go)",
+    "CodeQL (javascript-typescript)",
+    "CodeQL (python)",
+    "CodeQL (java-kotlin)",
+    "Rust audit",
+)
+PROOF_REFS = {
+    "refs/heads/main": LAB_MAIN_SHA,
+    "refs/heads/adversarial/git-lfs-content-substitution": (
+        "627042be00ec9a2eca210caa671ef7f81ba73d39"
+    ),
+    "refs/heads/adversarial/oversized-review-context": (
+        "28078dde81725b24708699f89bc0e5f72cf3e24b"
+    ),
+    "refs/heads/adversarial/patch-boundary-and-json-forgery": (
+        "b4124d6928f2b6f4c2a10e8e4a16bc5359441214"
+    ),
+    "refs/heads/adversarial/self-weakened-makefile": (
+        "a46e2c66222b5e26b98ea00fb35e5bc43d6f7b7a"
+    ),
+    "refs/heads/adversarial/source-instruction-overrides-review": (
+        "b5096f27833cbc853fe780a70052b5f0686005d5"
+    ),
+    "refs/heads/adversarial/symlink-read-boundary": (
+        "89b3050718bc51ccfbc9f528ddcfe1d099a82bcb"
+    ),
+    "refs/heads/adversarial/workflow-token-escalation": (
+        "0573b2dffb10632f0cb38e1eb465c970b82c4a0a"
+    ),
+    "refs/heads/canary/authority-generation": (
+        "2c080470f81d0aaa3235eddf012e2d6d6b770bd1"
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -134,9 +206,16 @@ def load_contract(path: Path) -> dict[str, Any]:
         required={
             "schema",
             "approver",
+            "merger",
             "machine_approval_ruleset",
+            "exclusive_updater_ruleset",
             "human_approval_ruleset",
             "classic_branch_protection",
+            "repository_settings",
+            "kernel_quality_ruleset",
+            "proof_ref_ruleset",
+            "proof_refs",
+            "evidence_ledger",
         },
         label="bootstrap contract",
     )
@@ -154,11 +233,18 @@ def load_contract(path: Path) -> dict[str, Any]:
     }:
         raise PermitInputError("bootstrap contract names the wrong approver")
 
+    merger_app_id = validate_merger(value["merger"])
+
     machine = value["machine_approval_ruleset"]
     if not isinstance(machine, dict):
         raise PermitInputError("machine approval ruleset contract must be an object")
     if machine != machine_ruleset_payload():
         raise PermitInputError("machine approval ruleset contract is not exact")
+    updater = value["exclusive_updater_ruleset"]
+    if not isinstance(updater, dict) or updater != updater_ruleset_payload(
+        merger_app_id
+    ):
+        raise PermitInputError("exclusive updater ruleset contract is not exact")
 
     human = value["human_approval_ruleset"]
     if not isinstance(human, dict):
@@ -194,7 +280,7 @@ def load_contract(path: Path) -> dict[str, Any]:
         raise PermitInputError(
             "bootstrap retires the wrong CODEOWNER-gated repositories"
         )
-    if set(remove) - set(PUBLIC_AUTONOMOUS_REPOSITORY_IDS):
+    if set(remove) - set(UPDATE_INTERLOCK_REPOSITORY_IDS):
         raise PermitInputError(
             "bootstrap retirement is outside public machine coverage"
         )
@@ -221,7 +307,76 @@ def load_contract(path: Path) -> dict[str, Any]:
         or reviews.get("required_approving_review_count") != 1
     ):
         raise PermitInputError("classic protection must retain one required approval")
+
+    expected_repository_settings = {
+        repository: ATOMIC_MERGE_SETTINGS for repository in AUTONOMOUS_REPOSITORIES
+    }
+    if value["repository_settings"] != expected_repository_settings:
+        raise PermitInputError("bootstrap repository settings contract is not exact")
+    if value["kernel_quality_ruleset"] != {
+        "id": KERNEL_QUALITY_RULESET_ID,
+        "name": KERNEL_QUALITY_RULESET_NAME,
+        "after": kernel_quality_ruleset_payload(),
+    }:
+        raise PermitInputError("bootstrap Kernel quality ruleset contract is not exact")
+    if value["proof_ref_ruleset"] != proof_ref_ruleset_payload():
+        raise PermitInputError("bootstrap proof-ref ruleset contract is not exact")
+    if value["proof_refs"] != PROOF_REFS:
+        raise PermitInputError("bootstrap proof-ref identities are not exact")
+    expected_ledger = {
+        "repository": LEDGER_REPOSITORY,
+        "ref": LEDGER_REF,
+        "history_ruleset": evidence_history_ruleset_payload(),
+        "exclusive_updater_ruleset": evidence_updater_ruleset_payload(
+            merger_app_id
+        ),
+    }
+    if value["evidence_ledger"] != expected_ledger:
+        raise PermitInputError("bootstrap evidence ledger contract is not exact")
     return value
+
+
+def validate_merger(value: Any) -> int | None:
+    if not isinstance(value, dict):
+        raise PermitInputError("bootstrap merger App must be an object")
+    require_exact_keys(
+        value,
+        required={
+            "enabled",
+            "app_id",
+            "installation_id",
+            "login",
+            "slug",
+            "organization",
+            "permission",
+        },
+        label="bootstrap merger App",
+    )
+    expected = {
+        "login": "helm-authority-merger[bot]",
+        "slug": "helm-authority-merger",
+        "organization": ORGANIZATION,
+        "permission": {"contents": "write", "pull_requests": "read"},
+    }
+    if any(
+        value.get(key) != expected_value for key, expected_value in expected.items()
+    ):
+        raise PermitInputError("bootstrap contract names the wrong merger App")
+    enabled = value.get("enabled")
+    if not isinstance(enabled, bool):
+        raise PermitInputError("bootstrap merger enabled flag must be boolean")
+    app_id = value.get("app_id")
+    installation_id = value.get("installation_id")
+    if not enabled:
+        if app_id is not None or installation_id is not None:
+            raise PermitInputError("disabled merger App cannot retain authority IDs")
+        return None
+    for item, label in ((app_id, "app_id"), (installation_id, "installation_id")):
+        if not isinstance(item, int) or isinstance(item, bool) or item <= 0:
+            raise PermitInputError(f"bootstrap merger {label} must be positive")
+    if app_id in {APPROVER_APP_ID, 4296957, 4296928}:
+        raise PermitInputError("merger App must be independent from all other roles")
+    return app_id
 
 
 def machine_ruleset_payload() -> dict[str, Any]:
@@ -233,7 +388,7 @@ def machine_ruleset_payload() -> dict[str, Any]:
         "conditions": {
             "ref_name": {"exclude": [], "include": ["~DEFAULT_BRANCH"]},
             "repository_id": {
-                "repository_ids": list(PUBLIC_AUTONOMOUS_REPOSITORY_IDS),
+                "repository_ids": list(UPDATE_INTERLOCK_REPOSITORY_IDS),
             },
         },
         "rules": [
@@ -247,10 +402,178 @@ def machine_ruleset_payload() -> dict[str, Any]:
                     "require_code_owner_review": False,
                     "require_last_push_approval": True,
                     "required_approving_review_count": 1,
-                    "required_review_thread_resolution": True,
+                    "required_review_thread_resolution": False,
                     "required_reviewers": [],
                 },
             },
+        ],
+    }
+
+
+def updater_ruleset_payload(merger_app_id: int | None) -> dict[str, Any]:
+    bypass_actors = (
+        []
+        if merger_app_id is None
+        else [
+            {
+                "actor_id": merger_app_id,
+                "actor_type": "Integration",
+                "bypass_mode": "always",
+            }
+        ]
+    )
+    return {
+        "name": UPDATER_RULESET_NAME,
+        "target": "branch",
+        "enforcement": "active",
+        "bypass_actors": bypass_actors,
+        "conditions": {
+            "ref_name": {"exclude": [], "include": ["~DEFAULT_BRANCH"]},
+            "repository_id": {
+                "repository_ids": list(UPDATE_INTERLOCK_REPOSITORY_IDS),
+            },
+        },
+        "rules": [
+            {
+                "type": "update",
+                "parameters": {"update_allows_fetch_and_merge": False},
+            }
+        ],
+    }
+
+
+def proof_ref_ruleset_payload() -> dict[str, Any]:
+    staged = proof_ref_ruleset_staged_payload()
+    return {
+        **staged,
+        "rules": [{"type": "creation"}, *staged["rules"]],
+    }
+
+
+def proof_ref_ruleset_staged_payload() -> dict[str, Any]:
+    return {
+        "name": PROOF_REF_RULESET_NAME,
+        "target": "branch",
+        "enforcement": "active",
+        "bypass_actors": [],
+        "conditions": {
+            "ref_name": {
+                "exclude": [],
+                "include": list(PROOF_REFS),
+            },
+            "repository_id": {"repository_ids": [LAB_REPOSITORY_ID]},
+        },
+        "rules": [
+            {"type": "deletion"},
+            {"type": "non_fast_forward"},
+            {
+                "type": "update",
+                "parameters": {"update_allows_fetch_and_merge": False},
+            },
+        ],
+    }
+
+
+def evidence_history_ruleset_payload() -> dict[str, Any]:
+    return {
+        "name": EVIDENCE_HISTORY_RULESET_NAME,
+        "target": "branch",
+        "enforcement": "active",
+        "bypass_actors": [],
+        "conditions": {
+            "ref_name": {"exclude": [], "include": [LEDGER_REF]},
+            "repository_id": {"repository_ids": [AUTHORITY_REPOSITORY_ID]},
+        },
+        "rules": [
+            {"type": "creation"},
+            {"type": "deletion"},
+            {"type": "non_fast_forward"},
+        ],
+    }
+
+
+def evidence_updater_ruleset_payload(
+    merger_app_id: int | None,
+) -> dict[str, Any]:
+    bypass_actors = (
+        []
+        if merger_app_id is None
+        else [
+            {
+                "actor_id": merger_app_id,
+                "actor_type": "Integration",
+                "bypass_mode": "always",
+            }
+        ]
+    )
+    return {
+        "name": EVIDENCE_UPDATER_RULESET_NAME,
+        "target": "branch",
+        "enforcement": "active",
+        "bypass_actors": bypass_actors,
+        "conditions": {
+            "ref_name": {"exclude": [], "include": [LEDGER_REF]},
+            "repository_id": {"repository_ids": [AUTHORITY_REPOSITORY_ID]},
+        },
+        "rules": [
+            {
+                "type": "update",
+                "parameters": {"update_allows_fetch_and_merge": False},
+            }
+        ],
+    }
+
+
+def kernel_status_rule() -> dict[str, Any]:
+    return {
+        "type": "required_status_checks",
+        "parameters": {
+            "strict_required_status_checks_policy": True,
+            "do_not_enforce_on_create": False,
+            "required_status_checks": [
+                {"context": context} for context in KERNEL_REQUIRED_STATUS_CONTEXTS
+            ],
+        },
+    }
+
+
+def kernel_quality_ruleset_payload() -> dict[str, Any]:
+    return {
+        "name": KERNEL_QUALITY_RULESET_NAME,
+        "target": "branch",
+        "enforcement": "active",
+        "bypass_actors": [],
+        "conditions": {
+            "ref_name": {"exclude": [], "include": ["refs/heads/main"]},
+        },
+        "rules": [kernel_status_rule()],
+    }
+
+
+def kernel_quality_ruleset_legacy_payload() -> dict[str, Any]:
+    return {
+        **kernel_quality_ruleset_payload(),
+        "rules": [
+            {
+                "type": "pull_request",
+                "parameters": {
+                    "required_approving_review_count": 0,
+                    "dismiss_stale_reviews_on_push": True,
+                    "required_reviewers": [],
+                    "require_code_owner_review": False,
+                    "dismissal_restriction": {
+                        "enabled": False,
+                        "allowed_actors": [],
+                    },
+                    "require_last_push_approval": False,
+                    "required_review_thread_resolution": True,
+                    "allowed_merge_methods": ["merge", "squash", "rebase"],
+                },
+            },
+            {"type": "required_linear_history"},
+            kernel_status_rule(),
+            {"type": "deletion"},
+            {"type": "non_fast_forward"},
         ],
     }
 
@@ -328,6 +651,39 @@ def normalize_classic_protection(protection: dict[str, Any]) -> dict[str, Any]:
         "required_status_checks": protection.get("required_status_checks"),
         "restrictions": protection.get("restrictions"),
     }
+
+
+def ensure_classic_protection_without_comment_gate(
+    client: GitHubAdminClient,
+    *,
+    path: str,
+    expected: dict[str, Any],
+) -> dict[str, Any]:
+    response = client.request("GET", path)
+    protection = require_object(response, label="classic branch protection")
+    state = normalize_classic_protection(protection)
+    legacy = {**expected, "required_conversation_resolution": True}
+    if state == legacy:
+        if not response.etag:
+            raise PermitInputError("classic branch protection GET returned no ETag")
+        refetched = client.request("GET", path)
+        if refetched.body != protection or refetched.etag != response.etag:
+            raise PermitInputError("classic branch protection changed before migration")
+        client.request(
+            "DELETE",
+            f"{path}/required_conversation_resolution",
+            if_match=response.etag,
+        )
+        protection = require_object(
+            client.request("GET", path),
+            label="confirmed classic branch protection",
+        )
+        state = normalize_classic_protection(protection)
+    if state != expected:
+        raise PermitInputError(
+            "classic branch protection did not retain its machine approval interlock"
+        )
+    return protection
 
 
 def validate_approval(
@@ -458,7 +814,10 @@ def verify_live_approval(
         raise PermitInputError("merged approval graph drifted from the permit")
 
 
-def ensure_machine_ruleset(client: GitHubAdminClient) -> dict[str, Any]:
+def ensure_machine_ruleset(
+    client: GitHubAdminClient,
+) -> dict[str, Any]:
+    expected = machine_ruleset_payload()
     response = client.request("GET", f"/orgs/{ORGANIZATION}/rulesets?per_page=100")
     if not isinstance(response.body, list):
         raise PermitInputError("GitHub ruleset list is malformed")
@@ -474,7 +833,7 @@ def ensure_machine_ruleset(client: GitHubAdminClient) -> dict[str, Any]:
             client.request(
                 "POST",
                 f"/orgs/{ORGANIZATION}/rulesets",
-                payload=machine_ruleset_payload(),
+                payload=expected,
             ),
             label="created machine approval ruleset",
         )
@@ -487,8 +846,292 @@ def ensure_machine_ruleset(client: GitHubAdminClient) -> dict[str, Any]:
         client.request("GET", f"/orgs/{ORGANIZATION}/rulesets/{ruleset_id}"),
         label="machine approval ruleset",
     )
-    if controlled_ruleset(current) != machine_ruleset_payload():
+    if controlled_ruleset(current) != expected:
         raise PermitInputError("machine approval ruleset is not exact and active")
+    return current
+
+
+def ensure_named_organization_ruleset(
+    client: GitHubAdminClient,
+    *,
+    name: str,
+    expected: dict[str, Any],
+    create: bool = True,
+) -> dict[str, Any]:
+    response = client.request("GET", f"/orgs/{ORGANIZATION}/rulesets?per_page=100")
+    if not isinstance(response.body, list):
+        raise PermitInputError("GitHub ruleset list is malformed")
+    matches = [
+        item
+        for item in response.body
+        if isinstance(item, dict) and item.get("name") == name
+    ]
+    if len(matches) > 1:
+        raise PermitInputError(f"multiple organization rulesets named {name} exist")
+    if not matches:
+        if not create:
+            raise PermitInputError(f"required organization ruleset {name} is absent")
+        created = require_object(
+            client.request(
+                "POST",
+                f"/orgs/{ORGANIZATION}/rulesets",
+                payload=expected,
+            ),
+            label=f"created {name} ruleset",
+        )
+        ruleset_id = created.get("id")
+    else:
+        ruleset_id = matches[0].get("id")
+    if not isinstance(ruleset_id, int) or isinstance(ruleset_id, bool) or ruleset_id <= 0:
+        raise PermitInputError(f"{name} ruleset ID is invalid")
+    current = require_object(
+        client.request("GET", f"/orgs/{ORGANIZATION}/rulesets/{ruleset_id}"),
+        label=f"{name} ruleset",
+    )
+    if controlled_ruleset(current) != expected:
+        raise PermitInputError(f"{name} ruleset is not exact and active")
+    return current
+
+
+def ensure_evidence_ledger_rulesets(
+    client: GitHubAdminClient,
+    *,
+    merger_app_id: int,
+    expected_head_sha: str,
+    allow_advanced: bool,
+) -> dict[str, Any]:
+    expected_head_sha = require_sha(
+        expected_head_sha,
+        label="evidence ledger bootstrap head SHA",
+        length=40,
+    )
+    ref_path = LEDGER_REF.removeprefix("refs/")
+
+    def observed_head() -> str:
+        ref = require_object(
+            client.request("GET", f"/repos/{LEDGER_REPOSITORY}/git/ref/{ref_path}"),
+            label="evidence ledger ref",
+        )
+        if ref.get("ref") != LEDGER_REF or not isinstance(ref.get("object"), dict):
+            raise PermitInputError("evidence ledger ref identity drifted")
+        return require_sha(
+            ref["object"].get("sha"), label="evidence ledger head SHA", length=40
+        )
+
+    initial_head_sha = observed_head()
+    advanced = initial_head_sha != expected_head_sha
+    if advanced and not allow_advanced:
+        raise PermitInputError("evidence ledger moved before its authority lock")
+    updater = ensure_named_organization_ruleset(
+        client,
+        name=EVIDENCE_UPDATER_RULESET_NAME,
+        expected=evidence_updater_ruleset_payload(merger_app_id),
+        create=not advanced,
+    )
+    if observed_head() != initial_head_sha:
+        raise PermitInputError("evidence ledger moved while installing updater lock")
+    history = ensure_named_organization_ruleset(
+        client,
+        name=EVIDENCE_HISTORY_RULESET_NAME,
+        expected=evidence_history_ruleset_payload(),
+        create=not advanced,
+    )
+    if observed_head() != initial_head_sha:
+        raise PermitInputError("evidence ledger moved while installing history lock")
+    return {
+        "ref": LEDGER_REF,
+        "head_sha": initial_head_sha,
+        "history_ruleset_id": history["id"],
+        "exclusive_updater_ruleset_id": updater["id"],
+    }
+
+
+def ensure_updater_ruleset(
+    client: GitHubAdminClient,
+    *,
+    merger_app_id: int,
+) -> dict[str, Any]:
+    expected = updater_ruleset_payload(merger_app_id)
+    response = client.request("GET", f"/orgs/{ORGANIZATION}/rulesets?per_page=100")
+    if not isinstance(response.body, list):
+        raise PermitInputError("GitHub ruleset list is malformed")
+    matches = [
+        item
+        for item in response.body
+        if isinstance(item, dict) and item.get("name") == UPDATER_RULESET_NAME
+    ]
+    if len(matches) > 1:
+        raise PermitInputError("multiple exclusive updater rulesets exist")
+    if not matches:
+        created = require_object(
+            client.request(
+                "POST",
+                f"/orgs/{ORGANIZATION}/rulesets",
+                payload=expected,
+            ),
+            label="created exclusive updater ruleset",
+        )
+        ruleset_id = created.get("id")
+    else:
+        ruleset_id = matches[0].get("id")
+    if not isinstance(ruleset_id, int) or ruleset_id <= 0:
+        raise PermitInputError("exclusive updater ruleset ID is invalid")
+    current = require_object(
+        client.request("GET", f"/orgs/{ORGANIZATION}/rulesets/{ruleset_id}"),
+        label="exclusive updater ruleset",
+    )
+    if controlled_ruleset(current) != expected:
+        raise PermitInputError("exclusive updater ruleset is not exact and active")
+    return current
+
+
+def ensure_proof_ref_ruleset(client: GitHubAdminClient) -> dict[str, Any]:
+    repository = "Mindburn-Labs/contracts-autonomous-release-lab"
+    def verify_refs() -> None:
+        for ref, expected_sha in PROOF_REFS.items():
+            branch = ref.removeprefix("refs/heads/")
+            live = require_object(
+                client.request("GET", f"/repos/{repository}/git/ref/heads/{branch}"),
+                label=f"proof fixture {ref}",
+            )
+            object_value = live.get("object")
+            if (
+                live.get("ref") != ref
+                or not isinstance(object_value, dict)
+                or object_value.get("sha") != expected_sha
+            ):
+                raise PermitInputError(f"proof fixture {ref} drifted before lock")
+
+    verify_refs()
+    expected = proof_ref_ruleset_payload()
+    staged = proof_ref_ruleset_staged_payload()
+    response = client.request("GET", f"/orgs/{ORGANIZATION}/rulesets?per_page=100")
+    if not isinstance(response.body, list):
+        raise PermitInputError("GitHub ruleset list is malformed")
+    matches = [
+        item
+        for item in response.body
+        if isinstance(item, dict) and item.get("name") == PROOF_REF_RULESET_NAME
+    ]
+    if len(matches) > 1:
+        raise PermitInputError("multiple immutable proof-ref rulesets exist")
+    if not matches:
+        created = require_object(
+            client.request(
+                "POST",
+                f"/orgs/{ORGANIZATION}/rulesets",
+                payload=staged,
+            ),
+            label="created staged immutable proof-ref ruleset",
+        )
+        ruleset_id = created.get("id")
+    else:
+        ruleset_id = matches[0].get("id")
+    if not isinstance(ruleset_id, int) or ruleset_id <= 0:
+        raise PermitInputError("immutable proof-ref ruleset ID is invalid")
+    path = f"/orgs/{ORGANIZATION}/rulesets/{ruleset_id}"
+    current_response = client.request("GET", path)
+    current = require_object(current_response, label="immutable proof-ref ruleset")
+    state = controlled_ruleset(current)
+    if state == expected:
+        verify_refs()
+        return current
+    if state != staged:
+        raise PermitInputError("immutable proof-ref ruleset is outside staged/final states")
+    verify_refs()
+    if not current_response.etag:
+        raise PermitInputError("staged immutable proof-ref ruleset GET returned no ETag")
+    refetched = client.request("GET", path)
+    if refetched.body != current or refetched.etag != current_response.etag:
+        raise PermitInputError("immutable proof-ref ruleset changed before final lock")
+    client.request(
+        "PUT",
+        path,
+        payload=expected,
+        if_match=current_response.etag,
+    )
+    current = require_object(
+        client.request("GET", path),
+        label="final immutable proof-ref ruleset",
+    )
+    if controlled_ruleset(current) != expected:
+        raise PermitInputError("immutable proof-ref ruleset is not exact and active")
+    verify_refs()
+    return current
+
+
+def ensure_atomic_merge_repository_settings(
+    client: GitHubAdminClient,
+) -> list[dict[str, Any]]:
+    receipts: list[dict[str, Any]] = []
+    for repository in AUTONOMOUS_REPOSITORIES:
+        path = f"/repos/{repository}"
+        before = require_object(
+            client.request("GET", path),
+            label=f"{repository} repository settings",
+        )
+        before_settings = {key: before.get(key) for key in ATOMIC_MERGE_SETTINGS}
+        if before_settings != ATOMIC_MERGE_SETTINGS:
+            updated = require_object(
+                client.request("PATCH", path, payload=ATOMIC_MERGE_SETTINGS),
+                label=f"updated {repository} repository settings",
+            )
+            if {
+                key: updated.get(key) for key in ATOMIC_MERGE_SETTINGS
+            } != ATOMIC_MERGE_SETTINGS:
+                raise PermitInputError(
+                    f"{repository} did not accept exact atomic merge settings"
+                )
+        after = require_object(
+            client.request("GET", path),
+            label=f"confirmed {repository} repository settings",
+        )
+        after_settings = {key: after.get(key) for key in ATOMIC_MERGE_SETTINGS}
+        if after_settings != ATOMIC_MERGE_SETTINGS:
+            raise PermitInputError(
+                f"{repository} repository settings drifted after update"
+            )
+        receipts.append(
+            {
+                "repository": repository,
+                "before": before_settings,
+                "after": after_settings,
+            }
+        )
+    return receipts
+
+
+def ensure_kernel_quality_ruleset(client: GitHubAdminClient) -> dict[str, Any]:
+    path = f"/repos/Mindburn-Labs/helm-ai-kernel/rulesets/{KERNEL_QUALITY_RULESET_ID}"
+    current_response = client.request("GET", path)
+    current = require_object(current_response, label="Kernel quality ruleset")
+    if (
+        current.get("id") != KERNEL_QUALITY_RULESET_ID
+        or current.get("name") != KERNEL_QUALITY_RULESET_NAME
+    ):
+        raise PermitInputError("GitHub returned the wrong Kernel quality ruleset")
+    state = controlled_ruleset(current)
+    legacy = kernel_quality_ruleset_legacy_payload()
+    expected = kernel_quality_ruleset_payload()
+    if state == legacy:
+        if not current_response.etag:
+            raise PermitInputError("Kernel quality ruleset GET returned no ETag")
+        refetched = client.request("GET", path)
+        if refetched.body != current or refetched.etag != current_response.etag:
+            raise PermitInputError("Kernel quality ruleset changed before migration")
+        client.request(
+            "PUT",
+            path,
+            payload=expected,
+            if_match=current_response.etag,
+        )
+        current = require_object(
+            client.request("GET", path),
+            label="confirmed Kernel quality ruleset",
+        )
+        state = controlled_ruleset(current)
+    if state != expected:
+        raise PermitInputError("Kernel quality ruleset is outside resumable states")
     return current
 
 
@@ -504,6 +1147,11 @@ def configure_machine_approval_gates(
         length=40,
     )
     contract = load_contract(args.contract)
+    merger_app_id = validate_merger(contract["merger"])
+    if merger_app_id is None:
+        raise PermitInputError(
+            "merger App is disabled; machine-gate cutover remains fail-closed"
+        )
     approval = validate_approval(
         args.approval_receipt,
         candidate_sha=approved_head_sha,
@@ -527,21 +1175,29 @@ def configure_machine_approval_gates(
         expected_ref=candidate_ref,
     )
 
+    evidence_ledger = ensure_evidence_ledger_rulesets(
+        client,
+        merger_app_id=merger_app_id,
+        expected_head_sha=approved_head_sha,
+        allow_advanced=bool(getattr(args, "allow_merged_resume", False)),
+    )
+    proof_refs = ensure_proof_ref_ruleset(client)
     machine = ensure_machine_ruleset(client)
     machine_id = machine["id"]
+    updater = ensure_updater_ruleset(client, merger_app_id=merger_app_id)
+    updater_id = updater["id"]
+    repository_settings = ensure_atomic_merge_repository_settings(client)
+    kernel_quality = ensure_kernel_quality_ruleset(client)
 
     classic = contract["classic_branch_protection"]
     branch_path = (
         f"/repos/{classic['repository']}/branches/{classic['branch']}/protection"
     )
-    protection = require_object(
-        client.request("GET", branch_path),
-        label="classic branch protection",
+    ensure_classic_protection_without_comment_gate(
+        client,
+        path=branch_path,
+        expected=classic["expected"],
     )
-    if normalize_classic_protection(protection) != classic["expected"]:
-        raise PermitInputError(
-            "classic branch protection did not retain its approval interlock"
-        )
 
     human_path = f"/orgs/{ORGANIZATION}/rulesets/{HUMAN_RULESET_ID}"
     human_response = client.request("GET", human_path)
@@ -568,12 +1224,28 @@ def configure_machine_approval_gates(
     if human_state != after_human:
         raise PermitInputError("human ruleset is outside the exact before/after states")
 
+    # Merge-method and ruleset mutations can cause GitHub to recompute an open
+    # pull request's merge candidate. Rebind the approval to the exact graph
+    # after every cutover mutation before emitting an authority receipt.
+    verify_live_approval(
+        client,
+        approval,
+        approved_head_sha=approved_head_sha,
+        allow_merged_resume=bool(getattr(args, "allow_merged_resume", False)),
+    )
+
     return {
         "schema": CONFIGURATION_SCHEMA,
         "machine_workflow_ruleset_id": STABLE_RULESET_ID,
         "machine_workflow_sha": candidate_sha,
         "machine_workflow_ref": candidate_ref,
         "machine_approval_ruleset_id": machine_id,
+        "proof_ref_ruleset_id": proof_refs["id"],
+        "evidence_ledger": evidence_ledger,
+        "exclusive_updater_ruleset_id": updater_id,
+        "exclusive_updater_app_id": merger_app_id,
+        "repository_settings": repository_settings,
+        "kernel_quality_ruleset_id": kernel_quality["id"],
         "machine_approval_review_id": approval["review_id"],
         "machine_approval_head_sha": approved_head_sha,
         "approver_login": APPROVER_LOGIN,

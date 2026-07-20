@@ -19,38 +19,46 @@ class AuthorityPromotionWorkflowTests(unittest.TestCase):
         self.assertIn('test "$GITHUB_SHA" = "$GITHUB_WORKFLOW_SHA"', workflow)
         self.assertIn("environment: authority-promotion", workflow)
         self.assertIn("environment: authority-observer", workflow)
+        self.assertIn("environment: authority-control", workflow)
         self.assertIn("HELM_AUTHORITY_PROMOTER_PRIVATE_KEY", workflow)
         self.assertEqual(workflow.count("HELM_AUTHORITY_PROMOTER_PRIVATE_KEY"), 5)
         self.assertIn("HELM_AUTHORITY_OBSERVER_PRIVATE_KEY", workflow)
-        self.assertEqual(workflow.count("HELM_AUTHORITY_OBSERVER_PRIVATE_KEY"), 2)
+        self.assertEqual(workflow.count("HELM_AUTHORITY_OBSERVER_PRIVATE_KEY"), 4)
         self.assertIn("HELM_AUTHORITY_APPROVER_PRIVATE_KEY", workflow)
-        self.assertEqual(workflow.count("HELM_AUTHORITY_APPROVER_PRIVATE_KEY"), 1)
+        self.assertEqual(workflow.count("HELM_AUTHORITY_APPROVER_PRIVATE_KEY"), 2)
+        self.assertEqual(workflow.count("HELM_AUTHORITY_MERGER_PRIVATE_KEY"), 8)
+        self.assertEqual(
+            workflow.count("HELM_AUTHORITY_CONTROL_UPDATER_PRIVATE_KEY"), 1
+        )
         self.assertEqual(workflow.count("Bind exact promoter App identity"), 5)
-        self.assertEqual(workflow.count("Bind exact observer App identity"), 2)
-        self.assertEqual(workflow.count("Bind exact approval App identity"), 1)
+        self.assertEqual(workflow.count("Bind exact observer App identity"), 4)
+        self.assertEqual(workflow.count("Bind exact approval App identity"), 2)
+        self.assertEqual(workflow.count("Bind exact merger App identity"), 2)
+        self.assertEqual(workflow.count("Bind exact control-updater App identity"), 1)
         self.assertEqual(
             workflow.count("action.yml defines client-id and deprecates app-id"),
-            8,
+            7,
         )
-        self.assertEqual(workflow.count("client-id:"), 8)
+        self.assertEqual(workflow.count("client-id:"), 20)
         self.assertNotIn("app-id:", workflow)
         self.assertEqual(workflow.count('= "helm-authority-promoter"'), 5)
-        self.assertEqual(workflow.count('= "helm-authority-observer"'), 2)
+        self.assertEqual(workflow.count('= "helm-authority-observer"'), 4)
+        self.assertEqual(workflow.count('= "helm-authority-control-updater"'), 1)
         self.assertEqual(workflow.count('= "146541790"'), 5)
-        self.assertEqual(workflow.count('= "146542079"'), 2)
+        self.assertEqual(workflow.count('= "146542079"'), 4)
         self.assertEqual(workflow.count('= "146576964"'), 1)
         self.assertEqual(
             workflow.count("permission-organization-administration: write"),
-            5,
+            9,
         )
         self.assertIn(
-            "observer token deliberately omits organization Administration",
+            "GitHub requires organization Administration write even for ruleset GET",
             workflow,
         )
         self.assertIn("permission-actions: read", workflow)
         self.assertIn("permission-attestations: read", workflow)
         self.assertIn("permission-pull-requests: write", workflow)
-        self.assertNotIn("permission-contents: write", workflow)
+        self.assertEqual(workflow.count("permission-contents: write"), 9)
         merge_job = workflow[workflow.index("  merge:") : workflow.index("  rebind:")]
         self.assertIn("contents: write", merge_job)
         self.assertNotIn("HELM_AUTHORITY_PROMOTER_PRIVATE_KEY", merge_job)
@@ -58,15 +66,20 @@ class AuthorityPromotionWorkflowTests(unittest.TestCase):
         observer = (ROOT / "scripts" / "observe_authority_promotion.py").read_text(
             encoding="utf-8",
         )
-        observer_jobs = workflow[
-            workflow.index("  observe_pre_activation:") : workflow.index("  activate:")
-        ] + workflow[
-            workflow.index("  observe_final:") : workflow.index("  recover:")
-        ]
-        self.assertNotIn(
-            "permission-organization-administration",
-            observer_jobs,
+        observer_jobs = (
+            workflow[
+                workflow.index("  observe_pre_activation:") : workflow.index(
+                    "  activate:"
+                )
+            ]
+            + workflow[
+                workflow.index("  observe_final:") : workflow.index(
+                    "  persist_promotion_final:"
+                )
+            ]
         )
+        self.assertIn("permission-organization-administration: write", observer_jobs)
+        self.assertNotIn("permission-contents: write", observer_jobs)
         stage_job = workflow[workflow.index("  stage:") : workflow.index("  merge:")]
         self.assertIn("pull-requests: read", stage_job)
         self.assertNotIn('"PUT"', observer)
@@ -125,7 +138,7 @@ class AuthorityPromotionWorkflowTests(unittest.TestCase):
         )
         self.assertIn('git check-ref-format "$candidate_ref"', workflow)
         self.assertNotIn('--candidate-ref "${{', workflow)
-        self.assertEqual(workflow.count('--candidate-ref "$CANDIDATE_REF"'), 6)
+        self.assertEqual(workflow.count('--candidate-ref "$CANDIDATE_REF"'), 7)
         self.assertIn(
             '--tree-sha "${{ needs.verify-candidate.outputs.candidate_tree_sha }}"',
             workflow,
@@ -157,7 +170,8 @@ class AuthorityPromotionWorkflowTests(unittest.TestCase):
             workflow,
         )
         self.assertNotIn('test "$parent_sha" = "$GITHUB_SHA"', workflow)
-        self.assertNotIn("ref: ${{ github.sha }}", workflow)
+        promotion_jobs = workflow[workflow.index("  verify-candidate:") :]
+        self.assertNotIn("ref: ${{ github.sha }}", promotion_jobs)
         self.assertIn(
             "ref: ${{ steps.metadata.outputs.parent_sha }}",
             workflow,
@@ -178,8 +192,48 @@ class AuthorityPromotionWorkflowTests(unittest.TestCase):
             "Main is outside the exact parent/ratified-merge states",
             workflow,
         )
-        self.assertNotIn("path: candidate-kernel", workflow)
-        self.assertNotIn("candidate-permit-verify", workflow)
+        self.assertEqual(workflow.count("path: candidate-kernel"), 2)
+        self.assertEqual(workflow.count("candidate-permit-verify"), 4)
+        self.assertEqual(workflow.count("--candidate-kernel-verifier"), 2)
+        self.assertIn("verify-kernel-transition", workflow)
+
+    def test_promotion_recovery_is_ledger_first_and_phase_ordered(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "promote-authority.yml").read_text(
+            encoding="utf-8",
+        )
+        self.assertIn("ledger_generation:", workflow)
+        self.assertIn("ledger_merge_sha:", workflow)
+        self.assertNotIn(
+            '"promotions/generation-${{ inputs.ledger_generation }}', workflow
+        )
+        self.assertIn(
+            '"promotions/generation-$LEDGER_GENERATION/$LEDGER_MERGE_SHA/intent"',
+            workflow,
+        )
+        reconcile = workflow[
+            workflow.index("  reconcile:") : workflow.index("  stage:")
+        ]
+        self.assertIn("- persist_promotion_intent", reconcile)
+        merge = workflow[
+            workflow.index("  merge:") : workflow.index("  persist_promotion_merged:")
+        ]
+        self.assertIn("- persist_promotion_intent", merge)
+        rebind = workflow[
+            workflow.index("  rebind:") : workflow.index("  observe_pre_activation:")
+        ]
+        self.assertIn("- persist_promotion_merged", rebind)
+        final = workflow[
+            workflow.index("  persist_promotion_final:") : workflow.index("  recover:")
+        ]
+        self.assertIn("Verify final observer provenance before persistence", final)
+        self.assertIn("--phase final", final)
+        recover = workflow[workflow.index("  recover:") :]
+        self.assertNotIn("persist_promotion_final.result", recover)
+        self.assertNotIn("gh api /installation |", workflow)
+        self.assertGreaterEqual(
+            workflow.count("gh api /installation/repositories?per_page=100"),
+            5,
+        )
 
     def test_all_external_actions_are_commit_pinned(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "promote-authority.yml").read_text(

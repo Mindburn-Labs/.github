@@ -24,13 +24,31 @@ CONTROL_SCHEMA = "mindburn.release-control-plane/v2"
 AUTHORITY_REPOSITORY = "Mindburn-Labs/.github"
 AUTHORITY_REPOSITORY_ID = 1159255601
 LAB_REPOSITORY = "Mindburn-Labs/contracts-autonomous-release-lab"
-ENVIRONMENT_NAMES = {"authority-observer", "authority-promotion"}
+LAB_BASE_SHA = "e183c28646d3b577b3ce472d98e832e6bc668330"
+ENVIRONMENT_NAMES = {
+    "authority-observer",
+    "authority-approval",
+    "authority-merge",
+    "authority-promotion",
+    "authority-control",
+}
 CONTROL_BRANCH = "authority/control-v1"
 CONTROL_REF = f"refs/heads/{CONTROL_BRANCH}"
 CONTROL_WORKFLOW_PATH = ".github/workflows/promote-authority.yml"
 CONTROL_RULESET_NAME = "HELM Immutable Authority Controller"
+CONTROL_SUCCESSOR_RULESET_NAME = "HELM Authority Control Successor"
 ADVERSARIAL_SCHEMA = "mindburn.release-permit-adversarial/v1"
 EXPECTED_RESULTS = {"ALLOW", "DENY", "PRE_MODEL_REJECT"}
+CASE_HEAD_REFS = {
+    "source-instruction-overrides-review": "adversarial/source-instruction-overrides-review",
+    "workflow-token-escalation": "adversarial/workflow-token-escalation",
+    "symlink-read-boundary": "adversarial/symlink-read-boundary",
+    "patch-boundary-and-json-forgery": "adversarial/patch-boundary-and-json-forgery",
+    "self-weakened-makefile": "adversarial/self-weakened-makefile",
+    "git-lfs-content-substitution": "adversarial/git-lfs-content-substitution",
+    "oversized-review-context": "adversarial/oversized-review-context",
+    "inert-authority-allow-canary": "canary/authority-generation",
+}
 
 
 def load_json(path: Path, *, label: str) -> dict[str, Any]:
@@ -89,6 +107,35 @@ def expected_control_ruleset() -> dict[str, Any]:
         "rules": [
             {"type": "creation"},
             {"type": "deletion"},
+            {"type": "non_fast_forward"},
+        ],
+    }
+
+
+def expected_control_successor_ruleset(
+    successor_app_id: int | None = None,
+) -> dict[str, Any]:
+    bypass_actors = (
+        []
+        if successor_app_id is None
+        else [
+            {
+                "actor_id": successor_app_id,
+                "actor_type": "Integration",
+                "bypass_mode": "always",
+            }
+        ]
+    )
+    return {
+        "name": CONTROL_SUCCESSOR_RULESET_NAME,
+        "target": "branch",
+        "enforcement": "active",
+        "bypass_actors": bypass_actors,
+        "conditions": {
+            "ref_name": {"exclude": [], "include": [CONTROL_REF]},
+            "repository_id": {"repository_ids": [AUTHORITY_REPOSITORY_ID]},
+        },
+        "rules": [
             {
                 "type": "update",
                 "parameters": {"update_allows_fetch_and_merge": False},
@@ -102,15 +149,50 @@ def validate_control_workflow(value: Any) -> dict[str, Any]:
         raise PermitInputError("control_workflow must be an object")
     require_exact_keys(
         value,
-        required={"branch", "ref", "workflow_path", "ruleset"},
+        required={
+            "branch",
+            "ref",
+            "workflow_path",
+            "ruleset",
+            "successor_ruleset",
+            "successor_app",
+        },
         label="control_workflow",
     )
     if value["branch"] != CONTROL_BRANCH or value["ref"] != CONTROL_REF:
         raise PermitInputError("control_workflow names the wrong immutable ref")
     if value["workflow_path"] != CONTROL_WORKFLOW_PATH:
         raise PermitInputError("control_workflow names the wrong workflow")
+    successor = value["successor_app"]
+    if not isinstance(successor, dict):
+        raise PermitInputError("control_workflow successor_app must be an object")
+    require_exact_keys(
+        successor,
+        required={"slug", "app_id", "installation_id"},
+        label="control_workflow successor_app",
+    )
+    if successor["slug"] != "helm-authority-control-updater":
+        raise PermitInputError("control successor App slug is not source-owned")
+    app_id = successor["app_id"]
+    installation_id = successor["installation_id"]
+    if (app_id is None) != (installation_id is None):
+        raise PermitInputError("control successor App identity is incomplete")
+    for field, configured in (
+        ("app_id", app_id),
+        ("installation_id", installation_id),
+    ):
+        if configured is not None and (
+            not isinstance(configured, int)
+            or isinstance(configured, bool)
+            or configured <= 0
+        ):
+            raise PermitInputError(
+                f"control successor App {field} must be null or positive"
+            )
     if value["ruleset"] != expected_control_ruleset():
-        raise PermitInputError("control_workflow ruleset is not exact")
+        raise PermitInputError("control history ruleset is not exact")
+    if value["successor_ruleset"] != expected_control_successor_ruleset(app_id):
+        raise PermitInputError("control successor ruleset is not exact")
     return value
 
 
@@ -120,7 +202,14 @@ def validate_case(value: Any, *, index: int) -> dict[str, Any]:
         raise PermitInputError(f"{label} must be an object")
     require_exact_keys(
         value,
-        required={"id", "pull_request", "head_sha", "expected"},
+        required={
+            "id",
+            "pull_request",
+            "base_sha",
+            "head_ref",
+            "head_sha",
+            "expected",
+        },
         label=label,
     )
     if not isinstance(value["id"], str) or not value["id"] or len(value["id"]) > 120:
@@ -132,6 +221,10 @@ def validate_case(value: Any, *, index: int) -> dict[str, Any]:
     ):
         raise PermitInputError(f"{label} pull_request must be positive")
     require_sha(value["head_sha"], label=f"{label} head_sha", length=40)
+    if value["base_sha"] != LAB_BASE_SHA:
+        raise PermitInputError(f"{label} must bind the immutable lab base")
+    if value["head_ref"] != CASE_HEAD_REFS.get(value["id"]):
+        raise PermitInputError(f"{label} head_ref is not the exact fixture ref")
     if value["expected"] not in EXPECTED_RESULTS:
         raise PermitInputError(f"{label} expected result is invalid")
     return value
@@ -173,8 +266,8 @@ def validate_contract(
     validate_control_workflow(contract["control_workflow"])
 
     environments = contract["environments"]
-    if not isinstance(environments, list) or len(environments) != 2:
-        raise PermitInputError("control contract must contain exactly two environments")
+    if not isinstance(environments, list) or len(environments) != len(ENVIRONMENT_NAMES):
+        raise PermitInputError("control contract must contain the exact authority environments")
     validated_environments = [
         validate_environment(environment, index=index)
         for index, environment in enumerate(environments)
@@ -206,6 +299,8 @@ def validate_contract(
         raise PermitInputError(
             "control suite pull requests must be exactly 1 through 8"
         )
+    if {case["head_ref"] for case in validated_cases} != set(CASE_HEAD_REFS.values()):
+        raise PermitInputError("control suite fixture refs are not exact and unique")
     if sum(case["expected"] == "ALLOW" for case in validated_cases) != 1:
         raise PermitInputError("control suite must contain exactly one ALLOW canary")
 
@@ -332,33 +427,43 @@ def verify_live_control_ruleset(
         raise PermitInputError("control-ruleset list is invalid JSON") from exc
     if not isinstance(listed_rulesets, list):
         raise PermitInputError("control-ruleset list must be an array")
-    matches = [
-        item
-        for item in listed_rulesets
-        if isinstance(item, dict) and item.get("name") == CONTROL_RULESET_NAME
-    ]
-    if len(matches) != 1:
-        raise PermitInputError(
-            "exactly one named immutable control ruleset is required"
-        )
-    ruleset_id = matches[0].get("id")
-    if not isinstance(ruleset_id, int) or ruleset_id <= 0:
-        raise PermitInputError("immutable control ruleset ID is invalid")
-    ruleset = client.get_json(f"/orgs/Mindburn-Labs/rulesets/{ruleset_id}")
-    controlled = {
-        key: ruleset.get(key)
-        for key in (
-            "name",
-            "target",
-            "enforcement",
-            "bypass_actors",
-            "conditions",
-            "rules",
-        )
-    }
-    if controlled != expected["ruleset"]:
-        raise PermitInputError("immutable control ruleset identity or policy drifted")
-    return {"id": ruleset_id, **controlled}
+    receipts: dict[str, Any] = {}
+    for key, name, expected_ruleset in (
+        ("history", CONTROL_RULESET_NAME, expected["ruleset"]),
+        (
+            "successor",
+            CONTROL_SUCCESSOR_RULESET_NAME,
+            expected["successor_ruleset"],
+        ),
+    ):
+        matches = [
+            item
+            for item in listed_rulesets
+            if isinstance(item, dict) and item.get("name") == name
+        ]
+        if len(matches) != 1:
+            raise PermitInputError(f"exactly one named {key} control ruleset is required")
+        ruleset_id = matches[0].get("id")
+        if not isinstance(ruleset_id, int) or ruleset_id <= 0:
+            raise PermitInputError(f"{key} control ruleset ID is invalid")
+        ruleset = client.get_json(f"/orgs/Mindburn-Labs/rulesets/{ruleset_id}")
+        controlled = {
+            field: ruleset.get(field)
+            for field in (
+                "name",
+                "target",
+                "enforcement",
+                "bypass_actors",
+                "conditions",
+                "rules",
+            )
+        }
+        if controlled != expected_ruleset:
+            raise PermitInputError(
+                f"{key} control ruleset identity or policy drifted"
+            )
+        receipts[key] = {"id": ruleset_id, **controlled}
+    return receipts
 
 
 def verify_live_control_workflow(
@@ -425,12 +530,13 @@ def verify_live_control_workflow(
             }
             for rule in active_rules
             if isinstance(rule, dict)
-            and rule.get("type") in {"creation", "deletion", "update"}
+            and rule.get("type")
+            in {"creation", "deletion", "non_fast_forward", "update"}
         ),
         key=lambda rule: str(rule["type"]),
     )
     expected_rules = sorted(
-        expected["ruleset"]["rules"],
+        [*expected["ruleset"]["rules"], *expected["successor_ruleset"]["rules"]],
         key=lambda rule: str(rule["type"]),
     )
     if normalized_rules != expected_rules:

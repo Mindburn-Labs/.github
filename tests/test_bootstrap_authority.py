@@ -8,6 +8,7 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,15 +26,22 @@ TREE_SHA = "4" * 40
 CANDIDATE_REF = "refs/heads/codex/autonomous-release-gen2-bootstrap"
 
 
-def pull_request(repository: str, number: int, head_sha: str) -> dict[str, object]:
+def pull_request(
+    repository: str,
+    number: int,
+    head_sha: str,
+    *,
+    base_sha: str = BASE_SHA,
+    head_ref: str | None = None,
+) -> dict[str, object]:
     return {
         "number": number,
         "state": "open",
         "merged": False,
         "draft": False,
-        "base": {"ref": "main", "sha": BASE_SHA},
+        "base": {"ref": "main", "sha": base_sha},
         "head": {
-            "ref": f"proof-{number}",
+            "ref": head_ref or f"proof-{number}",
             "sha": head_sha,
             "repo": {"full_name": repository},
         },
@@ -45,13 +53,20 @@ class TriggerClient:
         repository = contract["adversarial_suite"]["repository"]
         self.pulls = {
             case["pull_request"]: pull_request(
-                repository, case["pull_request"], case["head_sha"]
+                repository,
+                case["pull_request"],
+                case["head_sha"],
+                base_sha=case["base_sha"],
+                head_ref=case["head_ref"],
             )
             for case in contract["adversarial_suite"]["cases"]
         }
         self.patches = 0
 
     def get(self, path: str):
+        if path.endswith("/git/ref/heads/main"):
+            base_sha = next(iter(self.pulls.values()))["base"]["sha"]
+            return {"ref": "refs/heads/main", "object": {"sha": base_sha}}
         return json.loads(json.dumps(self.pulls[int(path.rsplit("/", 1)[1])]))
 
     def request(self, method: str, path: str, *, payload=None):
@@ -85,6 +100,13 @@ class ResumeMergeClient:
         raise AssertionError(f"unexpected GET {path}")
 
 
+class PendingMergeClient:
+    def get(self, path: str):
+        if path.endswith("/git/ref/heads/main"):
+            return {"object": {"sha": BASE_SHA}}
+        raise AssertionError(f"unexpected GET {path}")
+
+
 class RepositorySettingsClient:
     def __init__(self, delete_branch_on_merge: bool) -> None:
         self.delete_branch_on_merge = delete_branch_on_merge
@@ -107,17 +129,91 @@ class RepositorySettingsClient:
         return {"delete_branch_on_merge": False}
 
 
+class LedgerSeedClient:
+    def __init__(self, *, reserved_evidence: bool = False) -> None:
+        self.sha: str | None = None
+        self.posts = 0
+        self.reserved_evidence = reserved_evidence
+
+    def get(self, path: str):
+        if path.endswith(f"/git/commits/{CANDIDATE_SHA}"):
+            return {"tree": {"sha": "a" * 40}}
+        if path.endswith(f"/git/trees/{'a' * 40}"):
+            return {
+                "truncated": False,
+                "tree": (
+                    [{"path": ".helm", "type": "tree", "sha": "b" * 40}]
+                    if self.reserved_evidence
+                    else []
+                ),
+            }
+        if path.endswith(f"/git/trees/{'b' * 40}"):
+            return {
+                "truncated": False,
+                "tree": [{"path": "evidence", "type": "tree", "sha": "c" * 40}],
+            }
+        if not path.endswith("/git/ref/heads/authority/evidence-v1"):
+            raise AssertionError(path)
+        if self.sha is None:
+            raise MODULE.PermitInputError("GitHub GET failed with HTTP 404: absent")
+        return {"ref": MODULE.LEDGER_REF, "object": {"sha": self.sha}}
+
+    def request(self, method: str, path: str, *, payload=None):
+        if (
+            method != "POST"
+            or not path.endswith("/git/refs")
+            or payload != {"ref": MODULE.LEDGER_REF, "sha": CANDIDATE_SHA}
+        ):
+            raise AssertionError((method, path, payload))
+        self.sha = CANDIDATE_SHA
+        self.posts += 1
+        return {"ref": MODULE.LEDGER_REF, "object": {"sha": self.sha}}
+
+
+class LedgerStateClient:
+    def __init__(self, head_sha: str, *, status: str = "ahead") -> None:
+        self.head_sha = head_sha
+        self.status = status
+
+    def get(self, path: str):
+        if path.endswith("/git/ref/heads/authority/evidence-v1"):
+            return {"ref": MODULE.LEDGER_REF, "object": {"sha": self.head_sha}}
+        if "/compare/" in path:
+            return {
+                "status": self.status,
+                "ahead_by": 1,
+                "behind_by": 0,
+                "merge_base_commit": {"sha": CANDIDATE_SHA},
+            }
+        raise AssertionError(path)
+
+
 class ControlPlaneAdminClient:
     RULESET_ID = 4242
+    SUCCESSOR_RULESET_ID = 4243
 
-    def __init__(self, *, wrong_ref: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        wrong_ref: bool = False,
+        existing_environments: set[str] | None = None,
+    ) -> None:
         self.ruleset: dict[str, object] | None = None
+        self.successor_ruleset: dict[str, object] | None = None
         self.etag = 'W/"control-1"'
         self.ref_sha = "9" * 40 if wrong_ref else None
         self.environment_policies = {
             "authority-observer": [],
+            "authority-approval": [],
+            "authority-merge": [],
             "authority-promotion": [],
+            "authority-control": [],
         }
+        self.environments = (
+            set(self.environment_policies)
+            if existing_environments is None
+            else set(existing_environments)
+        )
         self.operations: list[str] = []
 
     def response(self, body, etag=None):
@@ -126,21 +222,38 @@ class ControlPlaneAdminClient:
     def request(self, method: str, path: str, *, payload=None, if_match=None):
         self.operations.append(f"{method} {path}")
         if path == "/orgs/Mindburn-Labs/rulesets?per_page=100" and method == "GET":
-            summaries = (
-                []
-                if self.ruleset is None
-                else [{"id": self.RULESET_ID, "name": self.ruleset["name"]}]
-            )
+            summaries = []
+            if self.ruleset is not None:
+                summaries.append({"id": self.RULESET_ID, "name": self.ruleset["name"]})
+            if self.successor_ruleset is not None:
+                summaries.append(
+                    {
+                        "id": self.SUCCESSOR_RULESET_ID,
+                        "name": self.successor_ruleset["name"],
+                    }
+                )
             return self.response(summaries)
         if path == "/orgs/Mindburn-Labs/rulesets" and method == "POST":
-            if self.ruleset is not None or payload is None:
-                raise AssertionError("unexpected control ruleset creation")
-            if any(rule.get("type") == "creation" for rule in payload["rules"]):
-                raise AssertionError(
-                    "control ref creation was blocked before it existed"
-                )
-            self.ruleset = {"id": self.RULESET_ID, **payload}
-            return self.response(self.ruleset, self.etag)
+            if payload is None:
+                raise AssertionError("missing control ruleset payload")
+            if payload["name"] == MODULE.CONTROL_RULESET_NAME:
+                if self.ruleset is not None:
+                    raise AssertionError("unexpected control history creation")
+                if any(rule.get("type") == "creation" for rule in payload["rules"]):
+                    raise AssertionError(
+                        "control ref creation was blocked before it existed"
+                    )
+                self.ruleset = {"id": self.RULESET_ID, **payload}
+                return self.response(self.ruleset, self.etag)
+            if payload["name"] == MODULE.CONTROL_SUCCESSOR_RULESET_NAME:
+                if self.successor_ruleset is not None:
+                    raise AssertionError("unexpected control successor creation")
+                self.successor_ruleset = {
+                    "id": self.SUCCESSOR_RULESET_ID,
+                    **payload,
+                }
+                return self.response(self.successor_ruleset, 'W/"successor-1"')
+            raise AssertionError("unexpected named control ruleset")
         if path == f"/orgs/Mindburn-Labs/rulesets/{self.RULESET_ID}":
             if self.ruleset is None:
                 raise AssertionError("control ruleset is absent")
@@ -156,6 +269,10 @@ class ControlPlaneAdminClient:
                 self.ruleset = {"id": self.RULESET_ID, **payload}
                 self.etag = 'W/"control-2"'
                 return self.response(self.ruleset, self.etag)
+        if path == f"/orgs/Mindburn-Labs/rulesets/{self.SUCCESSOR_RULESET_ID}":
+            if self.successor_ruleset is None or method != "GET":
+                raise AssertionError("control successor ruleset is absent")
+            return self.response(self.successor_ruleset, 'W/"successor-1"')
         if path.endswith("/git/matching-refs/heads/authority/control-v1"):
             refs = (
                 []
@@ -176,8 +293,34 @@ class ControlPlaneAdminClient:
                 raise AssertionError("wrong immutable control ref payload")
             self.ref_sha = MERGE_SHA
             return self.response({"ref": payload["ref"], "object": {"sha": MERGE_SHA}})
+        if "/deployment-branch-policies/" in path and method == "DELETE":
+            environment = path.split("/environments/", 1)[1].split("/", 1)[0]
+            policy_id = int(path.rsplit("/", 1)[1])
+            policies = self.environment_policies[environment]
+            if [policy.get("id") for policy in policies] != [policy_id]:
+                raise AssertionError("unexpected environment policy deletion")
+            policies.clear()
+            return self.response(None)
+        if "/environments/" in path and "/deployment-branch-policies" not in path:
+            environment = path.split("/environments/", 1)[1]
+            if method != "PUT" or payload != MODULE.DISABLED_ENVIRONMENT_PAYLOAD:
+                raise AssertionError((method, path, payload))
+            self.environments.add(environment)
+            return self.response(
+                {
+                    "name": environment,
+                    "can_admins_bypass": False,
+                    "protection_rules": [{"type": "branch_policy", "id": 1}],
+                    "deployment_branch_policy": {
+                        "protected_branches": False,
+                        "custom_branch_policies": True,
+                    },
+                }
+            )
         if path.endswith("/deployment-branch-policies"):
             environment = path.split("/environments/", 1)[1].split("/", 1)[0]
+            if environment not in self.environments:
+                raise AssertionError(f"environment {environment} is absent")
             policies = self.environment_policies[environment]
             if method == "GET":
                 return self.response(
@@ -205,8 +348,18 @@ class ControlPlaneObserverClient:
 
     def get_json(self, path: str):
         if path == f"/orgs/Mindburn-Labs/rulesets/{self.admin.RULESET_ID}":
-            assert self.admin.ruleset is not None
+            if self.admin.ruleset is None:
+                raise MODULE.PermitInputError("control ruleset is absent")
             return self.admin.ruleset
+        if path == (
+            f"/orgs/Mindburn-Labs/rulesets/"
+            f"{self.admin.SUCCESSOR_RULESET_ID}"
+        ):
+            if self.admin.successor_ruleset is None:
+                raise MODULE.PermitInputError("control successor ruleset is absent")
+            return self.admin.successor_ruleset
+        if path == f"/repos/{MODULE.AUTHORITY_REPOSITORY}":
+            return {"delete_branch_on_merge": False}
         if path.endswith("/git/ref/heads/authority/control-v1"):
             return {"object": {"sha": self.admin.ref_sha}}
         if "/branches/authority%2Fcontrol-v1" in path:
@@ -222,6 +375,9 @@ class ControlPlaneObserverClient:
             policies = self.admin.environment_policies[environment]
             return {"total_count": len(policies), "branch_policies": policies}
         if "/environments/" in path:
+            environment = path.split("/environments/", 1)[1].split("/", 1)[0]
+            if environment not in self.admin.environments:
+                raise AssertionError(f"environment {environment} is absent")
             return {
                 "can_admins_bypass": False,
                 "protection_rules": [{"type": "branch_policy", "id": 1}],
@@ -234,18 +390,29 @@ class ControlPlaneObserverClient:
 
     def get_bytes(self, path: str) -> bytes:
         if path == "/orgs/Mindburn-Labs/rulesets?per_page=100":
-            assert self.admin.ruleset is not None
+            if self.admin.ruleset is None or self.admin.successor_ruleset is None:
+                return b"[]"
             return json.dumps(
                 [
                     {
                         "id": self.admin.RULESET_ID,
                         "name": self.admin.ruleset["name"],
-                    }
+                    },
+                    {
+                        "id": self.admin.SUCCESSOR_RULESET_ID,
+                        "name": self.admin.successor_ruleset["name"],
+                    },
                 ]
             ).encode()
         if path.endswith("/rules/branches/authority%2Fcontrol-v1"):
-            assert self.admin.ruleset is not None
-            return json.dumps(self.admin.ruleset["rules"]).encode()
+            if self.admin.ruleset is None:
+                raise MODULE.PermitInputError("control ruleset is absent")
+            return json.dumps(
+                [
+                    *self.admin.ruleset["rules"],
+                    *self.admin.successor_ruleset["rules"],
+                ]
+            ).encode()
         raise AssertionError(f"unexpected observer bytes GET {path}")
 
 
@@ -262,6 +429,14 @@ class BootstrapAuthorityTests(unittest.TestCase):
             ),
         )
 
+    def control_args(self):
+        return argparse.Namespace(
+            control_contract=ROOT / "config" / "autonomous-release-control-plane.json",
+            adversarial_corpus=(
+                ROOT / "tests" / "fixtures" / "autonomous-release-adversarial.json"
+            ),
+        )
+
     def test_bootstrap_preserves_candidate_head_for_fail_closed_recovery(self) -> None:
         for initial, expected_patches in ((True, 1), (False, 0)):
             with self.subTest(initial=initial):
@@ -269,6 +444,44 @@ class BootstrapAuthorityTests(unittest.TestCase):
                 receipt = MODULE.ensure_recovery_head_ref_policy(client)
                 self.assertFalse(receipt["delete_branch_on_merge_after"])
                 self.assertEqual(client.patches, expected_patches)
+
+    def test_evidence_ledger_seed_creation_is_exact_and_idempotent(self) -> None:
+        client = LedgerSeedClient()
+        first = MODULE.ensure_evidence_ledger_seed(
+            client,
+            expected_sha=CANDIDATE_SHA,
+        )
+        second = MODULE.ensure_evidence_ledger_seed(
+            client,
+            expected_sha=CANDIDATE_SHA,
+        )
+        self.assertTrue(first["created"])
+        self.assertFalse(second["created"])
+        self.assertEqual(client.posts, 1)
+
+    def test_evidence_ledger_seed_rejects_candidate_reserved_tree(self) -> None:
+        with self.assertRaisesRegex(MODULE.PermitInputError, "must not pre-seed"):
+            MODULE.ensure_evidence_ledger_seed(
+                LedgerSeedClient(reserved_evidence=True),
+                expected_sha=CANDIDATE_SHA,
+            )
+
+    def test_evidence_ledger_resume_requires_seed_descendant(self) -> None:
+        exact = MODULE.verify_evidence_ledger_descendant(
+            LedgerStateClient(CANDIDATE_SHA),
+            seed_sha=CANDIDATE_SHA,
+        )
+        self.assertFalse(exact["advanced"])
+        advanced = MODULE.verify_evidence_ledger_descendant(
+            LedgerStateClient("d" * 40),
+            seed_sha=CANDIDATE_SHA,
+        )
+        self.assertTrue(advanced["advanced"])
+        with self.assertRaisesRegex(MODULE.PermitInputError, "not a seed descendant"):
+            MODULE.verify_evidence_ledger_descendant(
+                LedgerStateClient("e" * 40, status="diverged"),
+                seed_sha=CANDIDATE_SHA,
+            )
 
     def test_suite_trigger_reopens_every_exact_permanent_case(self) -> None:
         contract = MODULE.validate_contract(
@@ -313,9 +526,55 @@ class BootstrapAuthorityTests(unittest.TestCase):
             "merge_sha": MERGE_SHA,
             "merge_tree_sha": TREE_SHA,
         }
-        receipt = MODULE.confirmed_or_atomic_merge(ready, ResumeMergeClient())
+        with tempfile.TemporaryDirectory() as tmpdir:
+            receipt = MODULE.confirmed_or_atomic_merge(
+                ready,
+                ResumeMergeClient(),
+                merger={
+                    "slug": "helm-authority-merger",
+                    "app_id": 5000001,
+                    "installation_id": 6000001,
+                },
+                approval_receipt=Path(tmpdir) / "machine-approval.json",
+                permit=Path(tmpdir) / "liveness-permit.json",
+            )
         self.assertEqual(receipt["merge_sha"], MERGE_SHA)
         self.assertFalse(receipt["force"])
+
+    def test_pending_atomic_merge_forwards_authorization_for_revalidation(
+        self,
+    ) -> None:
+        ready = {
+            "pull_request": 36,
+            "base_sha": BASE_SHA,
+            "candidate_sha": CANDIDATE_SHA,
+            "merge_sha": MERGE_SHA,
+            "merge_tree_sha": TREE_SHA,
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            approval_path = Path(tmpdir) / "machine-approval.json"
+            permit_path = Path(tmpdir) / "liveness-permit.json"
+            captured: dict[str, argparse.Namespace] = {}
+
+            def capture(args: argparse.Namespace, _client: object) -> dict[str, object]:
+                captured["args"] = args
+                return {"merge_sha": MERGE_SHA, "force": False}
+
+            with patch.object(MODULE, "atomic_merge", side_effect=capture):
+                receipt = MODULE.confirmed_or_atomic_merge(
+                    ready,
+                    PendingMergeClient(),
+                    merger={
+                        "slug": "helm-authority-merger",
+                        "app_id": 5000001,
+                        "installation_id": 6000001,
+                    },
+                    approval_receipt=approval_path,
+                    permit=permit_path,
+                )
+        self.assertEqual(receipt["merge_sha"], MERGE_SHA)
+        self.assertEqual(captured["args"].approval_receipt, approval_path)
+        self.assertEqual(captured["args"].permit, permit_path)
 
     def test_ready_receipt_rejects_candidate_substitution(self) -> None:
         ready = {
@@ -363,7 +622,7 @@ class BootstrapAuthorityTests(unittest.TestCase):
             expected_sha=MERGE_SHA,
         )
         self.assertEqual(receipt["sha"], MERGE_SHA)
-        self.assertEqual(len(environments), 2)
+        self.assertEqual(len(environments), 5)
         create_ruleset = admin.operations.index("POST /orgs/Mindburn-Labs/rulesets")
         create_ref = admin.operations.index(
             "POST /repos/Mindburn-Labs/.github/git/refs"
@@ -399,6 +658,115 @@ class BootstrapAuthorityTests(unittest.TestCase):
             if operation.startswith(("POST ", "PUT "))
         ]
         self.assertEqual(retry_mutations, [])
+
+    def test_finalization_prestate_requires_empty_environments_without_lock(
+        self,
+    ) -> None:
+        admin = ControlPlaneAdminClient()
+        observer = ControlPlaneObserverClient(admin)
+        receipt = MODULE.verify_finalization_control_prestate(
+            self.control_args(),
+            observer,
+            observer,
+            expected_control_sha=MERGE_SHA,
+        )
+        self.assertEqual(receipt["state"], "lock-pending-environments-disabled")
+        admin.environment_policies["authority-observer"] = [
+            {"id": 1, "name": "authority/control-v1", "type": "branch"}
+        ]
+        with self.assertRaisesRegex(MODULE.PermitInputError, "branch policies"):
+            MODULE.verify_finalization_control_prestate(
+                self.control_args(),
+                observer,
+                observer,
+                expected_control_sha=MERGE_SHA,
+            )
+
+    def test_finalization_prestate_allows_partial_environments_only_after_lock(
+        self,
+    ) -> None:
+        contract = self.load_control_contract()
+        admin = ControlPlaneAdminClient()
+        observer = ControlPlaneObserverClient(admin)
+        MODULE.install_control_workflow(
+            contract,
+            admin,
+            observer,
+            expected_sha=MERGE_SHA,
+        )
+        admin.environment_policies["authority-observer"] = [
+            {"id": 1, "name": "authority/control-v1", "type": "branch"}
+        ]
+        receipt = MODULE.verify_finalization_control_prestate(
+            self.control_args(),
+            observer,
+            observer,
+            expected_control_sha=MERGE_SHA,
+        )
+        self.assertEqual(receipt["state"], "lock-proven-environments-transitioning")
+
+    def test_missing_control_environments_are_created_disabled(self) -> None:
+        contract = self.load_control_contract()
+        admin = ControlPlaneAdminClient(
+            existing_environments={"authority-observer", "authority-promotion"}
+        )
+        observer = ControlPlaneObserverClient(admin)
+        receipts = MODULE.ensure_control_environments_disabled(
+            contract,
+            admin,
+            observer,
+        )
+        self.assertEqual(len(receipts), 5)
+        self.assertEqual(admin.environments, set(admin.environment_policies))
+        self.assertTrue(all(receipt["branch_policies"] == [] for receipt in receipts))
+        self.assertEqual(
+            [
+                operation
+                for operation in admin.operations
+                if operation.startswith(
+                    "PUT /repos/Mindburn-Labs/.github/environments/"
+                )
+            ],
+            [
+                "PUT /repos/Mindburn-Labs/.github/environments/authority-observer",
+                "PUT /repos/Mindburn-Labs/.github/environments/authority-approval",
+                "PUT /repos/Mindburn-Labs/.github/environments/authority-merge",
+                "PUT /repos/Mindburn-Labs/.github/environments/authority-promotion",
+                "PUT /repos/Mindburn-Labs/.github/environments/authority-control",
+            ],
+        )
+
+    def test_enabled_control_policies_are_disabled_before_verification(self) -> None:
+        contract = self.load_control_contract()
+        admin = ControlPlaneAdminClient(
+            existing_environments={"authority-observer", "authority-promotion"}
+        )
+        for environment in ("authority-observer", "authority-promotion"):
+            admin.environment_policies[environment] = [
+                {
+                    "id": 51 if environment == "authority-observer" else 52,
+                    "name": "authority/control-v1",
+                    "type": "branch",
+                }
+            ]
+        observer = ControlPlaneObserverClient(admin)
+        receipts = MODULE.ensure_control_environments_disabled(
+            contract,
+            admin,
+            observer,
+        )
+        self.assertTrue(all(receipt["branch_policies"] == [] for receipt in receipts))
+        self.assertEqual(
+            [
+                operation
+                for operation in admin.operations
+                if operation.startswith("DELETE ")
+            ],
+            [
+                "DELETE /repos/Mindburn-Labs/.github/environments/authority-observer/deployment-branch-policies/51",
+                "DELETE /repos/Mindburn-Labs/.github/environments/authority-promotion/deployment-branch-policies/52",
+            ],
+        )
 
     def test_wrong_control_ref_keeps_environments_disabled(self) -> None:
         contract = self.load_control_contract()
@@ -440,11 +808,14 @@ class BootstrapAuthorityTests(unittest.TestCase):
             for operation in admin.operations[before:]
             if operation.startswith("POST ")
         ]
-        self.assertEqual(len(receipts), 2)
+        self.assertEqual(len(receipts), 5)
         self.assertEqual(
             mutations,
             [
-                "POST /repos/Mindburn-Labs/.github/environments/authority-promotion/deployment-branch-policies"
+                "POST /repos/Mindburn-Labs/.github/environments/authority-approval/deployment-branch-policies",
+                "POST /repos/Mindburn-Labs/.github/environments/authority-merge/deployment-branch-policies",
+                "POST /repos/Mindburn-Labs/.github/environments/authority-promotion/deployment-branch-policies",
+                "POST /repos/Mindburn-Labs/.github/environments/authority-control/deployment-branch-policies",
             ],
         )
 
