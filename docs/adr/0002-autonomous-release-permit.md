@@ -2,7 +2,13 @@
 
 ## Status
 
-Proposed for evaluation. It is not production-promotion authority.
+Proposed evaluation design. The permit in `ci.yml` is candidate-evidence review
+only: the permit itself is not merge, push, deployment, activation, or
+production-promotion authority. This repository also contains the separately
+scoped `promote-authority.yml` execution path, which can mint a GitHub App
+token, merge an exact ratified tree, and rebind or activate authority state.
+Its source presence is not proof that its credentials, environment approvals,
+rulesets, or effects are enabled or live.
 
 ## Decision
 
@@ -87,11 +93,16 @@ otherwise reuse an earlier attempt's input artifact while loading a newer
 ruleset workflow. Such mixed-generation retries fail closed; operators must
 rerun the complete workflow so a new context is minted for the new attempt.
 
-During evaluation the permit is scoped to measuring merge eligibility; it does
-not govern merges unless the ruleset is activated after proof. It never
-authorizes deployment, production promotion, migrations, key rotation, billing
-changes, or any other external side effect. Those authority migrations require
-their own policy, evidence, rollback, and fail-closed gates.
+Current `ci.yml` permit state: it evaluates candidate evidence for merge
+eligibility. A permit cannot itself merge a pull request, push a branch, deploy
+or activate a release, or authorize migrations, key rotation, billing changes,
+or any other external side effect. The separately scoped
+`promote-authority.yml` source path is designed to mint GitHub App credentials,
+merge the exact ratified authority tree, and rebind or activate authority after
+independent observations. Source alone is not proof that this path is enabled,
+authorized, or live: its app credentials, environment approvals, rulesets, and
+runtime receipts must be verified separately. When it executes, that scoped
+executor—not the permit—provides action authority.
 
 Claude Fable 5 is subject to GitHub's disclosed Anthropic retention behavior for
 prompts and outputs used by safety classifiers. That fact must remain visible
@@ -105,7 +116,13 @@ OpenAI. Activation therefore requires treating Copilot or Actions outage,
 misrouting, malformed output, and missing-provider evidence as fail-closed
 conditions rather than claiming infrastructure independence.
 
-## No-human target architecture
+## Proposed no-human authority architecture
+
+The following describes an execution-capable design present in source, not
+evidence that it is currently enabled or authorized. It requires exact-head
+GitHub App authority, adversarial proof, environment and ruleset receipts, and
+normal release/GitOps approval before any executor can act. This ADR is not an
+authorization to activate it.
 
 Removing independent human approval does not mean giving one model or one
 workflow unilateral authority. The target is a machine separation-of-powers
@@ -124,8 +141,10 @@ system:
    digest-bound evidence and emits a short-lived permit. Missing, stale,
    conflicting, duplicate-provider, or malformed evidence is `DENY`.
 5. A narrow GitHub App or deployment broker **executes** only the action named
-   by the permit. Models never receive repository-admin, cloud-admin, billing,
-   or production credentials directly.
+   by a permit when its separately scoped authority workflow is live and
+   authorized. The permit does not grant its credentials or action authority.
+   Models never receive repository-admin, cloud-admin, billing, or production
+   credentials directly.
 6. Independent **observers** compare expected and actual state, enforce canary
    and error-budget limits, produce receipts, and automatically roll back or
    freeze the lane on drift. The executor cannot mint its own success receipt.
@@ -171,8 +190,9 @@ non-authority pull request before it can become enforcing authority. Failed-job
 retries, a branch update, or an administrator editing the pin cannot substitute
 for either generation's evidence.
 
-The promotion transaction is deliberately split across isolated jobs and two
-GitHub Apps. The promoter can advance and restore exact ruleset bindings, run a
+The source-present promotion transaction is deliberately split across isolated
+jobs and two GitHub Apps. It is not live-authority proof. If enabled and
+authorized, its promoter can advance and restore exact ruleset bindings, run a
 permanent synthetic canary, merge the already-ratified tree through normal
 branch policy, and rebind only the evaluation ruleset. A separate observer
 re-downloads both permits from their originating runs, verifies their GitHub
