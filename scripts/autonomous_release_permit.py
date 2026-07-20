@@ -152,7 +152,34 @@ def load_authority(args: argparse.Namespace) -> dict[str, Any]:
     return authority
 
 
+def parse_workflow_ref(
+    workflow_ref: str,
+    workflow_repository: str,
+    workflow_path: str,
+) -> str:
+    source_prefix = f"{workflow_repository}/{workflow_path}@"
+    if not workflow_ref.startswith(source_prefix):
+        raise PermitInputError(
+            "workflow_ref must bind the configured workflow repository and path",
+        )
+    # Git permits `@` inside a refname (except as a bare ref or before `{`),
+    # so split only at the fixed workflow-source boundary rather than at the
+    # final `@` in the complete reference.
+    return workflow_ref[len(source_prefix) :]
+
+
+def normalize_workflow_ref(ref: str) -> str:
+    if not (ref.startswith("refs/heads/") or ref.startswith("refs/tags/")):
+        raise PermitInputError("workflow_ref must name a branch or tag ref")
+    return ref
+
+
 def prepare(args: argparse.Namespace) -> None:
+    workflow_ref = parse_workflow_ref(
+        args.workflow_ref,
+        args.workflow_repository,
+        args.workflow_path,
+    )
     target = args.target_dir.resolve()
     output = args.output_dir.resolve()
     output.mkdir(parents=True, exist_ok=False)
@@ -182,6 +209,8 @@ def prepare(args: argparse.Namespace) -> None:
         raise PermitInputError(
             "authority workflow cannot review its own head or merge commit",
         )
+
+    workflow_ref = normalize_workflow_ref(workflow_ref)
 
     merge_parents = run_git(
         target,
@@ -299,7 +328,7 @@ def prepare(args: argparse.Namespace) -> None:
         "merge_tree_sha": merge_tree_sha,
         "workflow_repository": args.workflow_repository,
         "workflow_path": args.workflow_path,
-        "workflow_ref": args.workflow_ref,
+        "workflow_ref": workflow_ref,
         "workflow_sha": args.workflow_sha,
         "run_id": args.run_id,
         "run_attempt": args.run_attempt,

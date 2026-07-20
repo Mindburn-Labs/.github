@@ -85,7 +85,7 @@ def prepare_args(
         merge_sha=merge,
         workflow_repository="Mindburn-Labs/.github",
         workflow_path=".github/workflows/ci.yml",
-        workflow_ref="refs/heads/main",
+        workflow_ref="Mindburn-Labs/.github/.github/workflows/ci.yml@refs/heads/main",
         workflow_sha="3" * 40,
         run_id=101,
         run_attempt=1,
@@ -118,6 +118,7 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertEqual(context["head_sha"], head)
         self.assertEqual(context["merge_sha"], merge)
         self.assertEqual(len(context["merge_tree_sha"]), 40)
+        self.assertEqual(context["workflow_ref"], "refs/heads/main")
         self.assertEqual(context["schema"], "mindburn.release-permit-context/v2")
         self.assertEqual(context["authority"]["generation"], 1)
         self.assertIsNone(context["authority"]["parent"])
@@ -143,6 +144,41 @@ class AutonomousReleasePermitTests(unittest.TestCase):
             with self.assertRaisesRegex(MODULE.PermitInputError, "does not match event merge"):
                 MODULE.prepare(args)
 
+    def test_prepare_rejects_unbound_workflow_ref(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo, base, head, merge = build_repo(root)
+            args = prepare_args(repo, base, head, merge, root / "permit-input")
+            args.workflow_ref = "Mindburn-Labs/.github/.github/workflows/other.yml@refs/heads/main"
+            with self.assertRaisesRegex(
+                MODULE.PermitInputError,
+                "must bind the configured workflow repository and path",
+            ):
+                MODULE.prepare(args)
+
+    def test_prepare_accepts_branch_workflow_ref_with_at(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo, base, head, merge = build_repo(root)
+            output = root / "permit-input"
+            args = prepare_args(repo, base, head, merge, output)
+            args.workflow_ref = (
+                "Mindburn-Labs/.github/.github/workflows/ci.yml@refs/heads/authority@next"
+            )
+            MODULE.prepare(args)
+
+            context = json.loads((output / "context.json").read_text(encoding="utf-8"))
+        self.assertEqual(context["workflow_ref"], "refs/heads/authority@next")
+
+    def test_prepare_rejects_non_branch_workflow_ref(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo, base, head, merge = build_repo(root)
+            args = prepare_args(repo, base, head, merge, root / "permit-input")
+            args.workflow_ref = "Mindburn-Labs/.github/.github/workflows/ci.yml@refs/pull/42/merge"
+            with self.assertRaisesRegex(MODULE.PermitInputError, "must name a branch or tag ref"):
+                MODULE.prepare(args)
+
     def test_prepare_rejects_merge_parent_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -158,6 +194,9 @@ class AutonomousReleasePermitTests(unittest.TestCase):
             args = prepare_args(repo, base, head, merge, root / "permit-input")
             args.repository = args.workflow_repository.swapcase()
             args.workflow_sha = merge
+            args.workflow_ref = (
+                "Mindburn-Labs/.github/.github/workflows/ci.yml@refs/pull/42/merge"
+            )
             with self.assertRaisesRegex(
                 MODULE.PermitInputError,
                 "authority workflow cannot review its own head or merge commit",
