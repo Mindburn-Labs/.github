@@ -46,7 +46,9 @@ PERMIT_KEYS = (
     "reasons",
 )
 
-PARENT_WORKFLOW_PATH = Path(".github/workflows/ci.yml")
+PARENT_WORKFLOW_DIRECTORY = ".github/workflows"
+PARENT_WORKFLOW_PATH = f"{PARENT_WORKFLOW_DIRECTORY}/ci.yml"
+WORKFLOW_REGULAR_MODE = "100644"
 
 # The parent checkout is the trusted authority. Its complete workflow is the
 # allowlist: the candidate may differ only at the four bindings that move the
@@ -131,11 +133,13 @@ def reject_unsafe_yaml(node)
     raise "YAML aliases or anchors are not allowed"
   end
 
+  if node.respond_to?(:tag) && node.tag
+    raise "YAML tags are not allowed"
+  end
+
   case node
   when Psych::Nodes::Scalar
-    if node.tag
-      raise "YAML tags are not allowed"
-    end
+    nil
   when Psych::Nodes::Alias
     raise "YAML aliases or anchors are not allowed"
   when Psych::Nodes::Mapping
@@ -434,21 +438,13 @@ def validate_machine_approval_chain(
         )
 
 
-def parent_workflow_source() -> Path:
-    path = Path(__file__).resolve().parents[1] / PARENT_WORKFLOW_PATH
-    if path.is_symlink() or not path.is_file():
-        raise PermitInputError("parent authority workflow source is not a regular file")
-    return path
-
-
 def expected_candidate_workflow(kernel_sha: str) -> dict[str, Any]:
     require_sha(kernel_sha, label="candidate authority kernel_sha", length=40)
-    parent_path = parent_workflow_source()
     try:
-        parent_text = parent_path.read_text(encoding="utf-8")
-    except OSError as exc:
+        parent_text = parent_workflow_bytes().decode("utf-8")
+    except UnicodeDecodeError as exc:
         raise PermitInputError(
-            f"unable to read parent authority workflow: {exc}"
+            f"parent authority workflow is invalid UTF-8: {exc}"
         ) from exc
     parent = parse_strict_workflow_yaml(parent_text, label="parent authority workflow")
     validate_authority_workflow_shape(parent, label="parent authority workflow")
@@ -507,7 +503,7 @@ def first_workflow_difference(
         if len(expected) != len(candidate):
             return f"{path} length"
         for index, (expected_value, candidate_value) in enumerate(
-            zip(expected, candidate, strict=True)
+            zip(expected, candidate)
         ):
             difference = first_workflow_difference(
                 expected_value,
@@ -552,6 +548,124 @@ def git_text(repository: Path, *arguments: str) -> str:
 
 def git_blob(repository: Path, candidate_sha: str, path: str) -> bytes:
     return run_git(repository, "show", f"{candidate_sha}:{path}")
+
+
+def parent_repository() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def git_workflow_inventory(
+    repository: Path,
+    revision: str,
+    *,
+    label: str,
+) -> dict[str, tuple[str, str, str]]:
+    records = run_git(
+        repository,
+        "ls-tree",
+        "-r",
+        "-z",
+        revision,
+        "--",
+        PARENT_WORKFLOW_DIRECTORY,
+    ).split(b"\0")
+    inventory: dict[str, tuple[str, str, str]] = {}
+    prefix = f"{PARENT_WORKFLOW_DIRECTORY}/"
+    for record in records:
+        if not record:
+            continue
+        try:
+            metadata, raw_path = record.split(b"\t", maxsplit=1)
+            mode, object_type, object_id = metadata.split(b" ", maxsplit=2)
+            path = raw_path.decode("utf-8")
+            parsed_mode = mode.decode("ascii")
+            parsed_type = object_type.decode("ascii")
+            parsed_object_id = object_id.decode("ascii")
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise PermitInputError(f"{label} has an invalid Git workflow-tree entry") from exc
+        if not path.startswith(prefix):
+            raise PermitInputError(f"{label} escaped the workflow directory: {path!r}")
+        if path in inventory:
+            raise PermitInputError(f"{label} contains duplicate workflow path: {path}")
+        require_sha(parsed_object_id, label=f"{label} object for {path}", length=40)
+        inventory[path] = (parsed_mode, parsed_type, parsed_object_id)
+    if not inventory:
+        raise PermitInputError(f"{label} has no workflow files")
+    return inventory
+
+
+def parent_workflow_inventory() -> dict[str, tuple[str, str, str]]:
+    inventory = git_workflow_inventory(
+        parent_repository(),
+        "HEAD",
+        label="parent authority workflow inventory",
+    )
+    if PARENT_WORKFLOW_PATH not in inventory:
+        raise PermitInputError("parent authority workflow inventory is missing ci.yml")
+    for path, (mode, object_type, _) in inventory.items():
+        if mode != WORKFLOW_REGULAR_MODE or object_type != "blob":
+            raise PermitInputError(
+                "parent authority workflow inventory contains a non-regular file: "
+                f"{path}",
+            )
+    return inventory
+
+
+def parent_workflow_bytes() -> bytes:
+    parent_workflow_inventory()
+    return git_blob(parent_repository(), "HEAD", PARENT_WORKFLOW_PATH)
+
+
+def validate_candidate_workflow_inventory(
+    candidate_repository: Path,
+    candidate_sha: str,
+    *,
+    kernel_sha: str,
+) -> None:
+    parent_inventory = parent_workflow_inventory()
+    candidate_inventory = git_workflow_inventory(
+        candidate_repository,
+        candidate_sha,
+        label="candidate workflow inventory",
+    )
+    parent_paths = set(parent_inventory)
+    candidate_paths = set(candidate_inventory)
+    if candidate_paths != parent_paths:
+        missing = sorted(parent_paths - candidate_paths)
+        unexpected = sorted(candidate_paths - parent_paths)
+        raise PermitInputError(
+            "candidate workflow inventory differs from the immutable parent; "
+            f"missing={missing}, unexpected={unexpected}",
+        )
+
+    parent_repository_path = parent_repository()
+    for path in sorted(parent_paths):
+        parent_mode, parent_type, _ = parent_inventory[path]
+        candidate_mode, candidate_type, _ = candidate_inventory[path]
+        if (candidate_mode, candidate_type) != (parent_mode, parent_type):
+            raise PermitInputError(
+                "candidate workflow inventory mode/type differs from the immutable "
+                f"parent at {path}: expected {parent_mode} {parent_type}, "
+                f"observed {candidate_mode} {candidate_type}",
+            )
+        if path == PARENT_WORKFLOW_PATH:
+            continue
+        if git_blob(candidate_repository, candidate_sha, path) != git_blob(
+            parent_repository_path,
+            "HEAD",
+            path,
+        ):
+            raise PermitInputError(
+                "candidate non-authority workflow differs from the immutable parent: "
+                f"{path}",
+            )
+
+    workflow_bytes = git_blob(candidate_repository, candidate_sha, PARENT_WORKFLOW_PATH)
+    try:
+        workflow = workflow_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise PermitInputError(f"candidate workflow is invalid UTF-8: {exc}") from exc
+    validate_candidate_workflow(workflow, kernel_sha=kernel_sha)
 
 
 def validate_authority_shape(authority: Any, *, label: str) -> dict[str, Any]:
@@ -773,17 +887,9 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         if candidate_authority[field] != observed:
             raise PermitInputError(f"candidate {field} does not match {path}")
 
-    workflow_bytes = git_blob(
+    validate_candidate_workflow_inventory(
         candidate_repository,
         candidate_sha,
-        ".github/workflows/ci.yml",
-    )
-    try:
-        workflow = workflow_bytes.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise PermitInputError(f"candidate workflow is invalid UTF-8: {exc}") from exc
-    validate_candidate_workflow(
-        workflow,
         kernel_sha=candidate_authority["kernel_sha"],
     )
 

@@ -36,7 +36,12 @@ The local credential may execute those inputs but cannot make a DENY acceptable.
   the three declared Kernel checkout refs and matching `prepare` `KERNEL_SHA`
   may change. The ordered approval-broker checkout/build and sole
   approval-step use of the isolated App token are included in that profile.
-  Comments and repeated text do not satisfy this check.
+  The verifier also compares the full parent and candidate
+  `.github/workflows` Git-tree inventories: paths and regular modes are exact,
+  `ci.yml` is the only semantic exception, and every other workflow blob must
+  be byte-identical. Added, deleted, nested, symlinked, gitlink, mode-changed,
+  or altered workflows fail. Comments and repeated text do not satisfy this
+  check.
 - The permit, Sigstore bundle, and trusted context were downloaded from the
   same GitHub Actions run.
 - The output directory does not exist. Evidence directories are immutable.

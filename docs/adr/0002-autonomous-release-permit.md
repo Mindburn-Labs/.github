@@ -70,7 +70,12 @@ no command-discovery or Makefile fallback. The profile names an exact command
 vector and SHA-256 digests for every build file that can alter those commands;
 missing, changed, non-regular, or symlinked protected files fail before either
 model runs. Authority-critical profile changes use the same two-generation
-ratification rule as workflow changes.
+ratification rule as workflow changes. The authority repository additionally
+uses a closed `.github/workflows` inventory before any candidate command: each
+allowed path has an exact regular-file mode, `ci.yml` is the sole semantic
+entry, and every other workflow has a source-owned SHA-256 digest. An added,
+deleted, nested, non-regular, mode-changed, or digest-drifting workflow fails
+before a candidate gate command or model review.
 
 Every context also binds `config/autonomous-release-authority.json`. The
 manifest names a monotonically increasing generation, the exact Kernel SHA,
@@ -90,6 +95,12 @@ defaults/concurrency, all known job IDs and dependencies, every job execution
 field, and every ordered step, action SHA, input, environment value, shell
 script, and artifact path. The only permitted successor substitutions are the
 three declared Kernel checkout refs and the matching `prepare` `KERNEL_SHA`.
+It also reads the complete workflow directory directly from the immutable
+parent and candidate Git trees. Their path and mode inventories must be
+identical; only the regular `ci.yml` blob proceeds to the semantic check, while
+every other workflow blob must be byte-identical to the parent. Thus an added,
+deleted, nested, symlinked, gitlink, mode-changed, or otherwise altered
+workflow cannot create an authority surface outside the `ci.yml` exception.
 The machine-approval chain is part of that closed-world profile: the immutable
 approval-broker checkout and source-owned verifier build remain ordered, the
 approval-only App action SHA and step ID remain exact, and its minted token has

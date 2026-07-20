@@ -6,8 +6,6 @@
         ["make", "test"]
       ],
       "protected_files": {
-        ".github/workflows/ci.yml": "a4e14a559ed51489d4afa39cceb24fee4a4ad2adf8ceebb3ee3255c9d66717e9",
-        ".github/workflows/promote-authority.yml": "097460ffa3f2673f7f2d67a45a57bbb963acb231da3131a929a48d84aa6c6c39",
         "Makefile": "4559934af490cb54f61405c8471fca1e9d287ea5c719ff90192d33c1ec180925",
         "config/autonomous-release-bootstrap-v1.json": "d5b2012cadd4fbf8e24bfe4f8ed69c620cf9d6481dc9f488852aa855fe1712b6",
         "config/autonomous-release-control-plane.json": "62332956bdad7554e4b093c8abb95cf984a300c55f10381dee906f1466818992",
@@ -17,9 +15,9 @@
         "scripts/bootstrap_authority.py": "8ab8500dd56e6bc295e260fec5d30915b79de39e8d9c67bf3837d8b162d66cf9",
         "scripts/configure_machine_approval_gates.py": "ba5109198c69e2d2a0ce56bef18e43c0a201e2eba0f79c4ef5c7a4a759e4e923",
         "scripts/observe_authority_promotion.py": "04a4767e4a641fdcca809e6a185a502dcb53cdd6c47519df979a0f08fdcf773a",
-        "scripts/run_autonomous_release_gates.py": "e9ab0ed2d91923e93df3e7c148f2ea15381cff9ceb6f4360d3b1fd258ae26f31",
+        "scripts/run_autonomous_release_gates.py": "80a21f602748b39310f74c56e1ca6ccb2466dfab91d7de4ffd8120ad56b40839",
         "scripts/submit_machine_approval.py": "1a2743342026928c6a346df88ad0864b034155ce9320e6e45a598146398c986f",
-        "scripts/verify_authority_promotion.py": "aa1450c8ade5b6b57bde2df7a54fdd73400e66ed3d979a12b95600b349465938",
+        "scripts/verify_authority_promotion.py": "3afa53d363fbab363c19e481954895bf5270e16b97c5df1f0919e012ddfce8b2",
         "scripts/verify_control_plane.py": "78ad97bffd7f065737c6839ea66475a98ca4583dfbedb60673648f86ef893416",
         "scripts/wait_for_authority_canary.py": "6a6524639590e5dac432f0bc25a135712310a4fa1a87bc2f3aff19cc3f31662f",
         "scripts/wait_for_authority_suite.py": "b97933597c2b5d9f132a488a3a63a6b3ccec299bbe80ad3d2e085ad549343613",
@@ -31,12 +29,34 @@
         "tests/test_observe_authority_promotion.py": "3ea6c9824b7c3d20738b2c31d198d618a59a985c688dfa39694713756fb5aadd",
         "tests/test_configure_machine_approval_gates.py": "645d2acdb754fe77da9e10920e0bc9cf65a421e742c426f540e3c2f5b2a2cf6d",
         "tests/test_submit_machine_approval.py": "0a2887be1d996f83d66e6b2ce29da4915d21c16d2badb614e0bc016d74e8d38d",
-        "tests/test_verify_authority_promotion.py": "84c8cf6f8532c80d1eca3e0b87b33d70c7b792f64161d9653a88b4f345dafd34",
+        "tests/test_run_autonomous_release_gates.py": "2d031593af88385e0813a0b5e0cb73114131791065fecf59379b6c5fb68f4fdf",
+        "tests/test_verify_authority_promotion.py": "2e80ff9bf49abeabfc422fe6df22586c5f81a1e6696cd9113fdb3c2db0bb0291",
         "tests/test_verify_control_plane.py": "36620d9e7486582c9786d2c05479491e731243298338b8fe0e8302c31979ac88",
         "tests/test_wait_for_authority_canary.py": "6ec843374d9e2adb7063e15baa41b7a9bad2a49ec9c0f6a760ad17f39f449ce2",
         "tests/test_wait_for_authority_suite.py": "28297e2d191f21a85d46d5abe4c6403663a942e560299e8c0d549576176369b1",
         "tools/offline-attest/attest.mjs": "21c544e689f472039cbd5fd621fab34b801bdd40b92fb68745948253ce621144",
         "tools/offline-attest/package-lock.json": "a4b898bac65ba7ccbf1b6871d5ec5c6fdcf83d8d38fa976b52ad11bad29ac135"
+      },
+      "workflow_inventory": {
+        "root": ".github/workflows",
+        "files": {
+          ".github/workflows/ci.yml": {
+            "mode": "100644",
+            "semantic": true
+          },
+          ".github/workflows/docs-truth-public.yml": {
+            "mode": "100644",
+            "sha256": "5422a1d0f49f9edf711e5c96ca7c98ebb423cbeb71ef9e57c8a935744b547ea3"
+          },
+          ".github/workflows/docs-truth.yml": {
+            "mode": "100644",
+            "sha256": "2cc9bb7b1271b554664ce2f9e8a426b98528b7022187eb6feed9714230a0be2d"
+          },
+          ".github/workflows/promote-authority.yml": {
+            "mode": "100644",
+            "sha256": "097460ffa3f2673f7f2d67a45a57bbb963acb231da3131a929a48d84aa6c6c39"
+          }
+        }
       }
     },
     "Mindburn-Labs/app-helm-console": {

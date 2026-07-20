@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import sys
 from typing import Any
@@ -67,6 +68,55 @@ def validate_protected_path(value: Any, *, label: str) -> str:
     return value
 
 
+def validate_workflow_inventory(value: Any, *, label: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise GateProfileError(f"{label} must be an object")
+    require_exact_keys(value, {"root", "files"}, label)
+    root = validate_protected_path(value["root"], label=f"{label} root")
+    if root != ".github/workflows":
+        raise GateProfileError(f"{label} root must be .github/workflows")
+    files = value["files"]
+    if not isinstance(files, dict) or not files or len(files) > 32:
+        raise GateProfileError(f"{label} must declare 1-32 workflow files")
+
+    validated_files: dict[str, dict[str, Any]] = {}
+    semantic_paths: list[str] = []
+    prefix = f"{root}/"
+    for path, entry in files.items():
+        validated_path = validate_protected_path(path, label=f"{label} workflow path")
+        if not validated_path.startswith(prefix):
+            raise GateProfileError(f"{label} workflow path escapes its root: {validated_path}")
+        if not isinstance(entry, dict):
+            raise GateProfileError(f"{label} entry for {validated_path} must be an object")
+        mode = entry.get("mode")
+        if mode != "100644":
+            raise GateProfileError(
+                f"{label} entry for {validated_path} must declare regular mode 100644",
+            )
+        entry_keys = set(entry)
+        if entry_keys == {"mode", "semantic"}:
+            if entry["semantic"] is not True:
+                raise GateProfileError(
+                    f"{label} semantic entry for {validated_path} must be true",
+                )
+            validated_files[validated_path] = {"mode": mode, "semantic": True}
+            semantic_paths.append(validated_path)
+        elif entry_keys == {"mode", "sha256"}:
+            digest = entry["sha256"]
+            if not isinstance(digest, str) or not SHA256_PATTERN.fullmatch(digest):
+                raise GateProfileError(
+                    f"{label} digest for {validated_path!r} is invalid",
+                )
+            validated_files[validated_path] = {"mode": mode, "sha256": digest}
+        else:
+            raise GateProfileError(
+                f"{label} entry for {validated_path} must be semantic or digest-locked",
+            )
+    if semantic_paths != [f"{root}/ci.yml"]:
+        raise GateProfileError(f"{label} may make only {root}/ci.yml semantic")
+    return {"root": root, "files": validated_files}
+
+
 def load_profiles(path: Path) -> dict[str, dict[str, Any]]:
     document = parse_json_strict(path)
     if not isinstance(document, dict):
@@ -83,11 +133,15 @@ def load_profiles(path: Path) -> dict[str, dict[str, Any]]:
             raise GateProfileError(f"invalid profile repository: {repository!r}")
         if not isinstance(profile, dict):
             raise GateProfileError(f"profile {repository} must be an object")
-        require_exact_keys(
-            profile,
-            {"commands", "protected_files"},
-            f"profile {repository}",
-        )
+        profile_keys = set(profile)
+        required_keys = {"commands", "protected_files"}
+        permitted_keys = required_keys | {"workflow_inventory"}
+        if profile_keys != required_keys and profile_keys != permitted_keys:
+            raise GateProfileError(
+                f"profile {repository} keys invalid; "
+                f"missing={sorted(required_keys - profile_keys)}, "
+                f"unexpected={sorted(profile_keys - permitted_keys)}",
+            )
         commands = profile["commands"]
         if not isinstance(commands, list) or not commands or len(commands) > 32:
             raise GateProfileError(f"profile {repository} must contain 1-32 commands")
@@ -130,9 +184,16 @@ def load_profiles(path: Path) -> dict[str, dict[str, Any]]:
                     f"profile {repository} protected digest for {validated_path!r} is invalid",
                 )
             validated_protected_files[validated_path] = digest
+        workflow_inventory = None
+        if "workflow_inventory" in profile:
+            workflow_inventory = validate_workflow_inventory(
+                profile["workflow_inventory"],
+                label=f"profile {repository} workflow inventory",
+            )
         profiles[repository] = {
             "commands": validated_commands,
             "protected_files": validated_protected_files,
+            "workflow_inventory": workflow_inventory,
         }
     return profiles
 
@@ -152,6 +213,66 @@ def verify_protected_files(target: Path, protected_files: dict[str, str]) -> Non
             )
 
 
+def verify_workflow_inventory(target: Path, inventory: dict[str, Any]) -> None:
+    root = inventory["root"]
+    workflow_root = target.joinpath(*root.split("/"))
+    try:
+        root_status = os.lstat(workflow_root)
+    except OSError as exc:
+        raise GateProfileError(f"workflow inventory root is unavailable: {root}") from exc
+    if not stat.S_ISDIR(root_status.st_mode):
+        raise GateProfileError(f"workflow inventory root is missing or not a directory: {root}")
+
+    observed: dict[str, tuple[int, str]] = {}
+    for directory, directories, filenames in os.walk(workflow_root, followlinks=False):
+        current = Path(directory)
+        for name in directories:
+            candidate = current / name
+            if stat.S_ISLNK(os.lstat(candidate).st_mode):
+                raise GateProfileError(
+                    "workflow inventory contains a symlinked directory: "
+                    f"{candidate.relative_to(target).as_posix()}",
+                )
+        for name in filenames:
+            candidate = current / name
+            relative_path = candidate.relative_to(target).as_posix()
+            try:
+                candidate_status = os.lstat(candidate)
+            except OSError as exc:
+                raise GateProfileError(
+                    f"workflow inventory file is unavailable: {relative_path}",
+                ) from exc
+            if not stat.S_ISREG(candidate_status.st_mode):
+                raise GateProfileError(
+                    f"workflow inventory file is not regular: {relative_path}",
+                )
+            observed[relative_path] = (
+                candidate_status.st_mode,
+                hashlib.sha256(candidate.read_bytes()).hexdigest(),
+            )
+
+    expected_files = inventory["files"]
+    expected_paths = set(expected_files)
+    observed_paths = set(observed)
+    if observed_paths != expected_paths:
+        raise GateProfileError(
+            "workflow inventory differs from its source-owned profile; "
+            f"missing={sorted(expected_paths - observed_paths)}, "
+            f"unexpected={sorted(observed_paths - expected_paths)}",
+        )
+    for path, expected in expected_files.items():
+        observed_mode, observed_digest = observed[path]
+        if f"{observed_mode:06o}" != expected["mode"]:
+            raise GateProfileError(
+                f"workflow inventory file mode changed before its source-owned profile: {path}",
+            )
+        expected_digest = expected.get("sha256")
+        if expected_digest is not None and observed_digest != expected_digest:
+            raise GateProfileError(
+                f"workflow inventory file changed before its source-owned profile: {path}",
+            )
+
+
 def resolve_commands(
     repository: str,
     target: Path,
@@ -164,6 +285,8 @@ def resolve_commands(
             "repository has no immutable source-owned gate profile; Makefile fallback is forbidden",
         )
     profile = profiles[repository]
+    if profile["workflow_inventory"] is not None:
+        verify_workflow_inventory(target, profile["workflow_inventory"])
     verify_protected_files(target, profile["protected_files"])
     return "explicit", profile["commands"]
 

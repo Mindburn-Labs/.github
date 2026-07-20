@@ -69,6 +69,14 @@ explicitly: its immutable broker checkout and verifier build remain ordered,
 the approval-only App action SHA and step ID are exact, and that App token has
 one consumer only—the exact-head approval step. Comments, repeated text, or
 an unreviewed execution surface cannot constitute authority evidence.
+The parent verifier also inventories the complete `.github/workflows` Git tree:
+the candidate must retain the same paths and regular-file modes as its
+immutable parent. Only `ci.yml` is semantically reviewed under the four
+declared Kernel substitutions; every other workflow blob is byte-identical.
+Added, deleted, nested, symlinked, gitlink, mode-changed, or altered workflows
+fail closed. The authority repository's source-owned gate profile repeats that
+inventory before it runs a candidate command, so an extra workflow cannot hide
+outside the `ci.yml` semantic exception.
 Credentialed jobs also bind the pinned token action's live App slug and
 installation ID before use; the approval broker independently checks exact
 repository scope and the persisted GitHub review actor.

@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -73,7 +74,10 @@ def build_candidate(
     repository = root / "candidate"
     (repository / "config").mkdir(parents=True)
     (repository / "tests" / "fixtures").mkdir(parents=True)
-    (repository / ".github" / "workflows").mkdir(parents=True)
+    shutil.copytree(
+        ROOT / ".github" / "workflows",
+        repository / ".github" / "workflows",
+    )
     gates = b'{"profiles":{}}\n'
     corpus = b'{"schema":"mindburn.release-permit-adversarial/v1","cases":[]}\n'
     (repository / "config" / "autonomous-release-gates.json").write_bytes(gates)
@@ -111,6 +115,18 @@ def build_candidate(
     )
     candidate_sha = git(repository, "rev-parse", "HEAD")
     return repository, candidate_sha, git(repository, "rev-parse", "HEAD^{tree}")
+
+
+def commit_candidate(repository: Path, *, message: str = "candidate mutation") -> tuple[str, str]:
+    subprocess.run(["git", "-C", str(repository), "add", "-A"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repository), "commit", "-m", message],
+        check=True,
+    )
+    return (
+        git(repository, "rev-parse", "HEAD"),
+        git(repository, "rev-parse", "HEAD^{tree}"),
+    )
 
 
 def build_permit(candidate_sha: str, candidate_tree: str) -> dict[str, object]:
@@ -197,6 +213,30 @@ def verify_args(
 
 
 class AuthorityPromotionTests(unittest.TestCase):
+    def assert_inventory_rejected(self, mutation) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repository, _, _ = build_candidate(root)
+            mutation(repository)
+            candidate_sha, candidate_tree = commit_candidate(repository)
+            permit_path = root / "permit.json"
+            permit_path.write_text(
+                json.dumps(build_permit(candidate_sha, candidate_tree)) + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                MODULE.PermitInputError,
+                "workflow inventory|non-authority workflow",
+            ):
+                MODULE.verify(
+                    verify_args(
+                        repository,
+                        candidate_sha,
+                        permit_path,
+                        build_fake_verifier(root),
+                    ),
+                )
+
     def test_previous_generation_permit_ratifies_exact_successor(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -261,6 +301,97 @@ class AuthorityPromotionTests(unittest.TestCase):
                         candidate_sha,
                         permit_path,
                         build_fake_verifier(root, succeeds=False),
+                    ),
+                )
+
+    def test_candidate_exact_ci_cannot_add_unreviewed_authority_workflow(self) -> None:
+        def add_unreviewed_workflow(repository: Path) -> None:
+            workflow = repository / ".github" / "workflows" / "unreviewed-main.yml"
+            workflow.write_text(
+                "name: Unreviewed authority surface\n"
+                "on:\n"
+                "  push:\n"
+                "    branches: [main]\n"
+                "jobs:\n"
+                "  execute:\n"
+                "    runs-on: ubuntu-latest\n"
+                "    environment: authority-promotion\n"
+                "    steps:\n"
+                "      - run: true\n",
+                encoding="utf-8",
+            )
+
+        self.assert_inventory_rejected(add_unreviewed_workflow)
+
+    def test_candidate_workflow_inventory_rejects_add_delete_mutation_and_symlink(self) -> None:
+        def add_nested_workflow(repository: Path) -> None:
+            nested = repository / ".github" / "workflows" / "nested"
+            nested.mkdir()
+            (nested / "unreviewed.yml").write_text("name: unreviewed\n", encoding="utf-8")
+
+        def delete_workflow(repository: Path) -> None:
+            (repository / ".github" / "workflows" / "docs-truth.yml").unlink()
+
+        def mutate_workflow(repository: Path) -> None:
+            workflow = repository / ".github" / "workflows" / "docs-truth.yml"
+            workflow.write_text(
+                workflow.read_text(encoding="utf-8") + "\n# candidate mutation\n",
+                encoding="utf-8",
+            )
+
+        def symlink_workflow(repository: Path) -> None:
+            workflow = repository / ".github" / "workflows" / "docs-truth.yml"
+            workflow.unlink()
+            workflow.symlink_to("docs-truth-public.yml")
+
+        for name, mutation in (
+            ("nested", add_nested_workflow),
+            ("delete", delete_workflow),
+            ("mutation", mutate_workflow),
+            ("symlink", symlink_workflow),
+        ):
+            with self.subTest(name=name):
+                self.assert_inventory_rejected(mutation)
+
+    def test_candidate_workflow_inventory_rejects_gitlink(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repository, _, _ = build_candidate(root)
+            path = ".github/workflows/promote-authority.yml"
+            subprocess.run(
+                ["git", "-C", str(repository), "rm", "--cached", path],
+                check=True,
+            )
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(repository),
+                    "update-index",
+                    "--add",
+                    "--cacheinfo",
+                    f"160000,{'f' * 40},{path}",
+                ],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(repository), "commit", "-m", "candidate gitlink"],
+                check=True,
+            )
+            candidate_sha = git(repository, "rev-parse", "HEAD")
+            candidate_tree = git(repository, "rev-parse", "HEAD^{tree}")
+            permit_path = root / "permit.json"
+            permit_path.write_text(
+                json.dumps(build_permit(candidate_sha, candidate_tree)) + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(MODULE.PermitInputError, "workflow inventory"):
+                MODULE.verify(
+                    verify_args(
+                        repository,
+                        candidate_sha,
+                        permit_path,
+                        build_fake_verifier(root),
                     ),
                 )
 
@@ -333,6 +464,15 @@ class CandidateWorkflowContractTests(unittest.TestCase):
                         malformed,
                         kernel_sha=CANDIDATE_KERNEL_SHA,
                     )
+
+    def test_strict_yaml_rejects_mapping_and_sequence_tags(self) -> None:
+        for name, malformed in (
+            ("mapping", "!unsafe {name: authority}\n"),
+            ("sequence", "!unsafe [authority]\n"),
+        ):
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(MODULE.PermitInputError, "YAML tags are not allowed"):
+                    MODULE.parse_strict_workflow_yaml(malformed)
 
     def test_yaml_on_key_is_not_coerced_to_boolean(self) -> None:
         self.assert_rejected(
