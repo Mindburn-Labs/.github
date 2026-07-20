@@ -15,6 +15,7 @@ lint:
 	@ruby -e 'require "yaml"; require "date"; %w[manifest-local-policy.yaml local-compatibility-policy.yaml].each { |path| YAML.safe_load(File.read(path), permitted_classes: [Date, Time], aliases: true) }; puts "validated ecosystem map policies"'
 	@ruby -e 'require "yaml"; YAML.safe_load(File.read("agent.yaml"), aliases: true); YAML.safe_load(File.read("catalog-info.yaml"), aliases: true); YAML.safe_load(File.read("observability/alerts.yaml"), aliases: true); puts "validated baseline yaml"'
 	@ruby scripts/check-org-rename-guard.rb
+	@ruby scripts/stage-docs-truth-premerge-contracts_test.rb
 	@if [ -n "$$MINDBURN_WORKSPACE_ROOT" ] || [ "$(REQUIRE_WORKSPACE_CONTEXT)" = "1" ]; then \
 		ruby scripts/generate-helm-ecosystem-map.rb --check; \
 	else \
