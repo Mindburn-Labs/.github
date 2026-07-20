@@ -6,10 +6,14 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timedelta, timezone
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
+import tarfile
+import tempfile
 from typing import Any
 
 from atomic_merge_authority import (
@@ -39,23 +43,33 @@ from autonomous_release_permit import (
 from configure_machine_approval_gates import (
     GitHubAdminClient,
     configure_machine_approval_gates,
+    controlled_ruleset,
+    require_object,
 )
 from submit_machine_approval import (
+    APPROVER_APP_ID,
     APPROVER_INSTALLATION_ID,
     APPROVER_SLUG,
     GitHubApprovalClient,
     submit_machine_approval,
+    verify_installation,
 )
-from verify_authority_promotion import verify as verify_promotion
+from verify_authority_promotion import git_blob, verify as verify_promotion
 from verify_control_plane import (
+    AUTHORITY_REPOSITORY,
+    CONTROL_BRANCH,
+    CONTROL_REF,
+    CONTROL_RULESET_NAME,
     load_json,
     validate_contract,
+    verify_live_control_workflow,
     verify_live_environments,
     verify_live_repository_settings,
 )
 from wait_for_authority_canary import (
     GitHubReadClient,
     load_json_file,
+    require_get_forbidden,
     verify_attestation,
     verify_candidate_permit,
     wait_for_canary,
@@ -63,10 +77,41 @@ from wait_for_authority_canary import (
 from wait_for_authority_suite import wait_for_suite
 
 
-READY_SCHEMA = "mindburn.release-authority-bootstrap-ready/v1"
-FINAL_SCHEMA = "mindburn.release-authority-bootstrap/v1"
+READY_SCHEMA = "mindburn.release-authority-bootstrap-ready/v2"
+FINAL_SCHEMA = "mindburn.release-authority-bootstrap/v2"
 TRIGGER_SCHEMA = "mindburn.release-authority-suite-trigger/v1"
 LAB_REPOSITORY = "Mindburn-Labs/contracts-autonomous-release-lab"
+OBSERVER_APP_ID = 4296957
+OBSERVER_INSTALLATION_ID = 146542079
+OBSERVER_SLUG = "helm-authority-observer"
+OBSERVER_REPOSITORIES = {REPOSITORY, LAB_REPOSITORY}
+OBSERVER_PERMISSIONS = {
+    "actions": "read",
+    "attestations": "read",
+    "contents": "read",
+    "organization_administration": "write",
+    "pull_requests": "read",
+}
+CANDIDATE_ARGUMENT_SOURCE_INPUTS = {
+    "candidate_authority": "config/autonomous-release-authority.json",
+    "control_contract": "config/autonomous-release-control-plane.json",
+    "adversarial_corpus": "tests/fixtures/autonomous-release-adversarial.json",
+    "bootstrap_contract": "config/autonomous-release-bootstrap-v1.json",
+}
+CANDIDATE_LOCAL_SOURCE_INPUTS = (
+    "config/autonomous-release-ci-template.yml",
+    "scripts/atomic_merge_authority.py",
+    "scripts/authority_ruleset_broker.py",
+    "scripts/autonomous_release_permit.py",
+    "scripts/bootstrap_authority.py",
+    "scripts/configure_machine_approval_gates.py",
+    "scripts/observe_authority_promotion.py",
+    "scripts/submit_machine_approval.py",
+    "scripts/verify_authority_promotion.py",
+    "scripts/verify_control_plane.py",
+    "scripts/wait_for_authority_canary.py",
+    "scripts/wait_for_authority_suite.py",
+)
 
 
 def canonical_json(value: dict[str, Any]) -> bytes:
@@ -80,6 +125,121 @@ def write_json(path: Path, value: dict[str, Any]) -> None:
 
 def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def verify_candidate_source_inputs(args: argparse.Namespace) -> dict[str, str]:
+    repository = args.candidate_repository.resolve()
+    local_root = Path(__file__).resolve().parents[1]
+    receipts: dict[str, str] = {}
+    inputs = [
+        (getattr(args, argument), source_path)
+        for argument, source_path in CANDIDATE_ARGUMENT_SOURCE_INPUTS.items()
+    ] + [
+        (local_root / source_path, source_path)
+        for source_path in CANDIDATE_LOCAL_SOURCE_INPUTS
+    ]
+    for local_path, source_path in inputs:
+        source = git_blob(repository, args.candidate_sha, source_path)
+        if local_path.read_bytes() != source:
+            raise PermitInputError(
+                f"bootstrap input {source_path} is not the reviewed candidate blob"
+            )
+        receipts[source_path] = hashlib.sha256(source).hexdigest()
+    return receipts
+
+
+def extract_kernel_source(repository: Path, kernel_sha: str, destination: Path) -> None:
+    process = subprocess.run(
+        ["git", "-C", str(repository), "archive", "--format=tar", kernel_sha, "core"],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if process.returncode != 0:
+        detail = process.stderr.decode("utf-8", errors="replace").strip()
+        raise PermitInputError(f"cannot archive exact Kernel {kernel_sha}: {detail}")
+    try:
+        with tarfile.open(fileobj=io.BytesIO(process.stdout), mode="r:") as archive:
+            members = archive.getmembers()
+            if any(member.issym() or member.islnk() for member in members):
+                raise PermitInputError("exact Kernel archive cannot contain links")
+            archive.extractall(destination, filter="data")
+    except (tarfile.TarError, ValueError) as exc:
+        raise PermitInputError("exact Kernel archive is invalid") from exc
+
+
+def build_exact_kernel_verifier(
+    repository: Path,
+    kernel_sha: str,
+    destination: Path,
+) -> dict[str, Any]:
+    kernel_sha = require_sha(kernel_sha, label="Kernel source SHA", length=40)
+    source_dir = destination / "source"
+    source_dir.mkdir(parents=True, exist_ok=False)
+    extract_kernel_source(repository.resolve(), kernel_sha, source_dir)
+    binary = destination / "release-permit-verify"
+    process = subprocess.run(
+        [
+            "go",
+            "build",
+            "-buildvcs=false",
+            "-trimpath",
+            "-ldflags=-buildid=",
+            "-o",
+            str(binary),
+            "./cmd/release-permit-verify",
+        ],
+        cwd=source_dir / "core",
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if process.returncode != 0:
+        detail = process.stderr.decode("utf-8", errors="replace").strip()
+        raise PermitInputError(
+            f"cannot build exact Kernel verifier {kernel_sha}: {detail}"
+        )
+    if not binary.is_file():
+        raise PermitInputError("exact Kernel build emitted no verifier")
+    receipt = {
+        "schema": "mindburn.release-authority-kernel-verifier-build/v1",
+        "kernel_sha": kernel_sha,
+        "binary_sha256": sha256_file(binary),
+        "command": [
+            "go",
+            "build",
+            "-buildvcs=false",
+            "-trimpath",
+            "-ldflags=-buildid=",
+            "./cmd/release-permit-verify",
+        ],
+    }
+    write_json(destination / "receipt.json", receipt)
+    return {"binary": binary, "receipt": receipt}
+
+
+def authority_kernel_shas(args: argparse.Namespace) -> tuple[str, str]:
+    permit = load_json_file(args.permit, label="generation-1 ratification permit")
+    parent = permit.get("authority")
+    if not isinstance(parent, dict):
+        raise PermitInputError("ratification permit has no authority object")
+    parent_sha = require_sha(
+        parent.get("kernel_sha"),
+        label="ratification authority kernel_sha",
+        length=40,
+    )
+    candidate = load_json_file(args.candidate_authority, label="candidate authority")
+    candidate_sha = require_sha(
+        candidate.get("kernel_sha"),
+        label="candidate authority kernel_sha",
+        length=40,
+    )
+    if candidate_sha != parent_sha:
+        raise PermitInputError(
+            "bootstrap cannot change the Kernel without a separately ratified "
+            "Kernel-upgrade protocol"
+        )
+    return parent_sha, candidate_sha
 
 
 def nested(value: dict[str, Any], *keys: str, label: str) -> Any:
@@ -189,6 +349,7 @@ def suite_args(
     *,
     trigger: Path,
     output_dir: Path,
+    kernel_verifier: Path,
 ) -> argparse.Namespace:
     return argparse.Namespace(
         contract=args.control_contract,
@@ -196,7 +357,7 @@ def suite_args(
         trigger=trigger,
         expected_workflow_sha=args.candidate_sha,
         expected_authority=args.candidate_authority,
-        kernel_verifier=args.permit_verifier,
+        kernel_verifier=kernel_verifier,
         output_dir=output_dir,
         timeout_seconds=args.timeout_seconds,
         poll_seconds=args.poll_seconds,
@@ -207,6 +368,8 @@ def verify_ratification(
     args: argparse.Namespace,
     *,
     attestation_token: str,
+    kernel_verifier: Path,
+    replay_dir: Path,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     permit = load_json_file(args.permit, label="generation-1 ratification permit")
     if permit.get("workflow_sha") != LEGACY_PARENT_WORKFLOW_SHA:
@@ -228,9 +391,11 @@ def verify_ratification(
     )
     promotion = verify_promotion(
         argparse.Namespace(
-            permit_verifier=args.permit_verifier,
+            permit_verifier=kernel_verifier,
             permit=args.permit,
             trusted_context=args.trusted_context,
+            review_evidence_dir=args.review_evidence_dir,
+            recomputed_permit=replay_dir / "parent-recomputed-permit.json",
             candidate_repository=args.candidate_repository,
             candidate_sha=args.candidate_sha,
             candidate_pr=args.candidate_pr,
@@ -244,7 +409,13 @@ def verify_ratification(
 
 
 def verify_control(
-    args: argparse.Namespace, client: GitHubReadClient
+    args: argparse.Namespace,
+    client: GitHubReadClient,
+    *,
+    deployment_disabled: bool = False,
+    deployment_transition: bool = False,
+    expected_control_sha: str | None = None,
+    effective_only: bool = False,
 ) -> dict[str, Any]:
     contract = validate_contract(
         load_json(args.control_contract, label="control contract"),
@@ -253,8 +424,220 @@ def verify_control(
     return {
         "contract": contract,
         "repository_settings": verify_live_repository_settings(contract, client),
-        "environments": verify_live_environments(contract, client),
+        "control_workflow": (
+            verify_live_control_workflow(
+                contract,
+                client,
+                expected_sha=expected_control_sha,
+                effective_only=effective_only,
+            )
+            if expected_control_sha is not None
+            else {}
+        ),
+        "environments": verify_live_environments(
+            contract,
+            client,
+            deployment_disabled=deployment_disabled,
+            deployment_transition=deployment_transition,
+        ),
     }
+
+
+def control_ruleset_payload(
+    contract: dict[str, Any],
+    *,
+    staged: bool,
+) -> dict[str, Any]:
+    final = contract["control_workflow"]["ruleset"]
+    if not staged:
+        return final
+    return {
+        **final,
+        "rules": [rule for rule in final["rules"] if rule.get("type") != "creation"],
+    }
+
+
+def install_control_workflow(
+    contract: dict[str, Any],
+    client: GitHubAdminClient,
+    observer_client: GitHubReadClient,
+    *,
+    expected_sha: str,
+) -> dict[str, Any]:
+    expected_sha = require_sha(
+        expected_sha,
+        label="immutable control workflow SHA",
+        length=40,
+    )
+    staged = control_ruleset_payload(contract, staged=True)
+    final = control_ruleset_payload(contract, staged=False)
+    listed = client.request("GET", "/orgs/Mindburn-Labs/rulesets?per_page=100")
+    if not isinstance(listed.body, list):
+        raise PermitInputError("GitHub control-ruleset list is malformed")
+    matches = [
+        item
+        for item in listed.body
+        if isinstance(item, dict) and item.get("name") == CONTROL_RULESET_NAME
+    ]
+    if len(matches) > 1:
+        raise PermitInputError("multiple immutable control rulesets exist")
+    if matches:
+        ruleset_id = matches[0].get("id")
+    else:
+        created = require_object(
+            client.request(
+                "POST",
+                "/orgs/Mindburn-Labs/rulesets",
+                payload=staged,
+            ),
+            label="created immutable control ruleset",
+        )
+        ruleset_id = created.get("id")
+    if not isinstance(ruleset_id, int) or ruleset_id <= 0:
+        raise PermitInputError("immutable control ruleset ID is invalid")
+
+    ruleset_path = f"/orgs/Mindburn-Labs/rulesets/{ruleset_id}"
+    current_response = client.request("GET", ruleset_path)
+    current = require_object(current_response, label="immutable control ruleset")
+    state = controlled_ruleset(current)
+    if state not in (staged, final):
+        raise PermitInputError("immutable control ruleset is outside resumable states")
+
+    refs_response = client.request(
+        "GET",
+        f"/repos/{AUTHORITY_REPOSITORY}/git/matching-refs/heads/{CONTROL_BRANCH}",
+    )
+    if not isinstance(refs_response.body, list):
+        raise PermitInputError("GitHub control-ref list is malformed")
+    exact_refs = [
+        ref
+        for ref in refs_response.body
+        if isinstance(ref, dict) and ref.get("ref") == CONTROL_REF
+    ]
+    if len(exact_refs) > 1:
+        raise PermitInputError("GitHub returned duplicate immutable control refs")
+    if not exact_refs:
+        if state == final:
+            raise PermitInputError(
+                "immutable control ref is absent behind a final ruleset"
+            )
+        created_ref = require_object(
+            client.request(
+                "POST",
+                f"/repos/{AUTHORITY_REPOSITORY}/git/refs",
+                payload={"ref": CONTROL_REF, "sha": expected_sha},
+            ),
+            label="created immutable control ref",
+        )
+        exact_refs = [created_ref]
+    control_sha = nested(
+        exact_refs[0],
+        "object",
+        "sha",
+        label="immutable control ref SHA",
+    )
+    if control_sha != expected_sha:
+        raise PermitInputError("immutable control ref names the wrong reviewed SHA")
+
+    if state == staged:
+        if not current_response.etag:
+            raise PermitInputError("immutable control ruleset GET returned no ETag")
+        refetched = client.request("GET", ruleset_path)
+        if (
+            refetched.body != current
+            or refetched.etag != current_response.etag
+            or controlled_ruleset(require_object(refetched, label="control ruleset"))
+            != staged
+        ):
+            raise PermitInputError("immutable control ruleset changed before lock")
+        client.request(
+            "PUT",
+            ruleset_path,
+            payload=final,
+            if_match=current_response.etag,
+        )
+    confirmed = require_object(
+        client.request("GET", ruleset_path),
+        label="confirmed immutable control ruleset",
+    )
+    if controlled_ruleset(confirmed) != final:
+        raise PermitInputError("immutable control ruleset did not lock exactly")
+    observed = verify_live_control_workflow(
+        contract,
+        observer_client,
+        expected_sha=expected_sha,
+        effective_only=True,
+    )
+    return {
+        "schema": "mindburn.release-authority-control-installation/v1",
+        "ruleset_id": ruleset_id,
+        "ruleset_name": CONTROL_RULESET_NAME,
+        "ref": CONTROL_REF,
+        "sha": expected_sha,
+        "observer": observed,
+    }
+
+
+def enable_control_environments(
+    contract: dict[str, Any],
+    client: GitHubAdminClient,
+    observer_client: GitHubReadClient,
+    *,
+    expected_sha: str,
+) -> list[dict[str, Any]]:
+    verify_live_control_workflow(
+        contract,
+        observer_client,
+        expected_sha=expected_sha,
+        effective_only=True,
+    )
+    for environment in contract["environments"]:
+        name = environment["name"]
+        path = (
+            f"/repos/{AUTHORITY_REPOSITORY}/environments/{name}"
+            "/deployment-branch-policies"
+        )
+        listed = client.request("GET", path)
+        if not isinstance(listed.body, dict):
+            raise PermitInputError(
+                f"environment {name} branch-policy list is malformed"
+            )
+        policies = [
+            policy
+            for policy in listed.body.get("branch_policies", [])
+            if isinstance(policy, dict)
+        ]
+        normalized = sorted(
+            (
+                {"name": policy.get("name"), "type": policy.get("type")}
+                for policy in policies
+            ),
+            key=lambda policy: (str(policy["type"]), str(policy["name"])),
+        )
+        expected = environment["branch_policies"]
+        if normalized == expected and listed.body.get("total_count") == 1:
+            continue
+        if policies or listed.body.get("total_count") != 0:
+            raise PermitInputError(
+                f"environment {name} is not disabled or already controller-only"
+            )
+        created = require_object(
+            client.request(
+                "POST",
+                path,
+                payload=expected[0],
+            ),
+            label=f"environment {name} control branch policy",
+        )
+        if {"name": created.get("name"), "type": created.get("type")} != expected[0]:
+            raise PermitInputError(f"environment {name} admitted the wrong branch")
+    verify_live_control_workflow(
+        contract,
+        observer_client,
+        expected_sha=expected_sha,
+        effective_only=True,
+    )
+    return verify_live_environments(contract, observer_client)
 
 
 def ensure_recovery_head_ref_policy(client: GitHubMergeClient) -> dict[str, Any]:
@@ -287,6 +670,143 @@ def ensure_recovery_head_ref_policy(client: GitHubMergeClient) -> dict[str, Any]
     }
 
 
+def preflight_credentials(
+    args: argparse.Namespace,
+    executor_client: GitHubAdminClient,
+    observer_client: GitHubReadClient,
+    approval_client: GitHubApprovalClient,
+) -> dict[str, Any]:
+    """Prove all bootstrap identities and read scopes before the first mutation."""
+    executor = require_object(
+        executor_client.request("GET", "/user"),
+        label="bootstrap executor identity",
+    )
+    executor_login = executor.get("login")
+    if not isinstance(executor_login, str) or not executor_login:
+        raise PermitInputError("bootstrap executor identity has no login")
+    membership = require_object(
+        executor_client.request(
+            "GET",
+            "/user/memberships/orgs/Mindburn-Labs",
+        ),
+        label="bootstrap executor organization membership",
+    )
+    if membership.get("state") != "active" or membership.get("role") != "admin":
+        raise PermitInputError(
+            "bootstrap executor must be an active organization owner"
+        )
+    authority_repository = require_object(
+        executor_client.request("GET", f"/repos/{REPOSITORY}"),
+        label="bootstrap executor authority repository",
+    )
+    repository_permissions = authority_repository.get("permissions")
+    if (
+        not isinstance(repository_permissions, dict)
+        or repository_permissions.get("admin") is not True
+        or repository_permissions.get("push") is not True
+    ):
+        raise PermitInputError(
+            "bootstrap executor lacks authority repository administration"
+        )
+    candidate = require_object(
+        executor_client.request(
+            "GET",
+            f"/repos/{REPOSITORY}/pulls/{args.candidate_pr}",
+        ),
+        label="bootstrap candidate pull request",
+    )
+    if candidate.get("number") != args.candidate_pr:
+        raise PermitInputError(
+            "bootstrap executor read the wrong candidate pull request"
+        )
+    for ruleset_id in (STABLE_RULESET_ID, CANDIDATE_RULESET_ID):
+        ruleset = require_object(
+            executor_client.request(
+                "GET",
+                f"/orgs/Mindburn-Labs/rulesets/{ruleset_id}",
+            ),
+            label=f"bootstrap executor ruleset {ruleset_id}",
+        )
+        if ruleset.get("id") != ruleset_id:
+            raise PermitInputError(
+                "bootstrap executor read the wrong organization ruleset"
+            )
+
+    observer_installation = observer_client.get_json("/installation")
+    observer_account = observer_installation.get("account")
+    if (
+        observer_installation.get("app_id") != OBSERVER_APP_ID
+        or observer_installation.get("id") != OBSERVER_INSTALLATION_ID
+        or not isinstance(observer_account, dict)
+        or observer_account.get("login") != "Mindburn-Labs"
+        or observer_installation.get("permissions") != OBSERVER_PERMISSIONS
+    ):
+        raise PermitInputError("bootstrap observer App identity or permissions drifted")
+    observer_repositories = observer_client.get_json(
+        "/installation/repositories?per_page=100"
+    )
+    repository_items = observer_repositories.get("repositories")
+    if not isinstance(repository_items, list):
+        raise PermitInputError("bootstrap observer repository scope is malformed")
+    observer_names = {
+        item.get("full_name") for item in repository_items if isinstance(item, dict)
+    }
+    if observer_names != OBSERVER_REPOSITORIES:
+        raise PermitInputError("bootstrap observer repository scope is not exact")
+    require_get_forbidden(
+        observer_client,
+        f"/orgs/Mindburn-Labs/rulesets/{STABLE_RULESET_ID}",
+        label="bootstrap observer organization-ruleset write scope",
+    )
+
+    approver_installation = approval_client.request("GET", "/installation")
+    approver_account = (
+        approver_installation.get("account")
+        if isinstance(approver_installation, dict)
+        else None
+    )
+    if (
+        not isinstance(approver_installation, dict)
+        or approver_installation.get("app_id") != APPROVER_APP_ID
+        or approver_installation.get("id") != APPROVER_INSTALLATION_ID
+        or not isinstance(approver_account, dict)
+        or approver_account.get("login") != "Mindburn-Labs"
+        or approver_installation.get("permissions") != {"pull_requests": "write"}
+    ):
+        raise PermitInputError("bootstrap approver App identity or permissions drifted")
+    approver = verify_installation(
+        approval_client,
+        repository=REPOSITORY,
+        app_slug=APPROVER_SLUG,
+        installation_id=APPROVER_INSTALLATION_ID,
+    )
+    return {
+        "schema": "mindburn.release-authority-bootstrap-credential-preflight/v1",
+        "executor": {
+            "login": executor_login,
+            "organization": "Mindburn-Labs",
+            "organization_role": membership["role"],
+            "repository": REPOSITORY,
+            "repository_admin": True,
+        },
+        "observer": {
+            "app_id": OBSERVER_APP_ID,
+            "app_slug": OBSERVER_SLUG,
+            "installation_id": OBSERVER_INSTALLATION_ID,
+            "permissions": OBSERVER_PERMISSIONS,
+            "repositories": sorted(observer_names),
+            "ruleset_write_scope": "denied",
+        },
+        "approver": {
+            "app_id": approver["app_id"],
+            "app_slug": approver["app_slug"],
+            "installation_id": approver["id"],
+            "permissions": {"pull_requests": "write"},
+            "repositories": [REPOSITORY],
+        },
+    }
+
+
 def prepare(
     args: argparse.Namespace,
     token: str,
@@ -301,7 +821,12 @@ def prepare(
         raise PermitInputError("candidate_pr must be positive")
     if args.output_dir.exists():
         raise PermitInputError("bootstrap output directory already exists")
-    args.output_dir.mkdir(parents=True)
+    source_input_receipt = {
+        "schema": "mindburn.release-authority-bootstrap-source-inputs/v1",
+        "candidate_sha": args.candidate_sha,
+        "sha256": verify_candidate_source_inputs(args),
+    }
+    parent_kernel_sha, _candidate_kernel_sha = authority_kernel_shas(args)
 
     read_client = GitHubReadClient(token)
     observer_client = GitHubReadClient(observer_token)
@@ -309,6 +834,23 @@ def prepare(
     ruleset_client = GitHubRulesetClient(token)
     admin_client = GitHubAdminClient(token)
     approval_client = GitHubApprovalClient(approver_token)
+    credential_preflight = preflight_credentials(
+        args,
+        admin_client,
+        observer_client,
+        approval_client,
+    )
+    args.output_dir.mkdir(parents=True)
+    source_input_path = args.output_dir / "source-inputs.json"
+    write_json(source_input_path, source_input_receipt)
+    credential_preflight_path = args.output_dir / "credential-preflight.json"
+    write_json(credential_preflight_path, credential_preflight)
+    verifier_root = args.output_dir / "verifiers"
+    parent_verifier = build_exact_kernel_verifier(
+        args.kernel_repository,
+        parent_kernel_sha,
+        verifier_root / "parent",
+    )
     staged = False
     enforced = False
     enforcement_started = False
@@ -316,14 +858,20 @@ def prepare(
         ratification, promotion = verify_ratification(
             args,
             attestation_token=observer_token,
+            kernel_verifier=parent_verifier["binary"],
+            replay_dir=args.output_dir / "ratification-replay",
         )
         repository_settings = ensure_recovery_head_ref_policy(merge_client)
         write_json(
             args.output_dir / "repository-settings.json",
             repository_settings,
         )
-        control = verify_control(args, read_client)
-        observer_control = verify_control(args, observer_client)
+        control = verify_control(args, read_client, deployment_disabled=True)
+        observer_control = verify_control(
+            args,
+            observer_client,
+            deployment_disabled=True,
+        )
         if control != observer_control:
             raise PermitInputError("independent live control-plane reads did not match")
         write_json(args.output_dir / "control-plane-before.json", control)
@@ -392,6 +940,7 @@ def prepare(
                 args,
                 trigger=trigger_path,
                 output_dir=args.output_dir / "suite-promoter",
+                kernel_verifier=parent_verifier["binary"],
             ),
             read_client,
         )
@@ -402,6 +951,7 @@ def prepare(
                 args,
                 trigger=trigger_path,
                 output_dir=args.output_dir / "suite-observer",
+                kernel_verifier=parent_verifier["binary"],
             ),
             observer_client,
         )
@@ -450,7 +1000,7 @@ def prepare(
             started_at=liveness_started.isoformat().replace("+00:00", "Z"),
             expected_workflow_sha=args.candidate_sha,
             expected_authority=args.candidate_authority,
-            kernel_verifier=args.permit_verifier,
+            kernel_verifier=parent_verifier["binary"],
             output=liveness_dir / "release-permit.json",
             bundle=liveness_dir / "release-permit.attestation.json",
             context=liveness_dir / "context.json",
@@ -466,7 +1016,7 @@ def prepare(
                 permit=liveness_args.output,
                 permit_bundle=liveness_args.bundle,
                 trusted_context=liveness_args.context,
-                kernel_verifier=args.permit_verifier,
+                kernel_verifier=parent_verifier["binary"],
                 repository=REPOSITORY,
                 pull_request=args.candidate_pr,
                 head_sha=args.candidate_sha,
@@ -510,6 +1060,11 @@ def prepare(
             "merge_tree_sha": liveness["merge_tree_sha"],
             "evidence_sha256": {
                 "authority_suite": sha256_file(promoter_path),
+                "credential_preflight": sha256_file(credential_preflight_path),
+                "source_inputs": sha256_file(source_input_path),
+                "parent_verifier": sha256_file(
+                    verifier_root / "parent" / "receipt.json"
+                ),
                 "control_plane": sha256_file(
                     args.output_dir / "control-plane-before.json"
                 ),
@@ -656,21 +1211,49 @@ def finalize(
     ready = validate_ready(args)
     if ready["candidate_ref"] != args.candidate_ref:
         raise PermitInputError("bootstrap-ready receipt names the wrong candidate ref")
+    current_source_inputs = {
+        "schema": "mindburn.release-authority-bootstrap-source-inputs/v1",
+        "candidate_sha": args.candidate_sha,
+        "sha256": verify_candidate_source_inputs(args),
+    }
+    parent_kernel_sha, _candidate_kernel_sha = authority_kernel_shas(args)
+    verifier_workspace = tempfile.TemporaryDirectory(
+        prefix="helm-authority-finalize-verifiers-"
+    )
+    verifier_root = Path(verifier_workspace.name)
+    parent_verifier = build_exact_kernel_verifier(
+        args.kernel_repository,
+        parent_kernel_sha,
+        verifier_root / "parent",
+    )
 
+    executor_read_client = GitHubReadClient(token)
     read_client = GitHubReadClient(observer_token)
     merge_client = GitHubMergeClient(token)
     ruleset_client = GitHubRulesetClient(token)
     admin_client = GitHubAdminClient(token)
     approval_client = GitHubApprovalClient(approver_token)
+    current_credential_preflight = preflight_credentials(
+        args,
+        admin_client,
+        read_client,
+        approval_client,
+    )
     ratification, promotion = verify_ratification(
         args,
         attestation_token=observer_token,
+        kernel_verifier=parent_verifier["binary"],
+        replay_dir=verifier_root / "ratification-replay",
     )
     if promotion["candidate_tree_sha"] != ready["candidate_tree_sha"]:
         raise PermitInputError(
             "ratification tree does not match bootstrap-ready receipt"
         )
-    verify_control(args, read_client)
+    transition_control = verify_control(
+        args,
+        read_client,
+        deployment_transition=True,
+    )
 
     liveness_dir = args.ready.parent / "authority-liveness"
     liveness_permit_path = liveness_dir / "release-permit.json"
@@ -678,6 +1261,9 @@ def finalize(
     liveness_context_path = liveness_dir / "context.json"
     paths = {
         "authority_suite": args.ready.parent / "authority-suite.json",
+        "credential_preflight": args.ready.parent / "credential-preflight.json",
+        "source_inputs": args.ready.parent / "source-inputs.json",
+        "parent_verifier": args.ready.parent / "verifiers/parent/receipt.json",
         "control_plane": args.ready.parent / "control-plane-before.json",
         "control_plane_observer": args.ready.parent / "control-plane-observer.json",
         "repository_settings": args.ready.parent / "repository-settings.json",
@@ -695,6 +1281,25 @@ def finalize(
         "evidence_sha256"
     ]:
         raise PermitInputError("bootstrap evidence digest mismatch")
+    if (
+        load_json_file(
+            paths["credential_preflight"],
+            label="recorded credential preflight",
+        )
+        != current_credential_preflight
+    ):
+        raise PermitInputError(
+            "bootstrap credential identities changed before finalization"
+        )
+    if (
+        load_json_file(paths["source_inputs"], label="recorded source inputs")
+        != current_source_inputs
+        or load_json_file(
+            paths["parent_verifier"], label="recorded parent verifier build"
+        )
+        != parent_verifier["receipt"]
+    ):
+        raise PermitInputError("bootstrap source or verifier build changed")
 
     liveness_run = read_client.get_json(
         f"/repos/{REPOSITORY}/actions/runs/{ready['liveness_run_id']}",
@@ -711,7 +1316,7 @@ def finalize(
         expected_authority=load_json_file(
             args.candidate_authority, label="candidate authority"
         ),
-        kernel_verifier=args.permit_verifier,
+        kernel_verifier=parent_verifier["binary"],
         attestation_token=observer_token,
     )
     if (
@@ -749,13 +1354,14 @@ def finalize(
             permit=liveness_permit_path,
             permit_bundle=liveness_bundle_path,
             trusted_context=liveness_context_path,
-            kernel_verifier=args.permit_verifier,
+            kernel_verifier=parent_verifier["binary"],
             repository=REPOSITORY,
             pull_request=args.candidate_pr,
             head_sha=args.candidate_sha,
             workflow_sha=args.candidate_sha,
             approver_app_slug=APPROVER_SLUG,
             approver_installation_id=APPROVER_INSTALLATION_ID,
+            allow_merged_resume=True,
         ),
         approval_client,
         attestation_token=observer_token,
@@ -770,13 +1376,49 @@ def finalize(
             pull_request=args.candidate_pr,
             approval_receipt=paths["machine_approval"],
             contract=args.bootstrap_contract,
+            allow_merged_resume=True,
         ),
         admin_client,
     )
-    if canonical_json(gate_receipt) != paths["machine_gates"].read_bytes():
+    recorded_gate_receipt = load_json_file(
+        paths["machine_gates"],
+        label="recorded machine approval gates",
+    )
+    expected_gate_receipt = {
+        **recorded_gate_receipt,
+        "machine_workflow_sha": machine_sha,
+        "machine_workflow_ref": machine_ref,
+    }
+    if gate_receipt != expected_gate_receipt:
         raise PermitInputError(
             "machine approval gate state changed after bootstrap prepare"
         )
+    control_installation = install_control_workflow(
+        transition_control["contract"],
+        admin_client,
+        read_client,
+        expected_sha=ready["merge_sha"],
+    )
+    control_environments = enable_control_environments(
+        transition_control["contract"],
+        admin_client,
+        read_client,
+        expected_sha=ready["merge_sha"],
+    )
+    control = verify_control(
+        args,
+        executor_read_client,
+        expected_control_sha=ready["merge_sha"],
+        effective_only=True,
+    )
+    observer_control = verify_control(
+        args,
+        read_client,
+        expected_control_sha=ready["merge_sha"],
+        effective_only=True,
+    )
+    if control != observer_control:
+        raise PermitInputError("independent final control-plane reads did not match")
     merge_receipt = confirmed_or_atomic_merge(ready, merge_client)
     ruleset_receipt = transition(
         transition_args(
@@ -812,6 +1454,9 @@ def finalize(
         "machine_rulesets": [STABLE_RULESET_ID, CANDIDATE_RULESET_ID],
         "machine_approval": current_approval,
         "machine_approval_gates": gate_receipt,
+        "control_workflow_installation": control_installation,
+        "control_environments": control_environments,
+        "control_plane": control,
         "atomic_merge": merge_receipt,
         "ruleset_finalization": ruleset_receipt,
     }
@@ -821,7 +1466,8 @@ def add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--permit", type=Path, required=True)
     parser.add_argument("--permit-bundle", type=Path, required=True)
     parser.add_argument("--trusted-context", type=Path, required=True)
-    parser.add_argument("--permit-verifier", type=Path, required=True)
+    parser.add_argument("--review-evidence-dir", type=Path, required=True)
+    parser.add_argument("--kernel-repository", type=Path, required=True)
     parser.add_argument("--candidate-repository", type=Path, required=True)
     parser.add_argument("--candidate-authority", type=Path, required=True)
     parser.add_argument("--candidate-sha", required=True)

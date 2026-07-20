@@ -52,14 +52,53 @@
     ],
     "repository": "Mindburn-Labs/contracts-autonomous-release-lab"
   },
+  "control_workflow": {
+    "branch": "authority/control-v1",
+    "ref": "refs/heads/authority/control-v1",
+    "ruleset": {
+      "bypass_actors": [],
+      "conditions": {
+        "ref_name": {
+          "exclude": [],
+          "include": [
+            "refs/heads/authority/control-v1"
+          ]
+        },
+        "repository_id": {
+          "repository_ids": [
+            1159255601
+          ]
+        }
+      },
+      "enforcement": "active",
+      "name": "HELM Immutable Authority Controller",
+      "rules": [
+        {
+          "type": "creation"
+        },
+        {
+          "type": "deletion"
+        },
+        {
+          "parameters": {
+            "update_allows_fetch_and_merge": false
+          },
+          "type": "update"
+        }
+      ],
+      "target": "branch"
+    },
+    "workflow_path": ".github/workflows/promote-authority.yml"
+  },
   "environments": [
     {
       "branch_policies": [
         {
-          "name": "main",
+          "name": "authority/control-v1",
           "type": "branch"
         }
       ],
+      "can_admins_bypass": false,
       "deployment_branch_policy": {
         "custom_branch_policies": true,
         "protected_branches": false
@@ -72,10 +111,11 @@
     {
       "branch_policies": [
         {
-          "name": "main",
+          "name": "authority/control-v1",
           "type": "branch"
         }
       ],
+      "can_admins_bypass": false,
       "deployment_branch_policy": {
         "custom_branch_policies": true,
         "protected_branches": false
@@ -90,5 +130,5 @@
   "repository_settings": {
     "delete_branch_on_merge": false
   },
-  "schema": "mindburn.release-control-plane/v1"
+  "schema": "mindburn.release-control-plane/v2"
 }

@@ -7,6 +7,8 @@ import sys
 import tempfile
 import unittest
 from unittest import mock
+import urllib.error
+import urllib.request
 import zipfile
 
 
@@ -29,6 +31,234 @@ def archive(entries: dict[str, bytes]) -> bytes:
 
 
 class AuthorityCanaryTests(unittest.TestCase):
+    def test_write_gated_get_must_return_exact_forbidden(self) -> None:
+        client = mock.Mock(
+            api_url="https://api.github.com",
+            token="read-only-token",
+        )
+        client.opener.open.side_effect = urllib.error.HTTPError(
+            "https://api.github.com/orgs/Mindburn-Labs/rulesets/1",
+            403,
+            "Forbidden",
+            {},
+            io.BytesIO(b"{}"),
+        )
+        MODULE.require_get_forbidden(
+            client,
+            "/orgs/Mindburn-Labs/rulesets/1",
+            label="observer scope",
+        )
+
+        for status in (404, 500):
+            with self.subTest(status=status):
+                client.opener.open.side_effect = urllib.error.HTTPError(
+                    "https://api.github.com/orgs/Mindburn-Labs/rulesets/1",
+                    status,
+                    "Unexpected",
+                    {},
+                    io.BytesIO(b"{}"),
+                )
+                with self.assertRaisesRegex(
+                    MODULE.PermitInputError,
+                    f"unexpected HTTP {status}",
+                ):
+                    MODULE.require_get_forbidden(
+                        client,
+                        "/orgs/Mindburn-Labs/rulesets/1",
+                        label="observer scope",
+                    )
+
+    def test_write_gated_get_rejects_token_that_can_read_admin_endpoint(self) -> None:
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = b"{}"
+        client = mock.Mock(
+            api_url="https://api.github.com",
+            token="overprivileged-token",
+        )
+        client.opener.open.return_value = response
+        with self.assertRaisesRegex(
+            MODULE.PermitInputError,
+            "retains forbidden write authority",
+        ):
+            MODULE.require_get_forbidden(
+                client,
+                "/orgs/Mindburn-Labs/rulesets/1",
+                label="observer scope",
+            )
+
+    def test_unclassified_newer_run_blocks_older_exact_allow(self) -> None:
+        newer = {
+            "id": 11,
+            "run_number": 11,
+            "run_attempt": 1,
+            "name": MODULE.WORKFLOW_NAME,
+            "path": MODULE.WORKFLOW_PATH,
+            "head_sha": "b" * 40,
+            "created_at": "2026-07-14T00:02:00Z",
+            "status": "in_progress",
+            "conclusion": None,
+        }
+        older = {
+            "id": 10,
+            "run_number": 10,
+            "run_attempt": 1,
+            "name": MODULE.WORKFLOW_NAME,
+            "path": MODULE.WORKFLOW_PATH,
+            "head_sha": "b" * 40,
+            "created_at": "2026-07-14T00:01:00Z",
+            "status": "completed",
+            "conclusion": "success",
+        }
+        client = mock.Mock(token="observer-token")
+        client.get_json.return_value = {"workflow_runs": [older, newer]}
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            args = mock.Mock(
+                expected_workflow_sha="a" * 40,
+                head_sha="b" * 40,
+                started_at="2026-07-14T00:00:00Z",
+                expected_authority=root / "authority.json",
+                timeout_seconds=60,
+                poll_seconds=5,
+                repository="Mindburn-Labs/lab",
+                output=root / "permit.json",
+                bundle=root / "bundle.json",
+                context=root / "context.json",
+                pull_request=8,
+                kernel_verifier=root / "release-permit-verify",
+            )
+            with (
+                mock.patch.object(MODULE, "load_json_file", return_value={}),
+                mock.patch.object(
+                    MODULE,
+                    "verify_run_workflow_provenance",
+                    return_value=None,
+                ) as provenance,
+                mock.patch.object(MODULE.time, "monotonic", side_effect=[0, 0, 61]),
+                mock.patch.object(MODULE.time, "sleep"),
+                mock.patch.object(MODULE, "artifact_for_run") as artifact,
+                self.assertRaisesRegex(MODULE.PermitInputError, "timed out"),
+            ):
+                MODULE.wait_for_canary(args, client)
+        provenance.assert_called_once()
+        self.assertIs(provenance.call_args.args[2], newer)
+        artifact.assert_not_called()
+
+    def test_newest_exact_run_failure_never_falls_back_to_older_success(self) -> None:
+        runs = [
+            {
+                "id": 10,
+                "run_number": 10,
+                "run_attempt": 1,
+                "name": MODULE.WORKFLOW_NAME,
+                "path": MODULE.WORKFLOW_PATH,
+                "head_sha": "b" * 40,
+                "created_at": "2026-07-14T00:01:00Z",
+                "status": "completed",
+                "conclusion": "success",
+            },
+            {
+                "id": 11,
+                "run_number": 11,
+                "run_attempt": 1,
+                "name": MODULE.WORKFLOW_NAME,
+                "path": MODULE.WORKFLOW_PATH,
+                "head_sha": "b" * 40,
+                "created_at": "2026-07-14T00:02:00Z",
+                "status": "completed",
+                "conclusion": "success",
+            },
+        ]
+        client = mock.Mock(token="observer-token")
+        client.get_json.return_value = {"workflow_runs": runs}
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            args = mock.Mock(
+                expected_workflow_sha="a" * 40,
+                head_sha="b" * 40,
+                started_at="2026-07-14T00:00:00Z",
+                expected_authority=root / "authority.json",
+                timeout_seconds=60,
+                poll_seconds=5,
+                repository="Mindburn-Labs/lab",
+                output=root / "permit.json",
+                bundle=root / "bundle.json",
+                context=root / "context.json",
+                pull_request=8,
+                kernel_verifier=root / "release-permit-verify",
+            )
+            with (
+                mock.patch.object(MODULE, "load_json_file", return_value={}),
+                mock.patch.object(
+                    MODULE,
+                    "verify_run_workflow_provenance",
+                    return_value={"is_expected_workflow": True},
+                ),
+                mock.patch.object(
+                    MODULE,
+                    "artifact_for_run",
+                    return_value=None,
+                ) as artifact,
+                self.assertRaisesRegex(
+                    MODULE.PermitInputError,
+                    "run 11 lacks permit evidence",
+                ),
+            ):
+                MODULE.wait_for_canary(args, client)
+        self.assertEqual(artifact.call_count, 2)
+        self.assertTrue(all(call.args[2] == 11 for call in artifact.call_args_list))
+
+    def test_cross_origin_redirect_strips_authorization(self) -> None:
+        request = urllib.request.Request(
+            "https://api.github.com/repos/example/actions/artifacts/1/zip",
+            headers={"Authorization": "Bearer TOP-SECRET"},
+        )
+        redirected = (
+            MODULE.StripCrossOriginAuthorizationRedirectHandler().redirect_request(
+                request,
+                None,
+                302,
+                "Found",
+                {},
+                "https://example.blob.core.windows.net/artifact.zip",
+            )
+        )
+        self.assertIsNotNone(redirected)
+        self.assertIsNone(redirected.get_header("Authorization"))
+
+    def test_same_origin_redirect_keeps_authorization(self) -> None:
+        request = urllib.request.Request(
+            "https://api.github.com/repos/example/actions/artifacts/1/zip",
+            headers={"Authorization": "Bearer TOP-SECRET"},
+        )
+        redirected = (
+            MODULE.StripCrossOriginAuthorizationRedirectHandler().redirect_request(
+                request,
+                None,
+                302,
+                "Found",
+                {},
+                "https://api.github.com/repos/example/actions/artifacts/2/zip",
+            )
+        )
+        self.assertIsNotNone(redirected)
+        self.assertEqual(redirected.get_header("Authorization"), "Bearer TOP-SECRET")
+
+    def test_https_redirect_cannot_downgrade(self) -> None:
+        request = urllib.request.Request(
+            "https://api.github.com/repos/example/actions/artifacts/1/zip",
+            headers={"Authorization": "Bearer TOP-SECRET"},
+        )
+        with self.assertRaisesRegex(MODULE.PermitInputError, "downgrade"):
+            MODULE.StripCrossOriginAuthorizationRedirectHandler().redirect_request(
+                request,
+                None,
+                302,
+                "Found",
+                {},
+                "http://example.test/artifact.zip",
+            )
+
     def test_attestation_verification_uses_explicit_observer_token(self) -> None:
         completed = mock.Mock(returncode=0, stderr=b"")
         with mock.patch.object(MODULE.subprocess, "run", return_value=completed) as run:
@@ -41,6 +271,7 @@ class AuthorityCanaryTests(unittest.TestCase):
                 github_token="observer-token",
             )
         self.assertEqual(run.call_args.kwargs["env"]["GH_TOKEN"], "observer-token")
+        self.assertNotIn("HELM_AUTHORITY_APPROVER_TOKEN", run.call_args.kwargs["env"])
 
     def test_attestation_verification_rejects_ambient_token_fallback(self) -> None:
         with self.assertRaisesRegex(MODULE.PermitInputError, "explicit token"):
@@ -138,20 +369,30 @@ class AuthorityCanaryTests(unittest.TestCase):
             ):
                 MODULE.extract_trusted_context(payload)
 
-    def test_extract_model_review_accepts_only_exact_bounded_provider_entry(
+    def test_extract_model_review_accepts_only_exact_replay_evidence(
         self,
     ) -> None:
+        raw = b'{"type":"result","exitCode":0}\n'
+        normalized = b'{"findings":[],"verdict":"ALLOW"}\n'
         review = b'{"schema":"mindburn.release-review/v1"}\n'
         self.assertEqual(
             MODULE.extract_model_review(
-                archive({"review-openai.json": review}),
+                archive(
+                    {
+                        "raw-openai.txt": raw,
+                        "normalized-openai.json": normalized,
+                        "review-openai.json": review,
+                    }
+                ),
                 "openai",
             ),
-            review,
+            (raw, normalized, review),
         )
         for payload in (
             archive(
                 {
+                    "raw-openai.txt": raw,
+                    "normalized-openai.json": normalized,
                     "review-openai.json": review,
                     "untrusted-extra.json": b"{}",
                 },
@@ -159,7 +400,9 @@ class AuthorityCanaryTests(unittest.TestCase):
             archive({"../review-openai.json": review}),
             archive(
                 {
-                    "review-openai.json": b"x" * (MODULE.MAX_REVIEW_BYTES + 1),
+                    "raw-openai.txt": b"x" * (MODULE.MAX_REVIEW_TRANSPORT_BYTES + 1),
+                    "normalized-openai.json": normalized,
+                    "review-openai.json": review,
                 },
             ),
         ):
@@ -213,6 +456,11 @@ class AuthorityCanaryTests(unittest.TestCase):
                         output_path,
                     )
                 command = run.call_args.args[0]
+                self.assertNotIn("GH_TOKEN", run.call_args.kwargs["env"])
+                self.assertNotIn(
+                    "HELM_AUTHORITY_APPROVER_TOKEN",
+                    run.call_args.kwargs["env"],
+                )
                 self.assertEqual(command.count("--review"), 2)
                 self.assertLess(
                     command.index(str(review_paths["anthropic"].resolve())),

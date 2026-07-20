@@ -554,6 +554,50 @@ def envelope(args: argparse.Namespace) -> None:
     )
 
 
+def rebuild_review_evidence(
+    *,
+    context: Path,
+    raw_transport: Path,
+    normalized_response: Path,
+    review_envelope: Path,
+    provider: str,
+    model: str,
+    output_dir: Path,
+) -> Path:
+    """Rebuild candidate review evidence byte-for-byte with parent code."""
+    output_dir.mkdir(parents=True, exist_ok=False)
+    rebuilt_normalized = output_dir / f"normalized-{provider}.json"
+    normalize_model_output(
+        argparse.Namespace(
+            raw=raw_transport,
+            output=rebuilt_normalized,
+            transport_format="copilot-jsonl",
+            max_transport_bytes=16_777_216,
+            max_response_bytes=1_048_576,
+        )
+    )
+    if rebuilt_normalized.read_bytes() != normalized_response.read_bytes():
+        raise PermitInputError(
+            f"{provider} normalized response is not derivable from raw transport"
+        )
+    rebuilt_review = output_dir / f"review-{provider}.json"
+    envelope(
+        argparse.Namespace(
+            context=context,
+            raw=rebuilt_normalized,
+            provider=provider,
+            model=model,
+            output=rebuilt_review,
+            max_response_bytes=1_048_576,
+        )
+    )
+    if rebuilt_review.read_bytes() != review_envelope.read_bytes():
+        raise PermitInputError(
+            f"{provider} review envelope is not derivable from normalized response"
+        )
+    return rebuilt_review
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", required=True)

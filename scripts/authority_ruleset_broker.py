@@ -43,6 +43,8 @@ PUBLIC_AUTONOMOUS_REPOSITORY_IDS = (
 LEGACY_STABLE_WORKFLOW_SHA = "8500b6549a61a9c1caf7575964132651ffb754c8"
 LEGACY_PARENT_WORKFLOW_SHA = "52a1ef42118e618e811bce48204f4a49a41b8bca"
 LEGACY_WORKFLOW_REF = "refs/heads/codex/autonomous-release-permit"
+AUTHORITY_REPOSITORY = "Mindburn-Labs/.github"
+RECONCILE_SCHEMA = "mindburn.release-authority-ruleset-reconcile/v1"
 
 
 @dataclass(frozen=True)
@@ -103,6 +105,20 @@ class GitHubRulesetClient:
             ) from exc
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
             raise PermitInputError(f"GitHub {method} {path} failed: {exc}") from exc
+
+    def get_main_sha(self) -> str:
+        response = self.request(
+            "GET",
+            f"/repos/{AUTHORITY_REPOSITORY}/git/ref/heads/main",
+        )
+        object_value = response.body.get("object")
+        if not isinstance(object_value, dict):
+            raise PermitInputError("GitHub main ref response is malformed")
+        return require_sha(
+            object_value.get("sha"),
+            label="live authority main SHA",
+            length=40,
+        )
 
 
 def validate_ref(value: str, *, label: str) -> str:
@@ -307,6 +323,112 @@ def transition(args: argparse.Namespace, client: GitHubRulesetClient) -> dict[st
     stable = get_ruleset(client, STABLE_RULESET_ID)
     candidate = get_ruleset(client, CANDIDATE_RULESET_ID)
 
+    if args.operation == "reconcile":
+        merge_sha = require_sha(args.merge_sha, label="merge_sha", length=40)
+        current_main_sha = client.get_main_sha()
+        stable_binding = validate_ruleset_identity(stable.body, kind="stable")
+        candidate_binding = validate_ruleset_identity(candidate.body, kind="candidate")
+        parent_binding = (parent_sha, MAIN_REF)
+        candidate_binding_expected = (candidate_sha, candidate_ref)
+        merged_binding = (merge_sha, MAIN_REF)
+        stable_state = (stable_binding["sha"], stable_binding["ref"])
+        candidate_state = (candidate_binding["sha"], candidate_binding["ref"])
+        if current_main_sha == parent_sha:
+            if stable_state != parent_binding or candidate_state not in {
+                parent_binding,
+                candidate_binding_expected,
+            }:
+                raise PermitInputError(
+                    "pre-merge rulesets are outside resumable states"
+                )
+            result = receipt(
+                args.operation,
+                parent_sha,
+                candidate_sha,
+                candidate_ref,
+                merge_sha,
+            )
+            result.update(
+                {
+                    "schema": RECONCILE_SCHEMA,
+                    "current_main_sha": current_main_sha,
+                    "rulesets_active": False,
+                    "state": "pre-merge",
+                }
+            )
+            return result
+        if current_main_sha != merge_sha:
+            raise PermitInputError("main is outside the reconciler lineage")
+        if stable_state == merged_binding:
+            if candidate_state != merged_binding:
+                if candidate_state not in {parent_binding, candidate_binding_expected}:
+                    raise PermitInputError(
+                        "active candidate ruleset is outside resumable states"
+                    )
+                candidate = put_ruleset(
+                    client,
+                    candidate,
+                    workflow_sha=merge_sha,
+                    workflow_ref=MAIN_REF,
+                )
+                validate_ruleset(
+                    candidate.body,
+                    kind="candidate",
+                    expected_sha=merge_sha,
+                    expected_ref=MAIN_REF,
+                )
+            result = receipt(
+                args.operation,
+                parent_sha,
+                candidate_sha,
+                candidate_ref,
+                merge_sha,
+            )
+            result.update(
+                {
+                    "schema": RECONCILE_SCHEMA,
+                    "current_main_sha": current_main_sha,
+                    "rulesets_active": True,
+                    "state": "active",
+                }
+            )
+            return result
+        if stable_state != parent_binding or candidate_state not in {
+            parent_binding,
+            candidate_binding_expected,
+            merged_binding,
+        }:
+            raise PermitInputError("post-merge rulesets are outside resumable states")
+        if candidate_state == merged_binding:
+            candidate = put_ruleset(
+                client,
+                candidate,
+                workflow_sha=parent_sha,
+                workflow_ref=MAIN_REF,
+            )
+            validate_ruleset(
+                candidate.body,
+                kind="candidate",
+                expected_sha=parent_sha,
+                expected_ref=MAIN_REF,
+            )
+        result = receipt(
+            args.operation,
+            parent_sha,
+            candidate_sha,
+            candidate_ref,
+            merge_sha,
+        )
+        result.update(
+            {
+                "schema": RECONCILE_SCHEMA,
+                "current_main_sha": current_main_sha,
+                "rulesets_active": False,
+                "state": "post-merge-retry",
+            }
+        )
+        return result
+
     if args.operation in {"bootstrap-stage", "bootstrap-restore"}:
         if parent_sha != LEGACY_PARENT_WORKFLOW_SHA:
             raise PermitInputError("bootstrap requires the exact generation-1 parent")
@@ -441,12 +563,32 @@ def transition(args: argparse.Namespace, client: GitHubRulesetClient) -> dict[st
                 expected_ref=candidate_ref,
             )
         else:
-            validate_ruleset(
-                candidate.body,
-                kind="candidate",
-                expected_sha=merge_sha,
-                expected_ref=MAIN_REF,
-            )
+            try:
+                validate_ruleset(
+                    candidate.body,
+                    kind="candidate",
+                    expected_sha=merge_sha,
+                    expected_ref=MAIN_REF,
+                )
+            except PermitInputError:
+                validate_ruleset(
+                    candidate.body,
+                    kind="candidate",
+                    expected_sha=candidate_sha,
+                    expected_ref=candidate_ref,
+                )
+                candidate = put_ruleset(
+                    client,
+                    candidate,
+                    workflow_sha=merge_sha,
+                    workflow_ref=MAIN_REF,
+                )
+                validate_ruleset(
+                    candidate.body,
+                    kind="candidate",
+                    expected_sha=merge_sha,
+                    expected_ref=MAIN_REF,
+                )
             return receipt(
                 args.operation, parent_sha, candidate_sha, candidate_ref, merge_sha
             )
@@ -514,12 +656,28 @@ def transition(args: argparse.Namespace, client: GitHubRulesetClient) -> dict[st
         validate_ruleset(
             stable.body, kind="stable", expected_sha=parent_sha, expected_ref=MAIN_REF
         )
-        validate_ruleset(
-            candidate.body,
-            kind="candidate",
-            expected_sha=parent_sha,
-            expected_ref=MAIN_REF,
-        )
+        try:
+            validate_ruleset(
+                candidate.body,
+                kind="candidate",
+                expected_sha=candidate_sha,
+                expected_ref=candidate_ref,
+            )
+        except PermitInputError:
+            validate_ruleset(
+                candidate.body,
+                kind="candidate",
+                expected_sha=parent_sha,
+                expected_ref=MAIN_REF,
+            )
+        else:
+            return receipt(
+                args.operation,
+                parent_sha,
+                candidate_sha,
+                candidate_ref,
+                None,
+            )
         updated = put_ruleset(
             client,
             candidate,
@@ -600,15 +758,48 @@ def transition(args: argparse.Namespace, client: GitHubRulesetClient) -> dict[st
 
     merge_sha = require_sha(args.merge_sha, label="merge_sha", length=40)
     if args.operation == "rebind":
-        validate_ruleset(
-            stable.body, kind="stable", expected_sha=parent_sha, expected_ref=MAIN_REF
-        )
-        validate_ruleset(
-            candidate.body,
-            kind="candidate",
-            expected_sha=candidate_sha,
-            expected_ref=candidate_ref,
-        )
+        try:
+            validate_ruleset(
+                stable.body,
+                kind="stable",
+                expected_sha=merge_sha,
+                expected_ref=MAIN_REF,
+            )
+        except PermitInputError:
+            validate_ruleset(
+                stable.body,
+                kind="stable",
+                expected_sha=parent_sha,
+                expected_ref=MAIN_REF,
+            )
+        else:
+            validate_ruleset(
+                candidate.body,
+                kind="candidate",
+                expected_sha=merge_sha,
+                expected_ref=MAIN_REF,
+            )
+            return receipt(
+                args.operation, parent_sha, candidate_sha, candidate_ref, merge_sha
+            )
+        try:
+            validate_ruleset(
+                candidate.body,
+                kind="candidate",
+                expected_sha=merge_sha,
+                expected_ref=MAIN_REF,
+            )
+        except PermitInputError:
+            validate_ruleset(
+                candidate.body,
+                kind="candidate",
+                expected_sha=candidate_sha,
+                expected_ref=candidate_ref,
+            )
+        else:
+            return receipt(
+                args.operation, parent_sha, candidate_sha, candidate_ref, merge_sha
+            )
         candidate_updated = put_ruleset(
             client,
             candidate,
@@ -625,11 +816,35 @@ def transition(args: argparse.Namespace, client: GitHubRulesetClient) -> dict[st
             args.operation, parent_sha, candidate_sha, candidate_ref, merge_sha
         )
 
+    try:
+        validate_ruleset(
+            stable.body,
+            kind="stable",
+            expected_sha=merge_sha,
+            expected_ref=MAIN_REF,
+        )
+    except PermitInputError:
+        validate_ruleset(
+            stable.body,
+            kind="stable",
+            expected_sha=parent_sha,
+            expected_ref=MAIN_REF,
+        )
+    else:
+        validate_ruleset(
+            candidate.body,
+            kind="candidate",
+            expected_sha=merge_sha,
+            expected_ref=MAIN_REF,
+        )
+        return receipt(
+            args.operation, parent_sha, candidate_sha, candidate_ref, merge_sha
+        )
     validate_ruleset(
-        stable.body, kind="stable", expected_sha=parent_sha, expected_ref=MAIN_REF
-    )
-    validate_ruleset(
-        candidate.body, kind="candidate", expected_sha=merge_sha, expected_ref=MAIN_REF
+        candidate.body,
+        kind="candidate",
+        expected_sha=merge_sha,
+        expected_ref=MAIN_REF,
     )
     stable_updated = put_ruleset(
         client,
@@ -672,6 +887,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "operation",
         choices=(
+            "reconcile",
             "advance",
             "rebind",
             "activate",
@@ -694,7 +910,7 @@ def main(argv: list[str]) -> int:
     try:
         args = build_parser().parse_args(argv)
         if (
-            args.operation in {"rebind", "activate", "bootstrap-finalize"}
+            args.operation in {"reconcile", "rebind", "activate", "bootstrap-finalize"}
             and not args.merge_sha
         ):
             raise PermitInputError(f"{args.operation} requires --merge-sha")

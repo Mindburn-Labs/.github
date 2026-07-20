@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 import sys
 import unittest
@@ -16,27 +17,82 @@ SPEC.loader.exec_module(MODULE)
 
 
 class FakeClient:
-    def __init__(self, *, add_reviewer: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        add_reviewer: bool = False,
+        deployment_disabled: bool = False,
+        disabled_environments: set[str] | None = None,
+        ruleset_bypass: bool = False,
+    ) -> None:
         self.add_reviewer = add_reviewer
+        self.deployment_disabled = deployment_disabled
+        self.disabled_environments = disabled_environments or set()
+        self.ruleset_bypass = ruleset_bypass
 
     def get_json(self, path: str):
         if path == "/repos/Mindburn-Labs/.github":
             return {"delete_branch_on_merge": False}
-        if path.endswith("/deployment-branch-policies"):
+        if path == "/orgs/Mindburn-Labs/rulesets/4242":
+            ruleset = MODULE.expected_control_ruleset()
+            if self.ruleset_bypass:
+                ruleset = {
+                    **ruleset,
+                    "bypass_actors": [
+                        {"actor_id": 1, "actor_type": "OrganizationAdmin"}
+                    ],
+                }
+            return {"id": 4242, **ruleset}
+        if path.endswith("/git/ref/heads/authority/control-v1"):
+            return {"object": {"sha": "a" * 40}}
+        if "/branches/authority%2Fcontrol-v1" in path:
+            return {"protected": True, "commit": {"sha": "a" * 40}}
+        if "/contents/.github/workflows/promote-authority.yml" in path:
             return {
-                "total_count": 1,
-                "branch_policies": [{"name": "main", "type": "branch"}],
+                "type": "file",
+                "path": ".github/workflows/promote-authority.yml",
+                "sha": "b" * 40,
+            }
+        if path.endswith("/deployment-branch-policies"):
+            environment = path.split("/environments/", 1)[1].split("/", 1)[0]
+            branch_policies = (
+                []
+                if self.deployment_disabled or environment in self.disabled_environments
+                else [{"name": "authority/control-v1", "type": "branch"}]
+            )
+            return {
+                "total_count": len(branch_policies),
+                "branch_policies": branch_policies,
             }
         rules = [{"type": "branch_policy", "id": 1}]
         if self.add_reviewer:
             rules.append({"type": "required_reviewers", "reviewers": [{"id": 7}]})
         return {
+            "can_admins_bypass": False,
             "protection_rules": rules,
             "deployment_branch_policy": {
                 "protected_branches": False,
                 "custom_branch_policies": True,
             },
         }
+
+    def get_bytes(self, path: str) -> bytes:
+        if path == "/orgs/Mindburn-Labs/rulesets?per_page=100":
+            return json.dumps(
+                [{"id": 4242, "name": MODULE.CONTROL_RULESET_NAME}]
+            ).encode()
+        if path.endswith("/rules/branches/authority%2Fcontrol-v1"):
+            return json.dumps(
+                [
+                    {"type": "creation"},
+                    {"type": "deletion"},
+                    {
+                        "type": "update",
+                        "parameters": {"update_allows_fetch_and_merge": False},
+                    },
+                ]
+            ).encode()
+        raise AssertionError(f"unexpected bytes path: {path}")
 
 
 class ControlPlaneTests(unittest.TestCase):
@@ -62,6 +118,10 @@ class ControlPlaneTests(unittest.TestCase):
         self.assertEqual(
             contract["repository_settings"],
             {"delete_branch_on_merge": False},
+        )
+        self.assertEqual(
+            contract["control_workflow"]["ref"],
+            "refs/heads/authority/control-v1",
         )
 
     def test_live_repository_settings_preserve_recovery_head_ref(self) -> None:
@@ -91,6 +151,51 @@ class ControlPlaneTests(unittest.TestCase):
         contract = MODULE.validate_contract(self.load_contract(), self.load_corpus())
         receipts = MODULE.verify_live_environments(contract, FakeClient())
         self.assertEqual(len(receipts), 2)
+
+    def test_disabled_environments_admit_no_branch_during_bootstrap(self) -> None:
+        contract = MODULE.validate_contract(self.load_contract(), self.load_corpus())
+        receipts = MODULE.verify_live_environments(
+            contract,
+            FakeClient(deployment_disabled=True),
+            deployment_disabled=True,
+        )
+        self.assertTrue(all(receipt["branch_policies"] == [] for receipt in receipts))
+
+    def test_transition_accepts_only_empty_or_exact_controller_policy(self) -> None:
+        contract = MODULE.validate_contract(self.load_contract(), self.load_corpus())
+        client = FakeClient(disabled_environments={"authority-observer"})
+        receipts = MODULE.verify_live_environments(
+            contract,
+            client,
+            deployment_transition=True,
+        )
+        self.assertEqual(
+            [receipt["branch_policies"] for receipt in receipts],
+            [[], [{"name": "authority/control-v1", "type": "branch"}]],
+        )
+        with self.assertRaisesRegex(MODULE.PermitInputError, "branch policies drifted"):
+            MODULE.verify_live_environments(contract, client)
+
+    def test_live_control_workflow_is_locked_to_the_reviewed_sha(self) -> None:
+        contract = MODULE.validate_contract(self.load_contract(), self.load_corpus())
+        receipt = MODULE.verify_live_control_workflow(
+            contract,
+            FakeClient(),
+            expected_sha="a" * 40,
+        )
+        self.assertEqual(receipt["sha"], "a" * 40)
+        with self.assertRaisesRegex(MODULE.PermitInputError, "wrong reviewed SHA"):
+            MODULE.verify_live_control_workflow(
+                contract,
+                FakeClient(),
+                expected_sha="c" * 40,
+            )
+        with self.assertRaisesRegex(MODULE.PermitInputError, "policy drifted"):
+            MODULE.verify_live_control_workflow(
+                contract,
+                FakeClient(ruleset_bypass=True),
+                expected_sha="a" * 40,
+            )
 
 
 if __name__ == "__main__":

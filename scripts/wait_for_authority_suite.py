@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import io
 import json
 import os
 from pathlib import Path
@@ -14,7 +13,6 @@ import sys
 import time
 from typing import Any
 import urllib.parse
-import zipfile
 
 from autonomous_release_permit import (
     PermitInputError,
@@ -30,6 +28,8 @@ from verify_authority_promotion import (
 from verify_control_plane import load_json, validate_contract
 from wait_for_authority_canary import (
     GitHubReadClient,
+    PROVENANCE_ARTIFACT as CANARY_PROVENANCE_ARTIFACT,
+    PROVENANCE_SCHEMA as CANARY_PROVENANCE_SCHEMA,
     WORKFLOW_NAME,
     WORKFLOW_PATH,
     artifact_for_run,
@@ -37,9 +37,11 @@ from wait_for_authority_canary import (
     extract_trusted_context,
     load_json_file,
     parse_time,
+    run_sort_key,
     verify_attestation,
     verify_candidate_permit,
     verify_permit_reduction,
+    verify_run_workflow_provenance,
     write_model_reviews,
 )
 
@@ -51,10 +53,8 @@ REVIEWERS = {
     ("openai", "gpt-5.6-sol"),
 }
 PRE_MODEL_GATES = {"Deterministic repository gates", "Bind immutable review input"}
-PROVENANCE_ARTIFACT = "release-workflow-provenance"
-PROVENANCE_SCHEMA = "mindburn.release-workflow-provenance/v1"
-MAX_PROVENANCE_BYTES = 64 << 10
-MAX_PROVENANCE_BUNDLE_BYTES = 4 << 20
+PROVENANCE_ARTIFACT = CANARY_PROVENANCE_ARTIFACT
+PROVENANCE_SCHEMA = CANARY_PROVENANCE_SCHEMA
 
 
 def validate_trigger(
@@ -250,112 +250,28 @@ def validate_pre_model_reject(
     if any(job.get("conclusion") != "skipped" for job in model_jobs):
         raise PermitInputError("pre-model rejection executed a model reviewer")
 
-    artifact_id = artifact_for_run(client, repository, run_id, PROVENANCE_ARTIFACT)
-    if artifact_id is None:
+    del attestation_token
+    provenance = verify_run_workflow_provenance(
+        client,
+        repository,
+        run,
+        head_sha=head_sha,
+        expected_workflow_sha=workflow_sha,
+        directory=directory,
+    )
+    if provenance is None:
         raise PermitInputError(
             "pre-model rejection lacks candidate workflow provenance"
         )
-    provenance_bytes, bundle_bytes = extract_workflow_provenance(
-        client.get_bytes(
-            f"/repos/{repository}/actions/artifacts/{artifact_id}/zip",
-            accept="application/vnd.github+json",
-        ),
-    )
-    directory.mkdir(parents=True, exist_ok=False)
-    provenance_path = directory / "release-workflow-provenance.json"
-    bundle_path = directory / "release-workflow-provenance.attestation.json"
-    provenance_path.write_bytes(provenance_bytes)
-    bundle_path.write_bytes(bundle_bytes)
-    try:
-        provenance = parse_json_strict(
-            provenance_bytes.decode("utf-8"),
-            label="candidate workflow provenance",
+    if not provenance["is_expected_workflow"]:
+        raise PermitInputError(
+            "pre-model rejection workflow_sha does not match the proof run"
         )
-    except UnicodeDecodeError as exc:
-        raise PermitInputError("candidate workflow provenance is not UTF-8") from exc
-    if not isinstance(provenance, dict):
-        raise PermitInputError("candidate workflow provenance must be an object")
-    require_exact_keys(
-        provenance,
-        required={
-            "schema",
-            "repository",
-            "workflow_path",
-            "workflow_sha",
-            "head_sha",
-            "merge_sha",
-            "run_id",
-            "run_attempt",
-        },
-        label="candidate workflow provenance",
-    )
-    expected = {
-        "schema": PROVENANCE_SCHEMA,
-        "repository": repository,
-        "workflow_path": WORKFLOW_PATH,
-        "workflow_sha": workflow_sha,
-        "head_sha": head_sha,
-        "run_id": run_id,
-        "run_attempt": run.get("run_attempt"),
-    }
-    for field, value in expected.items():
-        if provenance.get(field) != value:
-            raise PermitInputError(
-                f"candidate workflow provenance {field} does not match the proof run",
-            )
-    merge_sha = require_sha(
-        provenance.get("merge_sha"),
-        label="candidate workflow provenance merge_sha",
-        length=40,
-    )
-    verify_attestation(
-        provenance_path,
-        bundle_path,
-        repository=repository,
-        workflow_sha=workflow_sha,
-        source_sha=merge_sha,
-        github_token=attestation_token,
-    )
     return {
         "failed_gates": sorted(failed_gates),
-        "merge_sha": merge_sha,
-        "workflow_provenance_sha256": hashlib.sha256(provenance_bytes).hexdigest(),
+        "merge_sha": provenance["merge_sha"],
+        "workflow_provenance_sha256": provenance["workflow_provenance_sha256"],
     }
-
-
-def extract_workflow_provenance(archive: bytes) -> tuple[bytes, bytes]:
-    expected = {
-        "release-workflow-provenance.json": MAX_PROVENANCE_BYTES,
-        "release-workflow-provenance.attestation.json": MAX_PROVENANCE_BUNDLE_BYTES,
-    }
-    try:
-        with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
-            entries = bundle.infolist()
-            if len(entries) != len(expected) or {
-                entry.filename for entry in entries
-            } != set(expected):
-                raise PermitInputError(
-                    "workflow provenance artifact must contain exactly the marker and attestation",
-                )
-            by_name = {entry.filename: entry for entry in entries}
-            if any(
-                entry.is_dir()
-                or entry.file_size <= 0
-                or entry.file_size > expected[name]
-                for name, entry in by_name.items()
-            ):
-                raise PermitInputError(
-                    "workflow provenance artifact exceeds the size limit"
-                )
-            provenance = bundle.read(by_name["release-workflow-provenance.json"])
-            attestation = bundle.read(
-                by_name["release-workflow-provenance.attestation.json"],
-            )
-    except zipfile.BadZipFile as exc:
-        raise PermitInputError(
-            "workflow provenance artifact is not a valid ZIP archive",
-        ) from exc
-    return provenance, attestation
 
 
 def write_attested_case(
@@ -387,7 +303,13 @@ def write_attested_case(
     permit_path.write_bytes(permit_bytes)
     bundle_path.write_bytes(bundle_bytes)
     context_path.write_bytes(context_bytes)
-    review_paths = write_model_reviews(client, repository, run_id, directory)
+    review_paths = write_model_reviews(
+        client,
+        repository,
+        run_id,
+        directory,
+        context_path=context_path,
+    )
     return permit_path, bundle_path, context_path, review_paths
 
 
@@ -412,10 +334,10 @@ def candidate_runs(
             and run.get("name") == WORKFLOW_NAME
             and run.get("path") == WORKFLOW_PATH
             and run.get("head_sha") == head_sha
-            and run.get("status") == "completed"
             and parse_time(run.get("created_at"), label="run created_at") >= started_at
         ):
             result.append(run)
+    result.sort(key=run_sort_key, reverse=True)
     return result
 
 
@@ -531,38 +453,56 @@ def wait_for_suite(
     started_at = parse_time(trigger["started_at"], label="suite trigger started_at")
     repository = trigger["repository"]
     pending = {case["id"]: case for case in trigger["cases"]}
-    rejected: dict[str, set[int]] = {case_id: set() for case_id in pending}
     receipts: dict[str, dict[str, Any]] = {}
     deadline = time.monotonic() + args.timeout_seconds
     args.output_dir.mkdir(parents=True, exist_ok=False)
     while pending and time.monotonic() < deadline:
         for case_id, case in list(pending.items()):
-            for run in candidate_runs(
+            runs = candidate_runs(
                 client,
                 repository,
                 case["head_sha"],
                 started_at,
-            ):
-                if run["id"] in rejected[case_id]:
-                    continue
-                try:
-                    receipts[case_id] = verify_case(
-                        args,
-                        client,
-                        case=case,
-                        run=run,
-                        repository=repository,
-                        authority=authority,
-                        workflow_sha=workflow_sha,
-                    )
-                except (OSError, PermitInputError):
-                    rejected[case_id].add(run["id"])
-                    case_dir = args.output_dir / "cases" / case_id
-                    if case_dir.exists():
-                        shutil.rmtree(case_dir)
-                    continue
-                del pending[case_id]
-                break
+            )
+            exact_run = None
+            unclassified_newer_run = False
+            for run in runs:
+                provenance = verify_run_workflow_provenance(
+                    client,
+                    repository,
+                    run,
+                    head_sha=case["head_sha"],
+                    expected_workflow_sha=workflow_sha,
+                )
+                if provenance is None:
+                    unclassified_newer_run = True
+                    break
+                if provenance["is_expected_workflow"]:
+                    exact_run = run
+                    break
+            if unclassified_newer_run or exact_run is None:
+                continue
+            run = exact_run
+            if run.get("status") != "completed":
+                continue
+            try:
+                receipts[case_id] = verify_case(
+                    args,
+                    client,
+                    case=case,
+                    run=run,
+                    repository=repository,
+                    authority=authority,
+                    workflow_sha=workflow_sha,
+                )
+            except (OSError, PermitInputError) as exc:
+                case_dir = args.output_dir / "cases" / case_id
+                if case_dir.exists():
+                    shutil.rmtree(case_dir)
+                raise PermitInputError(
+                    f"newest exact candidate proof case {case_id} run {run['id']} failed validation: {exc}"
+                ) from exc
+            del pending[case_id]
         if pending:
             time.sleep(args.poll_seconds)
     if pending:

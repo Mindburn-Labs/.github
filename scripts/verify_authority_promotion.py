@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -15,12 +16,26 @@ from autonomous_release_permit import (
     AUTHORITY_SCHEMA,
     PermitInputError,
     parse_json_strict,
+    rebuild_review_evidence,
     require_exact_keys,
     require_sha,
 )
 
 
 PERMIT_SCHEMA = "mindburn.release-permit/v2"
+MODEL_REVIEWERS = {
+    "anthropic": "claude-fable-5",
+    "openai": "gpt-5.6-sol",
+}
+REVIEW_EVIDENCE_FILENAMES = {
+    f"{prefix}-{provider}.{suffix}"
+    for provider in MODEL_REVIEWERS
+    for prefix, suffix in (
+        ("raw", "txt"),
+        ("normalized", "json"),
+        ("review", "json"),
+    )
+}
 PERMIT_KEYS = (
     "schema",
     "permit_id",
@@ -44,6 +59,105 @@ PERMIT_KEYS = (
     "reviews",
     "reasons",
 )
+WORKFLOW_TEMPLATE_MARKER = "__HELM_AUTHORITY_KERNEL_SHA__"
+WORKFLOW_TEMPLATE_PIN_COUNT = 3
+WORKFLOW_TEMPLATE_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "config"
+    / "autonomous-release-ci-template.yml"
+)
+
+CHECKOUT_ACTION = "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683"
+KERNEL_REPOSITORY = "Mindburn-Labs/helm-ai-kernel"
+PREPARE_KERNEL_STEP = "Checkout pinned Kernel verifier source for isolated review"
+PERMIT_KERNEL_STEP = "Checkout pinned Kernel verifier"
+PREPARE_BUNDLE_STEP = "Prepare commit-bound review bundle"
+PREPARE_KERNEL_PATH = "verifier-source"
+PERMIT_KERNEL_PATH = "kernel"
+PREPARE_KERNEL_SPARSE_PATHS = (
+    "core/pkg/releasepermit",
+    "core/cmd/release-permit-verify",
+)
+PERMIT_RUNTIME_COPY = (
+    "cp policy/scripts/autonomous_release_permit.py "
+    "autonomous-review-runtime/policy/scripts/autonomous_release_permit.py"
+)
+PREPARE_COMMAND = (
+    "python3 policy/scripts/autonomous_release_permit.py prepare "
+    '--repository "$REPOSITORY" --pull-request "$PULL_REQUEST" '
+    '--base-ref "$BASE_REF" --base-sha "$BASE_SHA" --head-sha "$HEAD_SHA" '
+    '--merge-sha "$MERGE_SHA" --workflow-repository "$WORKFLOW_REPOSITORY" '
+    '--workflow-path "$WORKFLOW_PATH" --workflow-ref "$WORKFLOW_REF" '
+    '--workflow-sha "$WORKFLOW_SHA" --run-id "$RUN_ID" '
+    '--run-attempt "$RUN_ATTEMPT" '
+    "--issued-at \"$(date -u +'%Y-%m-%dT%H:%M:%SZ')\" "
+    '--anthropic-model "$ANTHROPIC_MODEL" --openai-model "$OPENAI_MODEL" '
+    "--authority-manifest policy/config/autonomous-release-authority.json "
+    '--kernel-sha "$KERNEL_SHA" '
+    "--gate-profiles policy/config/autonomous-release-gates.json "
+    "--adversarial-corpus policy/tests/fixtures/autonomous-release-adversarial.json "
+    "--target-dir target --output-dir permit-input "
+    '--max-patch-bytes "$MAX_PATCH_BYTES" '
+    '--max-changed-blob-bytes "$MAX_CHANGED_BLOB_BYTES"'
+)
+
+# Psych is already a repository prerequisite. It is used here rather than a
+# permissive YAML loader so comments, duplicate keys, aliases, and merge keys
+# cannot manufacture a lexical-looking authority workflow.
+STRICT_WORKFLOW_YAML_PARSER = r"""
+require "json"
+require "psych"
+
+def reject_unsafe_yaml(node)
+  if node.respond_to?(:anchor) && node.anchor
+    raise "YAML aliases or anchors are not allowed"
+  end
+
+  case node
+  when Psych::Nodes::Alias
+    raise "YAML aliases or anchors are not allowed"
+  when Psych::Nodes::Mapping
+    unless node.children.length.even?
+      raise "YAML mapping has an incomplete key/value pair"
+    end
+    keys = {}
+    node.children.each_slice(2) do |key, value|
+      unless key.is_a?(Psych::Nodes::Scalar)
+        raise "YAML mapping keys must be scalars"
+      end
+      key_name = key.value
+      if key_name == "<<"
+        raise "YAML merge keys are not allowed"
+      end
+      if keys.key?(key_name)
+        raise "duplicate YAML key: #{key_name}"
+      end
+      keys[key_name] = true
+      reject_unsafe_yaml(key)
+      reject_unsafe_yaml(value)
+    end
+  when Psych::Nodes::Sequence, Psych::Nodes::Document
+    node.children.each { |child| reject_unsafe_yaml(child) }
+  end
+end
+
+begin
+  source = STDIN.read
+  stream = Psych.parse_stream(source)
+  unless stream.children.length == 1
+    raise "YAML document must contain exactly one document"
+  end
+  reject_unsafe_yaml(stream.children.first)
+  document = Psych.safe_load(source, permitted_classes: [], aliases: false)
+  unless document.is_a?(Hash)
+    raise "YAML document must be an object"
+  end
+  STDOUT.write(JSON.generate(document))
+rescue StandardError => error
+  warn error.message
+  exit 1
+end
+"""
 
 
 def load_json_bytes(content: bytes, *, label: str) -> Any:
@@ -52,6 +166,188 @@ def load_json_bytes(content: bytes, *, label: str) -> Any:
     except UnicodeDecodeError as exc:
         raise PermitInputError(f"{label}: invalid UTF-8: {exc}") from exc
     return parse_json_strict(text, label=label)
+
+
+def require_mapping(value: Any, *, label: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise PermitInputError(f"{label} must be an object")
+    return value
+
+
+def parse_strict_workflow_yaml(content: str) -> dict[str, Any]:
+    try:
+        process = subprocess.run(
+            ["ruby", "-e", STRICT_WORKFLOW_YAML_PARSER],
+            input=content.encode("utf-8"),
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except OSError as exc:
+        raise PermitInputError(
+            f"candidate workflow YAML parser is unavailable: {exc}"
+        ) from exc
+    if process.returncode != 0:
+        detail = process.stderr.decode("utf-8", errors="replace").strip()
+        raise PermitInputError(f"candidate workflow YAML rejected: {detail}")
+    parsed = load_json_bytes(process.stdout, label="candidate workflow YAML")
+    return require_mapping(parsed, label="candidate workflow")
+
+
+def find_named_step(job: dict[str, Any], *, name: str, label: str) -> dict[str, Any]:
+    steps = job.get("steps")
+    if not isinstance(steps, list):
+        raise PermitInputError(f"candidate {label} steps must be an array")
+    matches = [
+        step for step in steps if isinstance(step, dict) and step.get("name") == name
+    ]
+    if len(matches) != 1:
+        raise PermitInputError(
+            f"candidate {label} must contain exactly one {name!r} step"
+        )
+    return matches[0]
+
+
+def validate_kernel_checkout(
+    step: dict[str, Any],
+    *,
+    label: str,
+    kernel_sha: str,
+    path: str,
+    sparse_paths: tuple[str, ...] | None,
+) -> None:
+    if step.get("uses") != CHECKOUT_ACTION:
+        raise PermitInputError(f"candidate {label} must use the pinned checkout action")
+    checkout = require_mapping(step.get("with"), label=f"candidate {label} with")
+    expected_keys = {"repository", "ref", "persist-credentials", "path"}
+    if sparse_paths is not None:
+        expected_keys.add("sparse-checkout")
+    require_exact_keys(
+        checkout,
+        required=expected_keys,
+        label=f"candidate {label} checkout",
+    )
+    if checkout["repository"] != KERNEL_REPOSITORY:
+        raise PermitInputError(f"candidate {label} repository is not the Kernel")
+    if checkout["ref"] != kernel_sha:
+        raise PermitInputError(f"candidate {label} ref is not the authority Kernel SHA")
+    if checkout["persist-credentials"] is not False:
+        raise PermitInputError(f"candidate {label} must disable persisted credentials")
+    if checkout["path"] != path:
+        raise PermitInputError(f"candidate {label} path is not the expected path")
+    if sparse_paths is not None:
+        sparse_checkout = checkout["sparse-checkout"]
+        if (
+            not isinstance(sparse_checkout, str)
+            or tuple(line for line in sparse_checkout.splitlines() if line)
+            != sparse_paths
+        ):
+            raise PermitInputError(
+                f"candidate {label} sparse checkout paths are not exact"
+            )
+
+
+def collect_shell_commands(run: Any, *, label: str) -> list[str]:
+    if not isinstance(run, str):
+        raise PermitInputError(f"candidate {label} must be a string")
+    commands: list[str] = []
+    current: list[str] = []
+    for raw_line in run.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        continued = line.endswith("\\")
+        if continued:
+            line = line[:-1].rstrip()
+            if not line:
+                raise PermitInputError(f"candidate {label} has an empty continuation")
+        current.append(line)
+        if not continued:
+            commands.append(" ".join(current))
+            current = []
+    if current:
+        raise PermitInputError(f"candidate {label} has an unterminated continuation")
+    return commands
+
+
+def parse_restricted_prepare_command(run: Any) -> None:
+    commands = collect_shell_commands(run, label="prepare command")
+    if any(command.startswith("#") for command in commands):
+        raise PermitInputError("candidate prepare command cannot contain comments")
+    if len(commands) != 2 or commands[0] != "set -euo pipefail":
+        raise PermitInputError(
+            "candidate prepare command has an unexpected control shape"
+        )
+    if commands[1] != PREPARE_COMMAND:
+        raise PermitInputError(
+            "candidate prepare command has an unexpected semantic shape"
+        )
+
+
+def reject_alternate_authority_execution(
+    job: dict[str, Any],
+    *,
+    label: str,
+    kernel_step_name: str,
+    prepare_step_name: str | None,
+) -> None:
+    steps = job.get("steps")
+    if not isinstance(steps, list):
+        raise PermitInputError(f"candidate {label} steps must be an array")
+    for index, step in enumerate(steps):
+        if not isinstance(step, dict):
+            continue
+        checkout = step.get("with")
+        if (
+            isinstance(checkout, dict)
+            and checkout.get("repository") == KERNEL_REPOSITORY
+            and step.get("name") != kernel_step_name
+        ):
+            raise PermitInputError(
+                f"candidate {label} has an alternate Kernel checkout at step {index}"
+            )
+        run = step.get("run")
+        if (
+            isinstance(run, str)
+            and any(
+                "autonomous_release_permit.py" in command
+                and command != PERMIT_RUNTIME_COPY
+                for command in collect_shell_commands(
+                    run,
+                    label=f"{label} step {index} run",
+                )
+            )
+            and step.get("name") != prepare_step_name
+        ):
+            raise PermitInputError(
+                f"candidate {label} has an alternate permit-builder command at step {index}"
+            )
+
+
+def validate_candidate_workflow(workflow: str, *, kernel_sha: str) -> None:
+    kernel_sha = require_sha(
+        kernel_sha, label="candidate workflow Kernel SHA", length=40
+    )
+    try:
+        template = WORKFLOW_TEMPLATE_PATH.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise PermitInputError("parent workflow template is not UTF-8") from exc
+    marker_count = template.count(WORKFLOW_TEMPLATE_MARKER)
+    if marker_count != WORKFLOW_TEMPLATE_PIN_COUNT:
+        raise PermitInputError(
+            "parent workflow template does not contain the exact Kernel pin count"
+        )
+    if WORKFLOW_TEMPLATE_MARKER in workflow:
+        raise PermitInputError("candidate workflow contains the template marker")
+    expected = template.replace(WORKFLOW_TEMPLATE_MARKER, kernel_sha)
+    if workflow != expected:
+        expected_sha = hashlib.sha256(expected.encode("utf-8")).hexdigest()
+        observed_sha = hashlib.sha256(workflow.encode("utf-8")).hexdigest()
+        raise PermitInputError(
+            "candidate workflow is outside the parent-owned complete allowlist "
+            f"(expected sha256:{expected_sha}, observed sha256:{observed_sha})"
+        )
+    parse_strict_workflow_yaml(workflow)
 
 
 def run_git(repository: Path, *arguments: str) -> bytes:
@@ -149,10 +445,119 @@ def verify_permit_with_kernel(
         check=False,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env={
+            key: value
+            for key in (
+                "HOME",
+                "LANG",
+                "LC_ALL",
+                "LC_CTYPE",
+                "PATH",
+                "TMPDIR",
+            )
+            if (value := os.environ.get(key))
+        }
+        | ({"PATH": os.defpath} if not os.environ.get("PATH") else {}),
     )
     if process.returncode != 0:
         detail = process.stderr.decode("utf-8", errors="replace").strip()
         raise PermitInputError(f"pinned Kernel rejected the permit: {detail}")
+
+
+def sanitized_subprocess_environment() -> dict[str, str]:
+    """Return a minimal environment without ambient authority credentials."""
+    environment = {
+        key: value
+        for key in (
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "LC_CTYPE",
+            "PATH",
+            "TMPDIR",
+        )
+        if (value := os.environ.get(key))
+    }
+    environment.setdefault("PATH", os.defpath)
+    return environment
+
+
+def rebuild_reviews_and_permit(
+    *,
+    verifier: Path,
+    permit: Path,
+    trusted_context: Path,
+    review_evidence_dir: Path,
+    recomputed_permit: Path,
+) -> None:
+    """Rebuild raw review evidence and the exact permit with parent-owned code."""
+    evidence_dir = review_evidence_dir.resolve()
+    try:
+        entries = list(evidence_dir.iterdir())
+    except OSError as exc:
+        raise PermitInputError(f"cannot read review evidence directory: {exc}") from exc
+    if {entry.name for entry in entries} != REVIEW_EVIDENCE_FILENAMES or any(
+        not entry.is_file() or entry.is_symlink() for entry in entries
+    ):
+        raise PermitInputError(
+            "review evidence directory must contain only the exact two-provider "
+            "raw, normalized, and envelope files"
+        )
+
+    rebuilt_root = recomputed_permit.resolve().parent / "parent-rebuilt-reviews"
+    try:
+        rebuilt_root.mkdir(parents=True, exist_ok=False)
+    except FileExistsError as exc:
+        raise PermitInputError(
+            "parent-rebuilt review directory already exists"
+        ) from exc
+    rebuilt_reviews: list[Path] = []
+    for provider, model in MODEL_REVIEWERS.items():
+        rebuilt_reviews.append(
+            rebuild_review_evidence(
+                context=trusted_context.resolve(),
+                raw_transport=evidence_dir / f"raw-{provider}.txt",
+                normalized_response=evidence_dir / f"normalized-{provider}.json",
+                review_envelope=evidence_dir / f"review-{provider}.json",
+                provider=provider,
+                model=model,
+                output_dir=rebuilt_root / provider,
+            )
+        )
+
+    command = [
+        str(verifier.resolve()),
+        "--context",
+        str(trusted_context.resolve()),
+    ]
+    for review in rebuilt_reviews:
+        command.extend(("--review", str(review.resolve())))
+    command.extend(("--output", str(recomputed_permit.resolve())))
+    process = subprocess.run(
+        command,
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=sanitized_subprocess_environment(),
+    )
+    candidate = validate_permit(load_json_bytes(permit.read_bytes(), label=str(permit)))
+    del candidate
+    if process.returncode != 0:
+        detail = process.stderr.decode("utf-8", errors="replace").strip()
+        raise PermitInputError(
+            "parent Kernel did not independently reproduce the ALLOW permit"
+            + (f": {detail}" if detail else "")
+        )
+    try:
+        recomputed = recomputed_permit.read_bytes()
+    except FileNotFoundError as exc:
+        raise PermitInputError(
+            "parent Kernel did not emit a recomputed permit"
+        ) from exc
+    if recomputed != permit.read_bytes():
+        raise PermitInputError(
+            "candidate permit differs from the parent raw-evidence reduction"
+        )
 
 
 def validate_permit(permit: Any) -> dict[str, Any]:
@@ -228,6 +633,13 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
     )
     permit = load_json_bytes(args.permit.read_bytes(), label=str(args.permit))
     permit_authority = validate_permit(permit)
+    rebuild_reviews_and_permit(
+        verifier=args.permit_verifier,
+        permit=args.permit,
+        trusted_context=args.trusted_context,
+        review_evidence_dir=args.review_evidence_dir,
+        recomputed_permit=args.recomputed_permit,
+    )
 
     if permit["repository"] != "Mindburn-Labs/.github":
         raise PermitInputError(
@@ -272,6 +684,11 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         raise PermitInputError(
             "candidate authority generation is not the next generation"
         )
+    if candidate_authority["kernel_sha"] != permit_authority["kernel_sha"]:
+        raise PermitInputError(
+            "candidate Kernel changes require a separately ratified full-source "
+            "Kernel-upgrade protocol"
+        )
     parent = candidate_authority["parent"]
     if parent != {
         "generation": args.expected_parent_generation,
@@ -294,23 +711,19 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         if candidate_authority[field] != observed:
             raise PermitInputError(f"candidate {field} does not match {path}")
 
-    workflow = git_blob(
+    workflow_bytes = git_blob(
         candidate_repository,
         candidate_sha,
         ".github/workflows/ci.yml",
-    ).decode("utf-8")
-    kernel_ref = f"ref: {candidate_authority['kernel_sha']}"
-    if workflow.count(kernel_ref) != 3:
-        raise PermitInputError(
-            "candidate workflow does not pin the declared Kernel exactly three times"
-        )
-    if (
-        "--authority-manifest policy/config/autonomous-release-authority.json"
-        not in workflow
-    ):
-        raise PermitInputError(
-            "candidate workflow does not bind the authority manifest"
-        )
+    )
+    try:
+        workflow = workflow_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise PermitInputError(f"candidate workflow is invalid UTF-8: {exc}") from exc
+    validate_candidate_workflow(
+        workflow,
+        kernel_sha=candidate_authority["kernel_sha"],
+    )
 
     return {
         "schema": "mindburn.release-authority-promotion/v1",
@@ -330,6 +743,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--permit", type=Path, required=True)
     parser.add_argument("--permit-verifier", type=Path, required=True)
     parser.add_argument("--trusted-context", type=Path, required=True)
+    parser.add_argument("--review-evidence-dir", type=Path, required=True)
+    parser.add_argument("--recomputed-permit", type=Path, required=True)
     parser.add_argument("--candidate-repository", type=Path, required=True)
     parser.add_argument("--candidate-sha", required=True)
     parser.add_argument("--candidate-pr", type=int, required=True)
