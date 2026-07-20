@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -48,6 +49,8 @@ def enabled_contract() -> dict[str, object]:
     value["enabled"] = True
     value["apps"]["merger"]["app_id"] = 5000001
     value["apps"]["merger"]["installation_id"] = 6000001
+    value["apps"]["control_updater"]["app_id"] = 5000002
+    value["apps"]["control_updater"]["installation_id"] = 6000002
     return value
 
 
@@ -203,6 +206,149 @@ class AutonomousReleaseControllerTests(unittest.TestCase):
         with self.assertRaisesRegex(MODULE.PermitInputError, "positive integer"):
             MODULE.validate_contract(value)
 
+    def test_bootstrap_verification_uses_original_merge_not_current_control(self) -> None:
+        intent = {
+            "descriptor": {"manifest_sha256": "8" * 64},
+            "manifest": {"workflow_sha": MERGE_SHA, "run_id": 1, "run_attempt": 1},
+            "inputs": {"bootstrap.json": b"{}"},
+        }
+        closure = {
+            "descriptor": {"manifest_sha256": "9" * 64},
+            "manifest": intent["manifest"],
+            "inputs": {
+                "intent-descriptor.json": json.dumps(intent["descriptor"]).encode(),
+                "atomic-merge.json": json.dumps(
+                    {
+                        "schema": "mindburn.release-authority-atomic-merge/v1",
+                        "repository": MODULE.AUTHORITY_REPOSITORY,
+                        "pull_request": 36,
+                        "base_sha": BASE_SHA,
+                        "head_sha": HEAD_SHA,
+                        "merge_sha": MERGE_SHA,
+                        "merge_tree_sha": TREE_SHA,
+                        "ref": "refs/heads/main",
+                        "force": False,
+                    }
+                ).encode(),
+                "final-control-plane.json": b"{}",
+                "final-control-plane-observer.json": b"{}",
+            },
+        }
+        final = {
+            "descriptor": {"manifest_sha256": "a" * 64},
+            "ledger_head_sha": "b" * 40,
+            "manifest": intent["manifest"],
+            "inputs": {
+                "closure-descriptor.json": json.dumps(
+                    closure["descriptor"]
+                ).encode(),
+                "ruleset-finalization.json": json.dumps(
+                    {
+                        "schema": "mindburn.release-authority-ruleset-transition/v1",
+                        "operation": "bootstrap-finalize",
+                        "merged_workflow_sha": MERGE_SHA,
+                        "stable_ruleset_id": MODULE.STABLE_RULESET_ID,
+                    }
+                ).encode(),
+                "final-control-plane.json": b"{}",
+                "final-control-plane-observer.json": b"{}",
+            },
+        }
+
+        class BootstrapClient:
+            def request(self, _method, path):
+                if path.endswith("/pulls/36"):
+                    body = {
+                        "number": 36,
+                        "state": "closed",
+                        "merged": True,
+                        "draft": False,
+                        "merge_commit_sha": MERGE_SHA,
+                        "base": {"ref": "main", "sha": BASE_SHA},
+                        "head": {
+                            "sha": HEAD_SHA,
+                            "repo": {"full_name": MODULE.AUTHORITY_REPOSITORY},
+                        },
+                    }
+                elif path.endswith(f"/git/commits/{MERGE_SHA}"):
+                    body = {
+                        "parents": [{"sha": BASE_SHA}, {"sha": HEAD_SHA}],
+                        "tree": {"sha": TREE_SHA},
+                    }
+                else:
+                    raise AssertionError(path)
+                return mock.Mock(body=body)
+
+        records = {"intent": intent, "closure": closure, "final": final}
+
+        def read(_client, *, namespace, record_type, phase):
+            self.assertEqual(record_type, "bootstrap")
+            self.assertIn(f"bootstrap/pr-36/{MERGE_SHA}/", namespace)
+            return records[phase]
+
+        with mock.patch.object(MODULE, "read_record", side_effect=read):
+            receipt = MODULE.verify_bootstrap_final(
+                argparse.Namespace(
+                    contract=ROOT / "config" / "autonomous-release-controller.json",
+                    control_sha=CONTROL_SHA,
+                ),
+                BootstrapClient(),
+            )
+        self.assertEqual(receipt["bootstrap_sha"], MERGE_SHA)
+        self.assertEqual(receipt["control_sha"], CONTROL_SHA)
+
+    def test_kernel_transition_requires_parent_closed_ordinary_merge(self) -> None:
+        class KernelClient:
+            def get_json(self, path):
+                if path.endswith("/git/ref/heads/main"):
+                    return {"object": {"sha": MERGE_SHA}}
+                raise AssertionError(path)
+
+        closed = entry(workflow_sha=ACTIVE_SHA)
+        closed["repository"] = KERNEL
+        closed["recovery"] = False
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            contract = self.write_json(root, "contract.json", enabled_contract())
+            args = argparse.Namespace(
+                contract=contract,
+                control_sha=ACTIVE_SHA,
+                parent_workflow_sha=ACTIVE_SHA,
+                parent_kernel_sha=BASE_SHA,
+                candidate_kernel_sha=MERGE_SHA,
+                kernel_verifier=root / "parent-verifier",
+                output_dir=root / "evidence",
+            )
+            with (
+                mock.patch.object(
+                    MODULE,
+                    "head_authority",
+                    return_value={"kernel_sha": BASE_SHA},
+                ),
+                mock.patch.object(
+                    MODULE,
+                    "recover_ordinary_from_ledger",
+                    return_value=closed,
+                ) as verify_closed,
+            ):
+                receipt = MODULE.verify_kernel_transition(args, KernelClient())
+            self.assertEqual(receipt["mode"], "upgrade")
+            self.assertEqual(receipt["ordinary_merge"]["merge_sha"], MERGE_SHA)
+            self.assertTrue(verify_closed.call_args.kwargs["return_closed"])
+
+            with (
+                mock.patch.object(
+                    MODULE,
+                    "head_authority",
+                    return_value={"kernel_sha": BASE_SHA},
+                ),
+                mock.patch.object(
+                    MODULE, "recover_ordinary_from_ledger", return_value=None
+                ),
+                self.assertRaisesRegex(MODULE.PermitInputError, "durable ordinary"),
+            ):
+                MODULE.verify_kernel_transition(args, KernelClient())
+
     def test_plan_separates_immutable_control_from_active_workflow(self) -> None:
         value = plan_value(ordinary=[entry()])
         self.assertEqual(
@@ -228,6 +374,529 @@ class AutonomousReleaseControllerTests(unittest.TestCase):
         recovery["promotions"][0]["recovery"] = False
         with self.assertRaisesRegex(MODULE.PermitInputError, "forward promotion"):
             MODULE.validate_plan(recovery, control_sha=CONTROL_SHA)
+
+    def test_signed_plan_cannot_mix_ordinary_and_promotion_actions(self) -> None:
+        value = plan_value(
+            ordinary=[entry()],
+            promotions=[entry(repository=MODULE.AUTHORITY_REPOSITORY)],
+        )
+        with self.assertRaisesRegex(MODULE.PermitInputError, "fixed serialization"):
+            MODULE.validate_plan(value, control_sha=CONTROL_SHA)
+
+    def test_generation_two_closure_is_bound_to_bootstrap_control_sha(self) -> None:
+        authority = {"generation": 2}
+        self.assertTrue(
+            MODULE.has_final_promotion_closure(
+                mock.Mock(),
+                mock.Mock(),
+                authority=authority,
+                control_sha=CONTROL_SHA,
+                active_workflow_sha=CONTROL_SHA,
+            )
+        )
+        self.assertFalse(
+            MODULE.has_final_promotion_closure(
+                mock.Mock(),
+                mock.Mock(),
+                authority=authority,
+                control_sha=CONTROL_SHA,
+                active_workflow_sha=ACTIVE_SHA,
+            )
+        )
+
+    def test_activated_recovery_stops_only_after_successor_closure(self) -> None:
+        authority = {
+            "generation": 3,
+            "parent": {"generation": 2, "workflow_sha": ACTIVE_SHA},
+        }
+        recovered_entry = entry(
+            repository=MODULE.AUTHORITY_REPOSITORY,
+            workflow_sha=ACTIVE_SHA,
+        )
+        recovered_entry["evidence"] = "promotion"
+        repository_config = {"merge_method": "merge"}
+        with (
+            mock.patch.object(MODULE, "head_authority", return_value={"generation": 2}),
+            mock.patch.object(
+                MODULE,
+                "read_verified_promotion_chain",
+                return_value=(recovered_entry, {"phase": "merged"}, None, None),
+            ) as reader,
+        ):
+            result = MODULE.verified_activated_recovery_entry(
+                argparse.Namespace(),
+                mock.Mock(),
+                authority=authority,
+                control_sha=ACTIVE_SHA,
+                active_workflow_sha=MERGE_SHA,
+                repository_config=repository_config,
+            )
+        self.assertTrue(result["recovery"])
+        reader.assert_called_once()
+
+        with (
+            mock.patch.object(MODULE, "head_authority", return_value={"generation": 2}),
+            mock.patch.object(
+                MODULE,
+                "read_verified_promotion_chain",
+                return_value=(
+                    recovered_entry,
+                    {"phase": "merged"},
+                    {"phase": "final"},
+                    {"phase": "successor"},
+                ),
+            ),
+        ):
+            self.assertIsNone(
+                MODULE.verified_activated_recovery_entry(
+                    argparse.Namespace(),
+                    mock.Mock(),
+                    authority=authority,
+                    control_sha=ACTIVE_SHA,
+                    active_workflow_sha=MERGE_SHA,
+                    repository_config=repository_config,
+                )
+            )
+
+    def test_promotion_merged_phase_binds_intent_approval_and_atomic_merge(
+        self,
+    ) -> None:
+        promotion_entry = entry(
+            repository=MODULE.AUTHORITY_REPOSITORY,
+            workflow_sha=ACTIVE_SHA,
+        )
+        promotion_entry["base_sha"] = ACTIVE_SHA
+        promotion_entry["evidence"] = "promotion"
+        approval = {
+            "schema": "mindburn.release-authority-machine-approval/v2",
+            "repository": MODULE.AUTHORITY_REPOSITORY,
+            "pull_request": promotion_entry["pull_request"],
+            "head_sha": promotion_entry["head_sha"],
+            "workflow_sha": promotion_entry["workflow_sha"],
+            "permit_id": promotion_entry["permit_id"],
+            "base_sha": promotion_entry["base_sha"],
+            "merge_sha": promotion_entry["merge_sha"],
+            "merge_tree_sha": promotion_entry["merge_tree_sha"],
+            "review_id": 101,
+            "review_state": "APPROVED",
+            "approver_login": MODULE.APPROVER_LOGIN,
+            "approver_app_id": MODULE.APPROVER_APP_ID,
+            "approver_installation_id": MODULE.APPROVER_INSTALLATION_ID,
+        }
+        merge_response = {
+            "schema": "mindburn.release-authority-atomic-merge/v1",
+            "repository": MODULE.AUTHORITY_REPOSITORY,
+            "pull_request": promotion_entry["pull_request"],
+            "base_sha": promotion_entry["base_sha"],
+            "head_sha": promotion_entry["head_sha"],
+            "merge_sha": promotion_entry["merge_sha"],
+            "merge_tree_sha": promotion_entry["merge_tree_sha"],
+            "ref": MODULE.MAIN_REF,
+            "force": False,
+        }
+        intent = {
+            "descriptor": {"manifest_sha256": "8" * 64},
+            "manifest": {
+                "workflow_sha": ACTIVE_SHA,
+                "run_id": 9001,
+                "run_attempt": 1,
+            },
+        }
+        merged = {
+            "inputs": {
+                "intent-descriptor.json": json.dumps(intent["descriptor"]).encode(),
+                "approval.json": json.dumps(approval).encode(),
+                "merge-response.json": json.dumps(merge_response).encode(),
+            },
+            "manifest": {
+                "namespace": f"promotions/generation-3/{MERGE_SHA}/merged",
+                "workflow_sha": ACTIVE_SHA,
+                "run_id": 9001,
+                "run_attempt": 1,
+            },
+        }
+        client = mock.Mock()
+        client.get_json.return_value = {
+            "state": "APPROVED",
+            "commit_id": HEAD_SHA,
+            "body": f"HELM signed ALLOW permit {PERMIT_ID}",
+            "user": {"login": MODULE.APPROVER_LOGIN},
+        }
+        MODULE.verify_promotion_merged(
+            client,
+            intent=intent,
+            merged=merged,
+            entry=promotion_entry,
+            generation=3,
+        )
+        merge_response["force"] = True
+        merged["inputs"]["merge-response.json"] = json.dumps(merge_response).encode()
+        with self.assertRaisesRegex(MODULE.PermitInputError, "merge response"):
+            MODULE.verify_promotion_merged(
+                client,
+                intent=intent,
+                merged=merged,
+                entry=promotion_entry,
+                generation=3,
+            )
+
+    def test_promotion_final_phase_requires_signed_observer_and_activation_chain(
+        self,
+    ) -> None:
+        promotion_entry = entry(
+            repository=MODULE.AUTHORITY_REPOSITORY,
+            workflow_sha=ACTIVE_SHA,
+        )
+        promotion_entry["base_sha"] = ACTIVE_SHA
+        promotion_entry["evidence"] = "promotion"
+        kernel_sha = "d" * 40
+        parent_authority = {"generation": 2, "kernel_sha": kernel_sha}
+        authority = {"generation": 3, "kernel_sha": kernel_sha}
+        kernel_transition = {
+            "schema": MODULE.KERNEL_TRANSITION_SCHEMA,
+            "mode": "unchanged",
+            "control_workflow_sha": ACTIVE_SHA,
+            "parent_workflow_sha": ACTIVE_SHA,
+            "parent_kernel_sha": kernel_sha,
+            "candidate_kernel_sha": kernel_sha,
+            "ordinary_merge": None,
+        }
+        kernel_transition_bytes = json.dumps(kernel_transition).encode()
+        promotion_receipt = {
+            "kernel_transition_sha256": hashlib.sha256(
+                kernel_transition_bytes
+            ).hexdigest()
+        }
+        intent = {
+            "inputs": {
+                "promotion/authority-promotion.json": json.dumps(
+                    promotion_receipt
+                ).encode(),
+                "promotion/kernel-transition.json": kernel_transition_bytes,
+                "promotion/parent-authority.json": json.dumps(
+                    parent_authority
+                ).encode(),
+            },
+            "manifest": {
+                "workflow_sha": ACTIVE_SHA,
+                "run_id": 9001,
+                "run_attempt": 1,
+            }
+        }
+        merged = {"descriptor": {"manifest_sha256": "8" * 64}}
+        observer = {
+            "schema": MODULE.PROMOTION_RECEIPT_SCHEMA,
+            "phase": "final",
+            "decision": "ALLOW",
+            "control_workflow_sha": ACTIVE_SHA,
+            "parent_workflow_sha": ACTIVE_SHA,
+            "candidate_workflow_sha": HEAD_SHA,
+            "merged_workflow_sha": MERGE_SHA,
+            "merged_tree_sha": TREE_SHA,
+            "ratification_permit_id": PERMIT_ID,
+            "canary_permit_id": "sha256:" + "9" * 64,
+            "promotion_run_id": 9100,
+            "promotion_run_attempt": 1,
+        }
+        control = json.loads(
+            (ROOT / "config" / "autonomous-release-control-plane.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        expected_cases = control["adversarial_suite"]["cases"]
+        suite = {
+            "schema": "mindburn.release-authority-suite/v1",
+            "repository": "Mindburn-Labs/contracts-autonomous-release-lab",
+            "workflow_sha": HEAD_SHA,
+            "cases": [
+                {
+                    "id": case["id"],
+                    "expected": case["expected"],
+                    "run_id": 9200 + index,
+                    "run_attempt": 1,
+                    "permit_id": "sha256:" + f"{index + 1:x}" * 64,
+                    "merge_sha": "a" * 40,
+                    "merge_tree_sha": "b" * 40,
+                }
+                for index, case in enumerate(expected_cases)
+            ],
+        }
+        suite_bytes = json.dumps(suite).encode()
+        suite_digest = hashlib.sha256(suite_bytes).hexdigest()
+        observer["authority_suite_sha256"] = suite_digest
+        pre_observer = {**observer, "phase": "pre-activation"}
+        trigger = {
+            "schema": "mindburn.release-authority-suite-trigger/v1",
+            "repository": suite["repository"],
+            "workflow_sha": HEAD_SHA,
+            "started_at": "2026-07-15T00:00:00Z",
+            "cases": expected_cases,
+        }
+        execution = {
+            "schema": "mindburn.release-authority-promotion-execution/v2",
+            "parent_generation": 2,
+            "candidate_generation": 3,
+            "parent_base_sha": ACTIVE_SHA,
+            "parent_workflow_sha": ACTIVE_SHA,
+            "control_workflow_sha": ACTIVE_SHA,
+            "candidate_workflow_sha": HEAD_SHA,
+            "candidate_workflow_ref": "refs/heads/codex/successor",
+            "candidate_tree_sha": TREE_SHA,
+            "candidate_pull_request": 42,
+            "merged_workflow_sha": MERGE_SHA,
+            "merged_tree_sha": TREE_SHA,
+            "ratification_permit_id": PERMIT_ID,
+            "ratification_run_id": 9001,
+            "ratification_run_attempt": 1,
+            "canary_run_id": 9200,
+            "canary_run_attempt": 1,
+            "canary_permit_id": "sha256:" + "9" * 64,
+            "authority_suite_sha256": suite_digest,
+        }
+        activation = {
+            "schema": "mindburn.release-authority-ruleset-transition/v1",
+            "operation": "activate",
+            "parent_workflow_sha": ACTIVE_SHA,
+            "candidate_workflow_sha": HEAD_SHA,
+            "merged_workflow_sha": MERGE_SHA,
+        }
+        final = {
+            "inputs": {
+                "merged-descriptor.json": json.dumps(merged["descriptor"]).encode(),
+                "final-observer-receipt.json": json.dumps(observer).encode(),
+                "final-observer-receipt.attestation.json": b'{"bundle":true}',
+                "pre-activation-observer-receipt.json": json.dumps(
+                    pre_observer
+                ).encode(),
+                "pre-activation-observer-receipt.attestation.json": b'{"bundle":true}',
+                "authority-promotion-execution.json": json.dumps(execution).encode(),
+                "authority-suite.json": suite_bytes,
+                "suite-trigger.json": json.dumps(trigger).encode(),
+                "kernel-transition.json": kernel_transition_bytes,
+                "ruleset-activate.json": json.dumps(activation).encode(),
+                "observer-replay-final/recomputed.json": b'{"decision":"ALLOW"}',
+                **{
+                    f"suite/cases/{case['id']}/receipt.json": json.dumps(
+                        suite["cases"][index]
+                    ).encode()
+                    for index, case in enumerate(expected_cases)
+                },
+                **{
+                    f"suite/cases/{case['id']}/{name}-kernel-permit.json": b'{"decision":"ALLOW"}'
+                    for case in expected_cases
+                    if case["expected"] != "PRE_MODEL_REJECT"
+                    for name in ("parent", "candidate")
+                },
+            },
+            "manifest": {
+                "namespace": f"promotions/generation-3/{MERGE_SHA}/final",
+                "workflow_sha": ACTIVE_SHA,
+                "run_id": 9001,
+                "run_attempt": 1,
+            },
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            with mock.patch.object(MODULE, "verify_attestation") as verify:
+                MODULE.verify_promotion_final(
+                    argparse.Namespace(
+                        output_dir=Path(temporary),
+                        contract=ROOT / "config" / "autonomous-release-controller.json",
+                    ),
+                    mock.Mock(token="token"),
+                    intent=intent,
+                    merged=merged,
+                    final=final,
+                    entry=promotion_entry,
+                    authority=authority,
+                    materialization_label="test",
+                )
+            self.assertEqual(verify.call_count, 2)
+        observer["decision"] = "DENY"
+        final["inputs"]["final-observer-receipt.json"] = json.dumps(observer).encode()
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(MODULE.PermitInputError, "observer receipt"):
+                MODULE.verify_promotion_final(
+                    argparse.Namespace(
+                        output_dir=Path(temporary),
+                        contract=ROOT / "config" / "autonomous-release-controller.json",
+                    ),
+                    mock.Mock(token="token"),
+                    intent=intent,
+                    merged=merged,
+                    final=final,
+                    entry=promotion_entry,
+                    authority=authority,
+                    materialization_label="deny",
+                )
+
+        observer["decision"] = "ALLOW"
+        observer["ratification_permit_id"] = "sha256:" + "a" * 64
+        final["inputs"]["final-observer-receipt.json"] = json.dumps(observer).encode()
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(MODULE.PermitInputError, "observer receipt"):
+                MODULE.verify_promotion_final(
+                    argparse.Namespace(
+                        output_dir=Path(temporary),
+                        contract=ROOT / "config" / "autonomous-release-controller.json",
+                    ),
+                    mock.Mock(token="token"),
+                    intent=intent,
+                    merged=merged,
+                    final=final,
+                    entry=promotion_entry,
+                    authority=authority,
+                    materialization_label="spliced-permit",
+                )
+
+        observer["ratification_permit_id"] = PERMIT_ID
+        final["inputs"]["final-observer-receipt.json"] = json.dumps(observer).encode()
+        execution["candidate_pull_request"] = 43
+        final["inputs"]["authority-promotion-execution.json"] = json.dumps(
+            execution
+        ).encode()
+        with tempfile.TemporaryDirectory() as temporary:
+            with mock.patch.object(MODULE, "verify_attestation"):
+                with self.assertRaisesRegex(
+                    MODULE.PermitInputError, "promotion execution identity"
+                ):
+                    MODULE.verify_promotion_final(
+                    argparse.Namespace(
+                        output_dir=Path(temporary),
+                        contract=ROOT / "config" / "autonomous-release-controller.json",
+                    ),
+                        mock.Mock(token="token"),
+                        intent=intent,
+                        merged=merged,
+                        final=final,
+                        entry=promotion_entry,
+                        authority=authority,
+                        materialization_label="spliced-execution",
+                    )
+
+    def test_promotion_successor_binds_durable_final_and_live_control(self) -> None:
+        promotion_entry = entry(
+            repository=MODULE.AUTHORITY_REPOSITORY,
+            workflow_sha=ACTIVE_SHA,
+        )
+        promotion_entry["base_sha"] = ACTIVE_SHA
+        authority = {"generation": 3}
+        final = {"descriptor": {"manifest_sha256": "8" * 64}}
+        parent_controller = enabled_contract()
+        parent_control = json.loads(
+            (ROOT / "config" / "autonomous-release-control-plane.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        updater = parent_controller["apps"]["control_updater"]
+        parent_control["control_workflow"]["successor_app"] = updater
+        parent_control["control_workflow"]["successor_ruleset"]["bypass_actors"] = [
+            {
+                "actor_id": updater["app_id"],
+                "actor_type": "Integration",
+                "bypass_mode": "always",
+            }
+        ]
+        parent_control_bytes = (
+            json.dumps(parent_control, indent=2, sort_keys=True) + "\n"
+        ).encode()
+        observer = {
+            "schema": MODULE.CONTROL_OBSERVER_SCHEMA,
+            "contract_sha256": hashlib.sha256(parent_control_bytes).hexdigest(),
+            "live": True,
+            "repository_settings": parent_control["repository_settings"],
+            "control_workflow": {
+                "branch": MODULE.CONTROL_BRANCH,
+                "ref": MODULE.CONTROL_REF,
+                "sha": MERGE_SHA,
+                "workflow_path": MODULE.CONTROL_WORKFLOW_PATH,
+                "workflow_blob_sha": "9" * 40,
+                "ruleset": {
+                    "history": {
+                        "id": 101,
+                        **parent_control["control_workflow"]["ruleset"],
+                    },
+                    "successor": {
+                        "id": 102,
+                        **parent_control["control_workflow"]["successor_ruleset"],
+                    },
+                },
+                "active_rules": [],
+            },
+            "control_ruleset": {},
+            "environments": parent_control["environments"],
+            "suite_cases": len(parent_control["adversarial_suite"]["cases"]),
+        }
+        transition = {
+            "schema": MODULE.CONTROL_SUCCESSOR_SCHEMA,
+            "repository": MODULE.AUTHORITY_REPOSITORY,
+            "ruleset": MODULE.CONTROL_SUCCESSOR_RULESET_NAME,
+            "ref": MODULE.CONTROL_REF,
+            "before_sha": ACTIVE_SHA,
+            "after_sha": MERGE_SHA,
+            "force": False,
+            "state": "advanced",
+            "candidate_generation": 3,
+            "candidate_pull_request": 42,
+            "ratification_permit_id": PERMIT_ID,
+            "final_descriptor": final["descriptor"],
+            "updater_app_id": updater["app_id"],
+            "updater_installation_id": updater["installation_id"],
+        }
+        successor = {
+            "inputs": {
+                "final-descriptor.json": json.dumps(final["descriptor"]).encode(),
+                "control-transition.json": json.dumps(transition).encode(),
+                "control-observer.json": json.dumps(observer).encode(),
+                "control-observer.attestation.json": b'{"bundle":true}',
+            },
+            "manifest": {
+                "namespace": f"promotions/generation-3/{MERGE_SHA}/successor",
+                "workflow_sha": ACTIVE_SHA,
+                "run_id": 9300,
+                "run_attempt": 1,
+            },
+        }
+
+        class ParentSourceClient:
+            token = "token"
+
+            def get_bytes(self, path, *, accept="application/vnd.github+json"):
+                del accept
+                if "autonomous-release-controller.json" in path:
+                    return json.dumps(parent_controller).encode()
+                if "autonomous-release-control-plane.json" in path:
+                    return parent_control_bytes
+                raise AssertionError(path)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            with mock.patch.object(MODULE, "verify_attestation") as verify:
+                MODULE.verify_promotion_successor(
+                    argparse.Namespace(output_dir=Path(temporary)),
+                    ParentSourceClient(),
+                    final=final,
+                    successor=successor,
+                    entry=promotion_entry,
+                    authority=authority,
+                    control_sha=MERGE_SHA,
+                    materialization_label="test",
+                )
+            verify.assert_called_once()
+
+        successor["manifest"]["workflow_sha"] = MERGE_SHA
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(
+                MODULE.PermitInputError, "cannot authorize control advance"
+            ):
+                MODULE.verify_promotion_successor(
+                    argparse.Namespace(output_dir=Path(temporary)),
+                    ParentSourceClient(),
+                    final=final,
+                    successor=successor,
+                    entry=promotion_entry,
+                    authority=authority,
+                    control_sha=MERGE_SHA,
+                    materialization_label="successor-signed-advance",
+                )
 
     def test_renames_bind_both_old_and_new_authority_paths(self) -> None:
         client = JsonBytesClient(
@@ -255,7 +924,7 @@ class AutonomousReleaseControllerTests(unittest.TestCase):
         candidate_authority = {
             **parent_authority,
             "generation": 3,
-            "parent": {"generation": 2, "workflow_sha": ACTIVE_SHA},
+            "parent": {"generation": 2, "workflow_sha": CONTROL_SHA},
         }
         pull_request = {
             "number": 42,
@@ -277,7 +946,9 @@ class AutonomousReleaseControllerTests(unittest.TestCase):
                 authority=authority,
                 kernel_verifier=directory / "verifier",
                 control_sha=CONTROL_SHA,
-                active_workflow_sha=ACTIVE_SHA,
+                active_workflow_sha=CONTROL_SHA,
+                observer_app_slug="helm-authority-observer",
+                observer_installation_id=146542079,
                 output_dir=directory / "plan",
             )
 
@@ -287,7 +958,7 @@ class AutonomousReleaseControllerTests(unittest.TestCase):
             with (
                 mock.patch.object(MODULE, "verify_observer_installation"),
                 mock.patch.object(
-                    MODULE, "discover_effective_workflow_sha", return_value=ACTIVE_SHA
+                    MODULE, "discover_effective_workflow_sha", return_value=CONTROL_SHA
                 ),
                 mock.patch.object(MODULE, "observe_effective_stable_rules"),
                 mock.patch.object(
@@ -314,14 +985,14 @@ class AutonomousReleaseControllerTests(unittest.TestCase):
                 mock.patch.object(
                     MODULE,
                     "verified_plan_entry",
-                    return_value=entry(repository=MODULE.AUTHORITY_REPOSITORY),
+                    return_value=entry(
+                        repository=MODULE.AUTHORITY_REPOSITORY,
+                        workflow_sha=CONTROL_SHA,
+                    ),
                 ),
                 mock.patch.object(MODULE, "changed_paths", return_value=["README.md"]),
                 mock.patch.object(
                     MODULE, "recover_merged_authority_promotion", return_value=None
-                ),
-                mock.patch.object(
-                    MODULE, "has_final_promotion_closure", return_value=True
                 ),
             ):
                 result = MODULE.plan(args, mock.Mock())
@@ -367,6 +1038,8 @@ class AutonomousReleaseControllerTests(unittest.TestCase):
             approvals=approvals,
             control_sha=CONTROL_SHA,
             repository=KERNEL,
+            merger_app_slug="helm-authority-merger",
+            merger_installation_id=6000001,
         )
 
     def test_merge_uses_atomic_before_oid_and_exact_reviewed_merge(self) -> None:

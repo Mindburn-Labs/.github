@@ -33,8 +33,15 @@ class FakeClient:
     def get_json(self, path: str):
         if path == "/repos/Mindburn-Labs/.github":
             return {"delete_branch_on_merge": False}
-        if path == "/orgs/Mindburn-Labs/rulesets/4242":
-            ruleset = MODULE.expected_control_ruleset()
+        if path in {
+            "/orgs/Mindburn-Labs/rulesets/4242",
+            "/orgs/Mindburn-Labs/rulesets/4243",
+        }:
+            ruleset = (
+                MODULE.expected_control_ruleset()
+                if path.endswith("/4242")
+                else MODULE.expected_control_successor_ruleset()
+            )
             if self.ruleset_bypass:
                 ruleset = {
                     **ruleset,
@@ -79,13 +86,20 @@ class FakeClient:
     def get_bytes(self, path: str) -> bytes:
         if path == "/orgs/Mindburn-Labs/rulesets?per_page=100":
             return json.dumps(
-                [{"id": 4242, "name": MODULE.CONTROL_RULESET_NAME}]
+                [
+                    {"id": 4242, "name": MODULE.CONTROL_RULESET_NAME},
+                    {
+                        "id": 4243,
+                        "name": MODULE.CONTROL_SUCCESSOR_RULESET_NAME,
+                    },
+                ]
             ).encode()
         if path.endswith("/rules/branches/authority%2Fcontrol-v1"):
             return json.dumps(
                 [
                     {"type": "creation"},
                     {"type": "deletion"},
+                    {"type": "non_fast_forward"},
                     {
                         "type": "update",
                         "parameters": {"update_allows_fetch_and_merge": False},
@@ -117,6 +131,7 @@ class ControlPlaneTests(unittest.TestCase):
                 "authority-approval",
                 "authority-merge",
                 "authority-promotion",
+                "authority-control",
             },
         )
         self.assertEqual(len(contract["adversarial_suite"]["cases"]), 8)
@@ -128,6 +143,40 @@ class ControlPlaneTests(unittest.TestCase):
             contract["control_workflow"]["ref"],
             "refs/heads/authority/control-v1",
         )
+        self.assertEqual(
+            contract["control_workflow"]["successor_app"],
+            {
+                "app_id": None,
+                "installation_id": None,
+                "slug": "helm-authority-control-updater",
+            },
+        )
+
+    def test_control_ruleset_admits_only_the_exact_successor_app(self) -> None:
+        contract = self.load_contract()
+        contract["control_workflow"]["successor_app"]["app_id"] = 4299000
+        contract["control_workflow"]["successor_app"]["installation_id"] = 146590000
+        contract["control_workflow"]["successor_ruleset"] = (
+            MODULE.expected_control_successor_ruleset(4299000)
+        )
+        validated = MODULE.validate_contract(contract, self.load_corpus())
+        self.assertEqual(
+            validated["control_workflow"]["successor_ruleset"]["bypass_actors"],
+            [
+                {
+                    "actor_id": 4299000,
+                    "actor_type": "Integration",
+                    "bypass_mode": "always",
+                }
+            ],
+        )
+        contract["control_workflow"]["successor_ruleset"]["bypass_actors"][0][
+            "actor_id"
+        ] = 4299001
+        with self.assertRaisesRegex(
+            MODULE.PermitInputError, "successor ruleset is not exact"
+        ):
+            MODULE.validate_contract(contract, self.load_corpus())
 
     def test_live_repository_settings_preserve_recovery_head_ref(self) -> None:
         contract = MODULE.validate_contract(self.load_contract(), self.load_corpus())
@@ -155,7 +204,7 @@ class ControlPlaneTests(unittest.TestCase):
     def test_live_environment_verification_accepts_exact_state(self) -> None:
         contract = MODULE.validate_contract(self.load_contract(), self.load_corpus())
         receipts = MODULE.verify_live_environments(contract, FakeClient())
-        self.assertEqual(len(receipts), 4)
+        self.assertEqual(len(receipts), 5)
 
     def test_disabled_environments_admit_no_branch_during_bootstrap(self) -> None:
         contract = MODULE.validate_contract(self.load_contract(), self.load_corpus())
@@ -178,6 +227,7 @@ class ControlPlaneTests(unittest.TestCase):
             [receipt["branch_policies"] for receipt in receipts],
             [
                 [],
+                [{"name": "authority/control-v1", "type": "branch"}],
                 [{"name": "authority/control-v1", "type": "branch"}],
                 [{"name": "authority/control-v1", "type": "branch"}],
                 [{"name": "authority/control-v1", "type": "branch"}],

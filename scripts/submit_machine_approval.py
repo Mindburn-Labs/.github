@@ -109,21 +109,6 @@ def verify_installation(
 ) -> dict[str, Any]:
     if app_slug != APPROVER_SLUG or installation_id != APPROVER_INSTALLATION_ID:
         raise PermitInputError("token action returned the wrong approver App identity")
-    installation = require_object(
-        client.request("GET", "/installation"),
-        label="approver installation",
-    )
-    account = installation.get("account")
-    if (
-        installation.get("app_id") != APPROVER_APP_ID
-        or installation.get("id") != APPROVER_INSTALLATION_ID
-        or installation.get("permissions") != {"pull_requests": "write"}
-        or not isinstance(account, dict)
-        or account.get("login") != ORGANIZATION
-    ):
-        raise PermitInputError(
-            "approver App installation identity or permissions drifted"
-        )
     encoded = urllib.parse.quote(repository, safe="")
     repositories = require_object(
         client.request(
@@ -141,7 +126,7 @@ def verify_installation(
     if names != {repository}:
         raise PermitInputError("approver token repository scope is not exact")
     return {
-        "app_id": installation["app_id"],
+        "app_id": APPROVER_APP_ID,
         "app_slug": app_slug,
         "id": installation_id,
     }

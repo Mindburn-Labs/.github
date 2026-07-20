@@ -207,6 +207,7 @@ class AuthoritySuiteTests(unittest.TestCase):
                 args = mock.Mock(
                     output_dir=output_dir,
                     kernel_verifier=root / "release-permit-verify",
+                    candidate_kernel_verifier=None,
                 )
                 client = mock.Mock(token="observer-token")
                 with (
@@ -256,6 +257,70 @@ class AuthoritySuiteTests(unittest.TestCase):
                     / "cases"
                     / f"case-{expected.lower()}"
                     / "parent-kernel-permit.json",
+                )
+
+    def test_candidate_kernel_reduction_must_match_parent_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            output_dir = root / "suite"
+            output_dir.mkdir()
+            evidence = root / "evidence"
+            evidence.mkdir()
+            paths = [evidence / name for name in ("permit", "bundle", "context")]
+            reviews = {
+                provider: evidence / f"review-{provider}.json"
+                for provider in ("anthropic", "openai")
+            }
+            for path in (*paths, *reviews.values()):
+                path.write_text("{}\n", encoding="utf-8")
+
+            def reduce(_verifier, _permit, _context, _reviews, output) -> None:
+                output.parent.mkdir(parents=True, exist_ok=True)
+                output.write_bytes(output.name.encode())
+
+            args = mock.Mock(
+                output_dir=output_dir,
+                kernel_verifier=root / "parent-verifier",
+                candidate_kernel_verifier=root / "candidate-verifier",
+            )
+            with (
+                mock.patch.object(
+                    MODULE,
+                    "write_attested_case",
+                    return_value=(*paths, reviews),
+                ),
+                mock.patch.object(
+                    MODULE,
+                    "verify_candidate_permit",
+                    return_value={
+                        "permit_id": "sha256:" + "a" * 64,
+                        "merge_sha": "b" * 40,
+                        "merge_tree_sha": "c" * 40,
+                    },
+                ),
+                mock.patch.object(
+                    MODULE,
+                    "verify_permit_reduction",
+                    side_effect=reduce,
+                ),
+                self.assertRaisesRegex(
+                    MODULE.PermitInputError,
+                    "Kernels disagree",
+                ),
+            ):
+                MODULE.verify_case(
+                    args,
+                    mock.Mock(token="observer-token"),
+                    case={
+                        "id": "allow",
+                        "expected": "ALLOW",
+                        "pull_request": 8,
+                        "head_sha": "d" * 40,
+                    },
+                    run={"id": 42, "run_attempt": 1, "conclusion": "success"},
+                    repository="Mindburn-Labs/contracts-autonomous-release-lab",
+                    authority={"generation": 2},
+                    workflow_sha="e" * 40,
                 )
 
     def test_trigger_must_exactly_match_source_contract(self) -> None:

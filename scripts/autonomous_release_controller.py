@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
-import io
+import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -13,7 +13,6 @@ import sys
 import time
 from typing import Any
 import urllib.parse
-import zipfile
 
 from autonomous_release_permit import (
     PermitInputError,
@@ -38,6 +37,7 @@ from authority_evidence_ledger import (
     LEDGER_REF,
     REPOSITORY as EVIDENCE_LEDGER_REPOSITORY,
     GitHubLedgerClient,
+    materialize_record,
     read_record,
 )
 from configure_machine_approval_gates import (
@@ -66,21 +66,31 @@ from configure_machine_approval_gates import (
 from observe_authority_promotion import (
     PUBLIC_STABLE_REPOSITORIES,
     observe_effective_stable_rules,
+    validate_execution,
 )
-from verify_authority_promotion import validate_authority_shape, validate_permit
+from verify_authority_promotion import (
+    validate_authority_shape,
+    validate_kernel_transition,
+    validate_permit,
+)
 from wait_for_authority_canary import (
     WORKFLOW_NAME,
     WORKFLOW_PATH,
     GitHubReadClient,
     load_json_file,
     run_sort_key,
-    artifact_for_run,
     verify_candidate_permit,
     verify_attestation,
     verify_permit_reduction,
     verify_run_workflow_provenance,
 )
 from wait_for_authority_suite import write_attested_case
+from verify_control_plane import (
+    CONTROL_BRANCH,
+    CONTROL_REF,
+    CONTROL_SUCCESSOR_RULESET_NAME,
+    CONTROL_WORKFLOW_PATH,
+)
 
 
 CONTRACT_SCHEMA = "mindburn.autonomous-release-controller/v1"
@@ -92,8 +102,10 @@ MERGE_SCHEMA = "mindburn.autonomous-release-merge/v1"
 ORDINARY_CLOSURE_SCHEMA = "mindburn.autonomous-release-merge-closure/v1"
 PROMOTION_WORKFLOW_NAME = "Promote HELM Release Authority"
 PROMOTION_WORKFLOW_PATH = ".github/workflows/promote-authority.yml"
-PROMOTION_RECEIPT_ARTIFACT = "helm-authority-promotion-receipt"
 PROMOTION_RECEIPT_SCHEMA = "mindburn.release-authority-observer-receipt/v4"
+CONTROL_SUCCESSOR_SCHEMA = "mindburn.release-authority-control-successor/v1"
+CONTROL_OBSERVER_SCHEMA = "mindburn.release-control-plane-verification/v2"
+KERNEL_TRANSITION_SCHEMA = "mindburn.release-authority-kernel-transition/v1"
 ORGANIZATION = "Mindburn-Labs"
 AUTHORITY_REPOSITORY = "Mindburn-Labs/.github"
 SELECTED_REPOSITORIES = {
@@ -209,7 +221,7 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
         raise PermitInputError("controller apps must be an object")
     require_exact_keys(
         apps,
-        required={"observer", "approver", "merger"},
+        required={"observer", "approver", "merger", "control_updater"},
         label="controller apps",
     )
     expected_apps = {
@@ -231,21 +243,29 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
             "installation_id": installation_id,
         }:
             raise PermitInputError(f"controller {name} App identity drifted")
-    merger = apps["merger"]
-    if not isinstance(merger, dict):
-        raise PermitInputError("controller merger App must be an object")
-    require_exact_keys(
-        merger,
-        required={"slug", "app_id", "installation_id"},
-        label="controller merger App",
-    )
-    if merger.get("slug") != "helm-authority-merger":
-        raise PermitInputError("controller merger App slug drifted")
-    if value["enabled"]:
-        positive_integer(merger.get("app_id"), label="merger app_id")
-        positive_integer(merger.get("installation_id"), label="merger installation_id")
-    elif merger.get("app_id") is not None or merger.get("installation_id") is not None:
-        raise PermitInputError("disabled controller must not declare merger authority")
+    for name, slug in (
+        ("merger", "helm-authority-merger"),
+        ("control_updater", "helm-authority-control-updater"),
+    ):
+        app = apps[name]
+        if not isinstance(app, dict):
+            raise PermitInputError(f"controller {name} App must be an object")
+        require_exact_keys(
+            app,
+            required={"slug", "app_id", "installation_id"},
+            label=f"controller {name} App",
+        )
+        if app.get("slug") != slug:
+            raise PermitInputError(f"controller {name} App slug drifted")
+        if value["enabled"]:
+            positive_integer(app.get("app_id"), label=f"{name} app_id")
+            positive_integer(
+                app.get("installation_id"), label=f"{name} installation_id"
+            )
+        elif app.get("app_id") is not None or app.get("installation_id") is not None:
+            raise PermitInputError(
+                f"disabled controller must not declare {name} authority"
+            )
 
     evidence_ledger = value["evidence_ledger"]
     if not isinstance(evidence_ledger, dict):
@@ -318,6 +338,7 @@ def contract_status(args: argparse.Namespace) -> dict[str, Any]:
         load_object(args.contract, label="controller contract")
     )
     merger = contract["apps"]["merger"]
+    control_updater = contract["apps"]["control_updater"]
     return {
         "schema": STATUS_SCHEMA,
         "enabled": contract["enabled"],
@@ -328,6 +349,14 @@ def contract_status(args: argparse.Namespace) -> dict[str, Any]:
             and isinstance(merger["installation_id"], int)
             and not isinstance(merger["installation_id"], bool)
             and merger["installation_id"] > 0
+        ),
+        "control_updater_configured": (
+            isinstance(control_updater["app_id"], int)
+            and not isinstance(control_updater["app_id"], bool)
+            and control_updater["app_id"] > 0
+            and isinstance(control_updater["installation_id"], int)
+            and not isinstance(control_updater["installation_id"], bool)
+            and control_updater["installation_id"] > 0
         ),
         "repositories": [item["repository"] for item in contract["repositories"]],
     }
@@ -342,7 +371,39 @@ def verify_bootstrap_final(
     )
     control_sha = require_sha(args.control_sha, label="control_sha", length=40)
     pull_request = contract["evidence_ledger"]["bootstrap_pr"]
-    root = f"bootstrap/pr-{pull_request}/{control_sha}"
+    pull_response = client.request(
+        "GET",
+        f"/repos/{AUTHORITY_REPOSITORY}/pulls/{pull_request}",
+    ).body
+    if (
+        not isinstance(pull_response, dict)
+        or pull_response.get("number") != pull_request
+        or pull_response.get("state") != "closed"
+        or pull_response.get("merged") is not True
+        or pull_response.get("draft") is True
+        or nested_string(
+            pull_response,
+            "base",
+            "ref",
+            label="bootstrap pull request base ref",
+        )
+        != "main"
+        or nested_string(
+            pull_response,
+            "head",
+            "repo",
+            "full_name",
+            label="bootstrap pull request head repository",
+        )
+        != AUTHORITY_REPOSITORY
+    ):
+        raise PermitInputError("bootstrap pull request identity drifted")
+    bootstrap_sha = require_sha(
+        pull_response.get("merge_commit_sha"),
+        label="bootstrap merge SHA",
+        length=40,
+    )
+    root = f"bootstrap/pr-{pull_request}/{bootstrap_sha}"
     final = read_record(
         client,
         namespace=f"{root}/final",
@@ -377,17 +438,23 @@ def verify_bootstrap_final(
         "final-control-plane-observer.json",
     }:
         raise PermitInputError("bootstrap closure record has an unexpected file set")
-    if record_input_object(
-        final,
-        "closure-descriptor.json",
-        label="bootstrap closure descriptor",
-    ) != closure["descriptor"]:
+    if (
+        record_input_object(
+            final,
+            "closure-descriptor.json",
+            label="bootstrap closure descriptor",
+        )
+        != closure["descriptor"]
+    ):
         raise PermitInputError("bootstrap final record names another closure")
-    if record_input_object(
-        closure,
-        "intent-descriptor.json",
-        label="bootstrap intent descriptor",
-    ) != intent["descriptor"]:
+    if (
+        record_input_object(
+            closure,
+            "intent-descriptor.json",
+            label="bootstrap intent descriptor",
+        )
+        != intent["descriptor"]
+    ):
         raise PermitInputError("bootstrap closure names another intent")
     merge = record_input_object(
         closure,
@@ -398,21 +465,52 @@ def verify_bootstrap_final(
         merge.get("schema") != "mindburn.release-authority-atomic-merge/v1"
         or merge.get("repository") != AUTHORITY_REPOSITORY
         or merge.get("pull_request") != pull_request
-        or merge.get("merge_sha") != control_sha
+        or merge.get("base_sha")
+        != nested_string(
+            pull_response,
+            "base",
+            "sha",
+            label="bootstrap pull request base SHA",
+        )
+        or merge.get("head_sha")
+        != nested_string(
+            pull_response,
+            "head",
+            "sha",
+            label="bootstrap pull request head SHA",
+        )
+        or merge.get("merge_sha") != bootstrap_sha
         or merge.get("ref") != "refs/heads/main"
         or merge.get("force") is not False
     ):
         raise PermitInputError("bootstrap atomic merge record is not exact")
+    merge_commit = client.request(
+        "GET",
+        f"/repos/{AUTHORITY_REPOSITORY}/git/commits/{bootstrap_sha}",
+    ).body
+    parents = merge_commit.get("parents") if isinstance(merge_commit, dict) else None
+    if (
+        not isinstance(parents, list)
+        or [parent.get("sha") for parent in parents if isinstance(parent, dict)]
+        != [merge["base_sha"], merge["head_sha"]]
+        or nested_string(
+            merge_commit,
+            "tree",
+            "sha",
+            label="bootstrap merge tree SHA",
+        )
+        != merge.get("merge_tree_sha")
+    ):
+        raise PermitInputError("bootstrap merge commit differs from its receipt")
     rulesets = record_input_object(
         final,
         "ruleset-finalization.json",
         label="bootstrap ruleset finalization",
     )
     if (
-        rulesets.get("schema")
-        != "mindburn.release-authority-ruleset-transition/v1"
+        rulesets.get("schema") != "mindburn.release-authority-ruleset-transition/v1"
         or rulesets.get("operation") != "bootstrap-finalize"
-        or rulesets.get("merged_workflow_sha") != control_sha
+        or rulesets.get("merged_workflow_sha") != bootstrap_sha
         or rulesets.get("stable_ruleset_id") != STABLE_RULESET_ID
     ):
         raise PermitInputError("bootstrap ruleset finalization is not exact")
@@ -430,6 +528,7 @@ def verify_bootstrap_final(
         "schema": "mindburn.autonomous-release-bootstrap-final/v1",
         "decision": "ALLOW",
         "control_sha": control_sha,
+        "bootstrap_sha": bootstrap_sha,
         "pull_request": pull_request,
         "ledger_head_sha": final["ledger_head_sha"],
         "final_manifest_sha256": final["descriptor"]["manifest_sha256"],
@@ -440,25 +539,15 @@ def verify_observer_installation(
     client: GitHubReadClient,
     *,
     contract: dict[str, Any],
+    app_slug: str,
+    installation_id: int,
 ) -> None:
     expected = contract["apps"]["observer"]
-    installation = client.get_json("/installation")
-    account = installation.get("account")
     if (
-        installation.get("app_id") != expected["app_id"]
-        or installation.get("id") != expected["installation_id"]
-        or installation.get("permissions")
-        != {
-            "actions": "read",
-            "attestations": "read",
-            "contents": "read",
-            "organization_administration": "write",
-            "pull_requests": "read",
-        }
-        or not isinstance(account, dict)
-        or account.get("login") != ORGANIZATION
+        app_slug != expected["slug"]
+        or installation_id != expected["installation_id"]
     ):
-        raise PermitInputError("observer App identity or permissions drifted")
+        raise PermitInputError("observer token action identity drifted")
     repositories = client.get_json("/installation/repositories?per_page=100")
     items = repositories.get("repositories")
     if (
@@ -638,7 +727,9 @@ def observe_merge_interlock(
     interlock_repositories = set(AUTONOMOUS_REPOSITORIES) | {lab}
     for repository in sorted(interlock_repositories):
         if repository in AUTONOMOUS_REPOSITORIES:
-            verify_repository_settings(client, repository=repository, merge_method="merge")
+            verify_repository_settings(
+                client, repository=repository, merge_method="merge"
+            )
         rules = get_json_value(
             client,
             f"/repos/{repository}/rules/branches/main",
@@ -802,7 +893,12 @@ def discover(args: argparse.Namespace, client: GitHubReadClient) -> dict[str, An
     )
     require_enabled(contract)
     control_sha = require_sha(args.control_sha, label="control_sha", length=40)
-    verify_observer_installation(client, contract=contract)
+    verify_observer_installation(
+        client,
+        contract=contract,
+        app_slug=args.observer_app_slug,
+        installation_id=args.observer_installation_id,
+    )
     active_workflow_sha = discover_effective_workflow_sha(client)
     observe_effective_stable_rules(client, workflow_sha=active_workflow_sha)
     authority = head_authority(client, head_sha=active_workflow_sha)
@@ -995,21 +1091,50 @@ def validate_merged_pull_request(
         )
 
 
+def head_file_bytes(
+    client: GitHubReadClient,
+    *,
+    path: str,
+    head_sha: str,
+) -> bytes:
+    return client.get_bytes(
+        f"/repos/{AUTHORITY_REPOSITORY}/contents/{path}"
+        f"?ref={urllib.parse.quote(head_sha, safe='')}",
+        accept="application/vnd.github.raw+json",
+    )
+
+
+def head_json_object(
+    client: GitHubReadClient,
+    *,
+    path: str,
+    head_sha: str,
+    label: str,
+) -> dict[str, Any]:
+    raw = head_file_bytes(client, path=path, head_sha=head_sha)
+    try:
+        value = parse_json_strict(raw.decode("utf-8"), label=label)
+    except UnicodeDecodeError as exc:
+        raise PermitInputError(f"{label} is not UTF-8") from exc
+    if not isinstance(value, dict):
+        raise PermitInputError(f"{label} must be an object")
+    return value
+
+
 def head_authority(
     client: GitHubReadClient,
     *,
     head_sha: str,
 ) -> dict[str, Any]:
-    raw = client.get_bytes(
-        "/repos/Mindburn-Labs/.github/contents/"
-        f"config/autonomous-release-authority.json?ref={head_sha}",
-        accept="application/vnd.github.raw+json",
+    return validate_authority_shape(
+        head_json_object(
+            client,
+            path="config/autonomous-release-authority.json",
+            head_sha=head_sha,
+            label="candidate authority",
+        ),
+        label="candidate authority",
     )
-    try:
-        value = parse_json_strict(raw.decode("utf-8"), label="candidate authority")
-    except UnicodeDecodeError as exc:
-        raise PermitInputError("candidate authority is not UTF-8") from exc
-    return validate_authority_shape(value, label="candidate authority")
 
 
 def verified_plan_entry(
@@ -1092,9 +1217,7 @@ def materialize_ledger_evidence(
     if not isinstance(inputs, dict):
         raise PermitInputError("ledger intent inputs are malformed")
     evidence_inputs = {
-        path: content
-        for path, content in inputs.items()
-        if path.startswith(prefix)
+        path: content for path, content in inputs.items() if path.startswith(prefix)
     }
     if not evidence_inputs:
         raise PermitInputError("ledger intent lacks permit evidence")
@@ -1102,7 +1225,9 @@ def materialize_ledger_evidence(
         target = output_dir.joinpath(*PurePosixPath(relative).parts)
         target.parent.mkdir(parents=True, exist_ok=True)
         if target.exists() or target.is_symlink():
-            raise PermitInputError("ledger evidence materialization would overwrite a file")
+            raise PermitInputError(
+                "ledger evidence materialization would overwrite a file"
+            )
         target.write_bytes(content)
     return evidence_directory(output_dir, {"evidence": evidence_path})
 
@@ -1129,7 +1254,35 @@ def verify_ledger_approval(
         or not isinstance(approvals[0], dict)
     ):
         raise PermitInputError("ledger approval artifact is not exact")
-    approval = approvals[0]
+    verify_machine_approval_receipt(client, approval=approvals[0], entry=entry)
+
+
+def verify_machine_approval_receipt(
+    client: GitHubReadClient,
+    *,
+    approval: dict[str, Any],
+    entry: dict[str, Any],
+) -> None:
+    require_exact_keys(
+        approval,
+        required={
+            "schema",
+            "repository",
+            "pull_request",
+            "head_sha",
+            "workflow_sha",
+            "permit_id",
+            "base_sha",
+            "merge_sha",
+            "merge_tree_sha",
+            "review_id",
+            "review_state",
+            "approver_login",
+            "approver_app_id",
+            "approver_installation_id",
+        },
+        label="machine approval receipt",
+    )
     expected = {
         "schema": "mindburn.release-authority-machine-approval/v2",
         "repository": entry["repository"],
@@ -1146,7 +1299,7 @@ def verify_ledger_approval(
         "approver_installation_id": APPROVER_INSTALLATION_ID,
     }
     if any(approval.get(field) != value for field, value in expected.items()):
-        raise PermitInputError("ledger approval fields are not exact")
+        raise PermitInputError("machine approval receipt fields are not exact")
     review_id = positive_integer(approval.get("review_id"), label="ledger review_id")
     review = client.get_json(
         f"/repos/{entry['repository']}/pulls/{entry['pull_request']}/reviews/{review_id}"
@@ -1174,11 +1327,14 @@ def verify_ordinary_closure(
         "ordinary-merge-closure.json",
     }:
         raise PermitInputError("ordinary closure has an unexpected file set")
-    if record_input_object(
-        closure,
-        "intent-descriptor.json",
-        label="ordinary intent descriptor",
-    ) != intent["descriptor"]:
+    if (
+        record_input_object(
+            closure,
+            "intent-descriptor.json",
+            label="ordinary intent descriptor",
+        )
+        != intent["descriptor"]
+    ):
         raise PermitInputError("ordinary closure names another intent")
     value = record_input_object(
         closure,
@@ -1213,7 +1369,9 @@ def verify_ordinary_closure(
         raise PermitInputError("ordinary merge closure does not match its intent")
     for field in ("workflow_sha", "run_id", "run_attempt"):
         if closure["manifest"][field] != intent["manifest"][field]:
-            raise PermitInputError("ordinary ledger phases have different run identities")
+            raise PermitInputError(
+                "ordinary ledger phases have different run identities"
+            )
 
 
 def recover_ordinary_from_ledger(
@@ -1223,6 +1381,7 @@ def recover_ordinary_from_ledger(
     contract: dict[str, Any],
     control_sha: str,
     repository_config: dict[str, Any],
+    return_closed: bool = False,
 ) -> dict[str, Any] | None:
     repository = repository_config["repository"]
     if repository not in ORDINARY_REPOSITORY_SLUGS:
@@ -1259,8 +1418,7 @@ def recover_ordinary_from_ledger(
         except PermitInputError:
             continue
         root = (
-            f"ordinary/{ORDINARY_REPOSITORY_SLUGS[repository]}/"
-            f"pr-{number}/{main_sha}"
+            f"ordinary/{ORDINARY_REPOSITORY_SLUGS[repository]}/pr-{number}/{main_sha}"
         )
         intent = read_record(
             ledger_client,
@@ -1283,8 +1441,7 @@ def recover_ordinary_from_ledger(
         )
     intent, closure = matches[0]
     if not {"entry.json", "approval.json"}.issubset(intent["inputs"]) or any(
-        path not in {"entry.json", "approval.json"}
-        and not path.startswith("evidence/")
+        path not in {"entry.json", "approval.json"} and not path.startswith("evidence/")
         for path in intent["inputs"]
     ):
         raise PermitInputError("ordinary intent contains an unexpected path")
@@ -1344,6 +1501,14 @@ def recover_ordinary_from_ledger(
         or permit["permit_id"] != entry["permit_id"]
     ):
         raise PermitInputError("ordinary ledger permit differs from its entry")
+    replay_output = (
+        args.output_dir
+        / "ledger-replay"
+        / ORDINARY_REPOSITORY_SLUGS[repository]
+        / str(entry["pull_request"])
+        / "recomputed-permit.json"
+    )
+    replay_output.parent.mkdir(parents=True, exist_ok=False)
     verify_permit_reduction(
         args.kernel_verifier,
         evidence / "release-permit.json",
@@ -1354,7 +1519,7 @@ def recover_ordinary_from_ledger(
             / f"review-{provider}.json"
             for provider in ("anthropic", "openai")
         },
-        evidence / "ledger-recomputed-permit.json",
+        replay_output,
     )
     verify_ledger_approval(
         client,
@@ -1373,39 +1538,886 @@ def recover_ordinary_from_ledger(
             entry=entry,
             control_sha=control_sha,
         )
-        return None
+        return {**entry, "recovery": False} if return_closed else None
     return {**entry, "recovery": True}
 
 
-def extract_final_promotion_receipt(archive: bytes) -> tuple[bytes, bytes]:
-    receipt_name = "final-observer-receipt.json"
-    bundle_name = "final-observer-receipt.attestation.json"
-    try:
-        with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
-            entries = bundle.infolist()
-            names = {entry.filename for entry in entries}
-            if (
-                len(entries) > 256
-                or receipt_name not in names
-                or bundle_name not in names
-                or any(
-                    (not entry.is_dir() and entry.file_size <= 0)
-                    or entry.file_size > 2 * 1024 * 1024
-                    or PurePosixPath(entry.filename).is_absolute()
-                    or ".." in PurePosixPath(entry.filename).parts
-                    or "\\" in entry.filename
-                    or (
-                        entry.filename not in {receipt_name, bundle_name}
-                        and not entry.filename.startswith("observer-replay-final/")
-                    )
-                    for entry in entries
-                )
-            ):
-                raise PermitInputError("final promotion receipt artifact is malformed")
-            by_name = {entry.filename: entry for entry in entries}
-            return bundle.read(by_name[receipt_name]), bundle.read(by_name[bundle_name])
-    except zipfile.BadZipFile as exc:
-        raise PermitInputError("final promotion receipt is not a ZIP archive") from exc
+def verify_kernel_transition(
+    args: argparse.Namespace,
+    client: GitHubReadClient,
+) -> dict[str, Any]:
+    contract = validate_contract(
+        load_object(args.contract, label="controller contract")
+    )
+    require_enabled(contract)
+    control_sha = require_sha(args.control_sha, label="control_sha", length=40)
+    parent_workflow_sha = require_sha(
+        args.parent_workflow_sha,
+        label="parent_workflow_sha",
+        length=40,
+    )
+    parent_kernel_sha = require_sha(
+        args.parent_kernel_sha,
+        label="parent_kernel_sha",
+        length=40,
+    )
+    candidate_kernel_sha = require_sha(
+        args.candidate_kernel_sha,
+        label="candidate_kernel_sha",
+        length=40,
+    )
+    parent_authority = head_authority(client, head_sha=parent_workflow_sha)
+    if parent_authority["kernel_sha"] != parent_kernel_sha:
+        raise PermitInputError("parent authority names another Kernel")
+    result: dict[str, Any] = {
+        "schema": KERNEL_TRANSITION_SCHEMA,
+        "mode": "unchanged",
+        "control_workflow_sha": control_sha,
+        "parent_workflow_sha": parent_workflow_sha,
+        "parent_kernel_sha": parent_kernel_sha,
+        "candidate_kernel_sha": candidate_kernel_sha,
+        "ordinary_merge": None,
+    }
+    if candidate_kernel_sha == parent_kernel_sha:
+        return result
+    kernel_config = repository_config(contract, "Mindburn-Labs/helm-ai-kernel")
+    main = client.get_json(
+        "/repos/Mindburn-Labs/helm-ai-kernel/git/ref/heads/main"
+    )
+    if (
+        nested_string(main, "object", "sha", label="Kernel main SHA")
+        != candidate_kernel_sha
+    ):
+        raise PermitInputError("candidate Kernel is not the exact live main commit")
+    closed = recover_ordinary_from_ledger(
+        args,
+        client,
+        contract=contract,
+        control_sha=control_sha,
+        repository_config=kernel_config,
+        return_closed=True,
+    )
+    if (
+        closed is None
+        or closed["recovery"] is not False
+        or closed["workflow_sha"] != parent_workflow_sha
+        or closed["merge_sha"] != candidate_kernel_sha
+    ):
+        raise PermitInputError(
+            "candidate Kernel lacks a parent-verified durable ordinary closure"
+        )
+    result["mode"] = "upgrade"
+    result["ordinary_merge"] = {
+        field: closed[field]
+        for field in (
+            "repository",
+            "pull_request",
+            "head_sha",
+            "merge_sha",
+            "merge_tree_sha",
+            "permit_id",
+            "workflow_sha",
+            "run_id",
+            "run_attempt",
+        )
+    }
+    return result
+
+
+def promotion_namespace_root(*, generation: int, merge_sha: str) -> str:
+    generation = positive_integer(generation, label="promotion generation")
+    merge_sha = require_sha(merge_sha, label="promotion merge SHA", length=40)
+    return f"promotions/generation-{generation}/{merge_sha}"
+
+
+def verify_promotion_intent(
+    args: argparse.Namespace,
+    client: GitHubReadClient,
+    *,
+    intent: dict[str, Any],
+    generation: int,
+    merge_sha: str,
+    expected_parent: dict[str, Any],
+    expected_successor: dict[str, Any],
+    materialization_label: str,
+    replay_with_kernel: bool,
+) -> dict[str, Any]:
+    inputs = intent.get("inputs")
+    if (
+        not isinstance(inputs, dict)
+        or "entry.json" not in inputs
+        or any(
+            path != "entry.json" and not path.startswith("promotion/")
+            for path in inputs
+        )
+    ):
+        raise PermitInputError("promotion intent contains an unexpected path")
+    required = {
+        "promotion/release-permit.json",
+        "promotion/release-permit.attestation.json",
+        "promotion/ratification-input/context.json",
+        "promotion/authority-promotion.json",
+        "promotion/kernel-transition.json",
+        "promotion/candidate-authority.json",
+        "promotion/parent-authority.json",
+        "promotion/trigger-run.json",
+    }
+    if not required.issubset(inputs):
+        raise PermitInputError("promotion intent lacks required ratification evidence")
+    entry = validate_plan_entry(
+        record_input_object(intent, "entry.json", label="promotion intent entry"),
+        label="promotion intent entry",
+    )
+    root = promotion_namespace_root(generation=generation, merge_sha=merge_sha)
+    if (
+        entry["repository"] != AUTHORITY_REPOSITORY
+        or entry["merge_sha"] != merge_sha
+        or entry["recovery"] is not False
+        or entry["evidence"] != "promotion"
+        or intent["manifest"]["namespace"] != f"{root}/intent"
+        or intent["manifest"]["workflow_sha"] != entry["workflow_sha"]
+        or intent["manifest"]["run_id"] != entry["run_id"]
+        or intent["manifest"]["run_attempt"] != entry["run_attempt"]
+    ):
+        raise PermitInputError("promotion intent identity drifted")
+    if expected_successor["generation"] != generation or expected_successor[
+        "parent"
+    ] != {
+        "generation": expected_parent["generation"],
+        "workflow_sha": entry["workflow_sha"],
+    }:
+        raise PermitInputError("promotion successor lineage is not exact")
+    if head_authority(client, head_sha=entry["workflow_sha"]) != expected_parent:
+        raise PermitInputError("promotion intent parent authority drifted")
+    if head_authority(client, head_sha=entry["head_sha"]) != expected_successor:
+        raise PermitInputError("promotion intent candidate authority drifted")
+
+    materialized = (
+        args.output_dir
+        / "evidence"
+        / "promotion-ledger"
+        / f"generation-{generation}-{materialization_label}"
+    )
+    materialize_record(intent, materialized)
+    if (
+        load_json_file(
+            materialized / "promotion" / "candidate-authority.json",
+            label="ledger candidate authority",
+        )
+        != expected_successor
+        or load_json_file(
+            materialized / "promotion" / "parent-authority.json",
+            label="ledger parent authority",
+        )
+        != expected_parent
+    ):
+        raise PermitInputError("promotion intent authority files drifted")
+    transition_bytes = inputs["promotion/kernel-transition.json"]
+    validate_kernel_transition(
+        load_json_file(
+            materialized / "promotion" / "kernel-transition.json",
+            label="ledger Kernel transition",
+        ),
+        parent_workflow_sha=entry["workflow_sha"],
+        parent_kernel_sha=expected_parent["kernel_sha"],
+        candidate_kernel_sha=expected_successor["kernel_sha"],
+    )
+    promotion = load_json_file(
+        materialized / "promotion" / "authority-promotion.json",
+        label="ledger authority promotion",
+    )
+    expected_promotion = {
+        "schema": "mindburn.release-authority-promotion/v1",
+        "candidate_generation": generation,
+        "candidate_pull_request": entry["pull_request"],
+        "candidate_sha": entry["head_sha"],
+        "candidate_tree_sha": entry["merge_tree_sha"],
+        "kernel_sha": expected_successor["kernel_sha"],
+        "kernel_transition_sha256": hashlib.sha256(transition_bytes).hexdigest(),
+        "parent_generation": expected_parent["generation"],
+        "parent_workflow_sha": entry["workflow_sha"],
+        "ratification_permit_id": entry["permit_id"],
+        "ratification_run_id": entry["run_id"],
+        "ratification_run_attempt": entry["run_attempt"],
+    }
+    if promotion != expected_promotion:
+        raise PermitInputError("promotion intent verification receipt drifted")
+    run = {"id": entry["run_id"], "run_attempt": entry["run_attempt"]}
+    permit_path = materialized / "promotion" / "release-permit.json"
+    context_path = materialized / "promotion" / "ratification-input" / "context.json"
+    bundle_path = materialized / "promotion" / "release-permit.attestation.json"
+    if replay_with_kernel:
+        permit = verify_candidate_permit(
+            permit_path,
+            bundle_path,
+            context_path,
+            run=run,
+            repository=AUTHORITY_REPOSITORY,
+            pull_request=entry["pull_request"],
+            head_sha=entry["head_sha"],
+            expected_workflow_sha=entry["workflow_sha"],
+            expected_authority=expected_parent,
+            kernel_verifier=args.kernel_verifier,
+            attestation_token=client.token,
+        )
+    else:
+        permit = load_json_file(permit_path, label="historical promotion permit")
+        if validate_permit(permit) != expected_parent:
+            raise PermitInputError("historical promotion permit authority drifted")
+        historical_identity = {
+            "repository": AUTHORITY_REPOSITORY,
+            "pull_request": entry["pull_request"],
+            "head_sha": entry["head_sha"],
+            "workflow_sha": entry["workflow_sha"],
+            "run_id": entry["run_id"],
+            "run_attempt": entry["run_attempt"],
+        }
+        if any(
+            permit.get(field) != value for field, value in historical_identity.items()
+        ):
+            raise PermitInputError("historical promotion permit identity drifted")
+        verify_attestation(
+            permit_path,
+            bundle_path,
+            repository=AUTHORITY_REPOSITORY,
+            workflow_sha=entry["workflow_sha"],
+            source_sha=entry["merge_sha"],
+            github_token=client.token,
+        )
+    expected_permit = {
+        "base_sha": entry["base_sha"],
+        "merge_sha": entry["merge_sha"],
+        "merge_tree_sha": entry["merge_tree_sha"],
+        "permit_id": entry["permit_id"],
+    }
+    if any(permit.get(field) != value for field, value in expected_permit.items()):
+        raise PermitInputError("promotion ledger permit differs from its entry")
+    if replay_with_kernel:
+        replay_output = (
+            args.output_dir
+            / "ledger-replay"
+            / f"promotion-generation-{generation}-{materialization_label}.json"
+        )
+        replay_output.parent.mkdir(parents=True, exist_ok=True)
+        if replay_output.exists() or replay_output.is_symlink():
+            raise PermitInputError("promotion replay output already exists")
+        verify_permit_reduction(
+            args.kernel_verifier,
+            permit_path,
+            context_path,
+            {
+                provider: materialized
+                / "promotion"
+                / "parent-rebuilt-reviews"
+                / provider
+                / f"review-{provider}.json"
+                for provider in ("anthropic", "openai")
+            },
+            replay_output,
+        )
+    trigger = load_json_file(
+        materialized / "promotion" / "trigger-run.json",
+        label="ledger trigger run",
+    )
+    if (
+        trigger.get("id") != entry["run_id"]
+        or trigger.get("run_attempt") != entry["run_attempt"]
+        or trigger.get("head_sha") != entry["head_sha"]
+        or trigger.get("event") != "pull_request"
+        or trigger.get("status") != "completed"
+        or trigger.get("conclusion") != "success"
+        or trigger.get("name") != WORKFLOW_NAME
+        or trigger.get("path") != WORKFLOW_PATH
+    ):
+        raise PermitInputError("promotion ledger trigger metadata drifted")
+    return entry
+
+
+def verify_promotion_merged(
+    client: GitHubReadClient,
+    *,
+    intent: dict[str, Any],
+    merged: dict[str, Any],
+    entry: dict[str, Any],
+    generation: int,
+) -> None:
+    if set(merged.get("inputs", {})) != {
+        "intent-descriptor.json",
+        "approval.json",
+        "merge-response.json",
+    }:
+        raise PermitInputError("promotion merged phase has an unexpected file set")
+    if (
+        record_input_object(
+            merged,
+            "intent-descriptor.json",
+            label="promotion intent descriptor",
+        )
+        != intent["descriptor"]
+    ):
+        raise PermitInputError("promotion merged phase names another intent")
+    verify_machine_approval_receipt(
+        client,
+        approval=record_input_object(
+            merged, "approval.json", label="promotion machine approval"
+        ),
+        entry=entry,
+    )
+    merge_response = record_input_object(
+        merged, "merge-response.json", label="promotion merge response"
+    )
+    expected = {
+        "schema": "mindburn.release-authority-atomic-merge/v1",
+        "repository": AUTHORITY_REPOSITORY,
+        "pull_request": entry["pull_request"],
+        "base_sha": entry["base_sha"],
+        "head_sha": entry["head_sha"],
+        "merge_sha": entry["merge_sha"],
+        "merge_tree_sha": entry["merge_tree_sha"],
+        "ref": MAIN_REF,
+        "force": False,
+    }
+    if merge_response != expected:
+        raise PermitInputError("promotion merge response differs from its intent")
+    root = promotion_namespace_root(generation=generation, merge_sha=entry["merge_sha"])
+    if merged["manifest"]["namespace"] != f"{root}/merged":
+        raise PermitInputError("promotion merged namespace drifted")
+    for field in ("workflow_sha", "run_id", "run_attempt"):
+        if merged["manifest"][field] != intent["manifest"][field]:
+            raise PermitInputError("promotion ledger phases have different identities")
+
+
+def verify_promotion_final(
+    args: argparse.Namespace,
+    client: GitHubReadClient,
+    *,
+    intent: dict[str, Any],
+    merged: dict[str, Any],
+    final: dict[str, Any],
+    entry: dict[str, Any],
+    authority: dict[str, Any],
+    materialization_label: str,
+) -> None:
+    inputs = final.get("inputs")
+    required = {
+        "merged-descriptor.json",
+        "final-observer-receipt.json",
+        "final-observer-receipt.attestation.json",
+        "pre-activation-observer-receipt.json",
+        "pre-activation-observer-receipt.attestation.json",
+        "authority-promotion-execution.json",
+        "authority-suite.json",
+        "suite-trigger.json",
+        "kernel-transition.json",
+        "ruleset-activate.json",
+    }
+    if (
+        not isinstance(inputs, dict)
+        or not required.issubset(inputs)
+        or not any(path.startswith("observer-replay-final/") for path in inputs)
+        or not any(path.startswith("suite/cases/") for path in inputs)
+        or any(
+            path not in required
+            and not path.startswith("observer-replay-final/")
+            and not path.startswith("suite/")
+            for path in inputs
+        )
+    ):
+        raise PermitInputError("promotion final phase has an unexpected file set")
+    if (
+        record_input_object(
+            final,
+            "merged-descriptor.json",
+            label="promotion merged descriptor",
+        )
+        != merged["descriptor"]
+    ):
+        raise PermitInputError("promotion final phase names another merged record")
+    root = promotion_namespace_root(
+        generation=authority["generation"], merge_sha=entry["merge_sha"]
+    )
+    if final["manifest"]["namespace"] != f"{root}/final":
+        raise PermitInputError("promotion final namespace drifted")
+    for field in ("workflow_sha", "run_id", "run_attempt"):
+        if final["manifest"][field] != intent["manifest"][field]:
+            raise PermitInputError("promotion ledger phases have different identities")
+    materialized = (
+        args.output_dir
+        / "evidence"
+        / "promotion-final"
+        / f"generation-{authority['generation']}-{materialization_label}"
+    )
+    materialize_record(final, materialized)
+    transition_bytes = inputs["kernel-transition.json"]
+    intent_transition_bytes = intent.get("inputs", {}).get(
+        "promotion/kernel-transition.json"
+    )
+    promotion = record_input_object(
+        intent,
+        "promotion/authority-promotion.json",
+        label="promotion verification receipt",
+    )
+    parent_authority = record_input_object(
+        intent,
+        "promotion/parent-authority.json",
+        label="promotion parent authority",
+    )
+    if (
+        transition_bytes != intent_transition_bytes
+        or promotion.get("kernel_transition_sha256")
+        != hashlib.sha256(transition_bytes).hexdigest()
+    ):
+        raise PermitInputError("durable Kernel transition drifted from intent")
+    validate_kernel_transition(
+        load_json_file(
+            materialized / "kernel-transition.json",
+            label="durable Kernel transition",
+        ),
+        parent_workflow_sha=entry["workflow_sha"],
+        parent_kernel_sha=parent_authority.get("kernel_sha"),
+        candidate_kernel_sha=authority.get("kernel_sha"),
+    )
+    receipt_path = materialized / "final-observer-receipt.json"
+    receipt = load_json_file(receipt_path, label="ledger final observer receipt")
+    if (
+        receipt.get("schema") != PROMOTION_RECEIPT_SCHEMA
+        or receipt.get("phase") != "final"
+        or receipt.get("decision") != "ALLOW"
+        or receipt.get("control_workflow_sha") != entry["workflow_sha"]
+        or receipt.get("parent_workflow_sha") != entry["workflow_sha"]
+        or receipt.get("candidate_workflow_sha") != entry["head_sha"]
+        or receipt.get("merged_workflow_sha") != entry["merge_sha"]
+        or receipt.get("merged_tree_sha") != entry["merge_tree_sha"]
+        or receipt.get("ratification_permit_id") != entry["permit_id"]
+    ):
+        raise PermitInputError("ledger final observer receipt identity drifted")
+    positive_integer(
+        receipt.get("promotion_run_id"), label="final promotion workflow run ID"
+    )
+    positive_integer(
+        receipt.get("promotion_run_attempt"),
+        label="final promotion workflow run attempt",
+    )
+    verify_attestation(
+        receipt_path,
+        materialized / "final-observer-receipt.attestation.json",
+        repository=AUTHORITY_REPOSITORY,
+        workflow_sha=entry["workflow_sha"],
+        source_sha=entry["workflow_sha"],
+        github_token=client.token,
+        signer_workflow=f"Mindburn-Labs/.github/{PROMOTION_WORKFLOW_PATH}",
+    )
+    execution = validate_execution(
+        load_json_file(
+            materialized / "authority-promotion-execution.json",
+            label="ledger promotion execution",
+        )
+    )
+    if (
+        execution.get("parent_generation") != authority["generation"] - 1
+        or execution.get("candidate_generation") != authority["generation"]
+        or execution.get("parent_base_sha") != entry["base_sha"]
+        or execution.get("parent_workflow_sha") != entry["workflow_sha"]
+        or execution.get("control_workflow_sha") != entry["workflow_sha"]
+        or execution.get("candidate_workflow_sha") != entry["head_sha"]
+        or execution.get("candidate_tree_sha") != entry["merge_tree_sha"]
+        or execution.get("candidate_pull_request") != entry["pull_request"]
+        or execution.get("merged_workflow_sha") != entry["merge_sha"]
+        or execution.get("merged_tree_sha") != entry["merge_tree_sha"]
+        or execution.get("ratification_permit_id") != entry["permit_id"]
+        or execution.get("ratification_run_id") != entry["run_id"]
+        or execution.get("ratification_run_attempt") != entry["run_attempt"]
+        or execution.get("authority_suite_sha256")
+        != receipt.get("authority_suite_sha256")
+        or execution.get("canary_permit_id") != receipt.get("canary_permit_id")
+    ):
+        raise PermitInputError("ledger promotion execution identity drifted")
+    suite = record_input_object(
+        final,
+        "authority-suite.json",
+        label="durable authority suite",
+    )
+    trigger = record_input_object(
+        final,
+        "suite-trigger.json",
+        label="durable authority suite trigger",
+    )
+    control_contract = load_object(
+        Path(args.contract).with_name("autonomous-release-control-plane.json"),
+        label="control contract",
+    )
+    expected_cases = control_contract.get("adversarial_suite", {}).get("cases")
+    suite_cases = suite.get("cases")
+    if (
+        suite.get("schema") != "mindburn.release-authority-suite/v1"
+        or suite.get("repository")
+        != "Mindburn-Labs/contracts-autonomous-release-lab"
+        or suite.get("workflow_sha") != entry["head_sha"]
+        or not isinstance(expected_cases, list)
+        or not isinstance(suite_cases, list)
+        or len(suite_cases) != len(expected_cases)
+        or [
+            (case.get("id"), case.get("expected"))
+            for case in suite_cases
+            if isinstance(case, dict)
+        ]
+        != [(case.get("id"), case.get("expected")) for case in expected_cases]
+        or trigger.get("schema")
+        != "mindburn.release-authority-suite-trigger/v1"
+        or trigger.get("repository") != suite.get("repository")
+        or trigger.get("workflow_sha") != entry["head_sha"]
+        or trigger.get("cases") != expected_cases
+    ):
+        raise PermitInputError("durable authority suite identity drifted")
+    suite_digest = hashlib.sha256(inputs["authority-suite.json"]).hexdigest()
+    if (
+        suite_digest != execution["authority_suite_sha256"]
+        or suite_digest != receipt.get("authority_suite_sha256")
+        or any(
+            not any(path.startswith(f"suite/cases/{case['id']}/") for path in inputs)
+            for case in expected_cases
+        )
+    ):
+        raise PermitInputError("durable authority suite evidence is incomplete")
+    for case in expected_cases:
+        if case["expected"] == "PRE_MODEL_REJECT":
+            continue
+        prefix = f"suite/cases/{case['id']}"
+        parent_reduction = f"{prefix}/parent-kernel-permit.json"
+        candidate_reduction = f"{prefix}/candidate-kernel-permit.json"
+        if (
+            parent_reduction not in inputs
+            or candidate_reduction not in inputs
+            or inputs[parent_reduction] != inputs[candidate_reduction]
+        ):
+            raise PermitInputError(
+                "durable parent and candidate Kernel reductions are not identical"
+            )
+    pre_receipt_path = materialized / "pre-activation-observer-receipt.json"
+    pre_receipt = load_json_file(
+        pre_receipt_path,
+        label="durable pre-activation observer receipt",
+    )
+    if (
+        pre_receipt.get("schema") != PROMOTION_RECEIPT_SCHEMA
+        or pre_receipt.get("phase") != "pre-activation"
+        or pre_receipt.get("decision") != "ALLOW"
+        or pre_receipt.get("control_workflow_sha") != entry["workflow_sha"]
+        or pre_receipt.get("parent_workflow_sha") != entry["workflow_sha"]
+        or pre_receipt.get("candidate_workflow_sha") != entry["head_sha"]
+        or pre_receipt.get("merged_workflow_sha") != entry["merge_sha"]
+        or pre_receipt.get("merged_tree_sha") != entry["merge_tree_sha"]
+        or pre_receipt.get("ratification_permit_id") != entry["permit_id"]
+        or pre_receipt.get("canary_permit_id")
+        != receipt.get("canary_permit_id")
+        or pre_receipt.get("authority_suite_sha256") != suite_digest
+        or pre_receipt.get("promotion_run_id") != receipt.get("promotion_run_id")
+        or pre_receipt.get("promotion_run_attempt")
+        != receipt.get("promotion_run_attempt")
+    ):
+        raise PermitInputError("durable pre-activation observer identity drifted")
+    verify_attestation(
+        pre_receipt_path,
+        materialized / "pre-activation-observer-receipt.attestation.json",
+        repository=AUTHORITY_REPOSITORY,
+        workflow_sha=entry["workflow_sha"],
+        source_sha=entry["workflow_sha"],
+        github_token=client.token,
+        signer_workflow=f"Mindburn-Labs/.github/{PROMOTION_WORKFLOW_PATH}",
+    )
+    activation = load_json_file(
+        materialized / "ruleset-activate.json",
+        label="ledger ruleset activation",
+    )
+    if (
+        activation.get("schema") != "mindburn.release-authority-ruleset-transition/v1"
+        or activation.get("operation") != "activate"
+        or activation.get("parent_workflow_sha") != entry["workflow_sha"]
+        or activation.get("candidate_workflow_sha") != entry["head_sha"]
+        or activation.get("merged_workflow_sha") != entry["merge_sha"]
+    ):
+        raise PermitInputError("ledger ruleset activation identity drifted")
+
+
+def verify_promotion_successor(
+    args: argparse.Namespace,
+    client: GitHubReadClient,
+    *,
+    final: dict[str, Any],
+    successor: dict[str, Any],
+    entry: dict[str, Any],
+    authority: dict[str, Any],
+    control_sha: str,
+    materialization_label: str,
+) -> None:
+    required = {
+        "final-descriptor.json",
+        "control-transition.json",
+        "control-observer.json",
+        "control-observer.attestation.json",
+    }
+    if set(successor.get("inputs", {})) != required:
+        raise PermitInputError("promotion successor phase has an unexpected file set")
+    if (
+        record_input_object(
+            successor,
+            "final-descriptor.json",
+            label="promotion final descriptor",
+        )
+        != final["descriptor"]
+    ):
+        raise PermitInputError("promotion successor phase names another final record")
+    root = promotion_namespace_root(
+        generation=authority["generation"], merge_sha=entry["merge_sha"]
+    )
+    if successor["manifest"]["namespace"] != f"{root}/successor":
+        raise PermitInputError("promotion successor namespace drifted")
+    if control_sha != entry["merge_sha"]:
+        raise PermitInputError("durable successor is not the live control workflow")
+
+    parent_controller = validate_contract(
+        head_json_object(
+            client,
+            path="config/autonomous-release-controller.json",
+            head_sha=entry["workflow_sha"],
+            label="parent controller contract",
+        )
+    )
+    updater = parent_controller["apps"]["control_updater"]
+    transition = record_input_object(
+        successor,
+        "control-transition.json",
+        label="control successor transition",
+    )
+    transition_keys = {
+        "schema",
+        "repository",
+        "ruleset",
+        "ref",
+        "before_sha",
+        "after_sha",
+        "force",
+        "state",
+        "candidate_generation",
+        "candidate_pull_request",
+        "ratification_permit_id",
+        "final_descriptor",
+        "updater_app_id",
+        "updater_installation_id",
+    }
+    require_exact_keys(
+        transition,
+        required=transition_keys,
+        label="control successor transition",
+    )
+    expected_transition = {
+        "schema": CONTROL_SUCCESSOR_SCHEMA,
+        "repository": AUTHORITY_REPOSITORY,
+        "ruleset": CONTROL_SUCCESSOR_RULESET_NAME,
+        "ref": CONTROL_REF,
+        "before_sha": entry["workflow_sha"],
+        "after_sha": entry["merge_sha"],
+        "force": False,
+        "candidate_generation": authority["generation"],
+        "candidate_pull_request": entry["pull_request"],
+        "ratification_permit_id": entry["permit_id"],
+        "final_descriptor": final["descriptor"],
+        "updater_app_id": updater["app_id"],
+        "updater_installation_id": updater["installation_id"],
+    }
+    if (
+        transition["state"] not in {"advanced", "already-advanced"}
+        or any(transition.get(field) != value for field, value in expected_transition.items())
+    ):
+        raise PermitInputError("control successor transition identity drifted")
+
+    materialized = (
+        args.output_dir
+        / "evidence"
+        / "promotion-successor"
+        / f"generation-{authority['generation']}-{materialization_label}"
+    )
+    materialize_record(successor, materialized)
+    observer_path = materialized / "control-observer.json"
+    observer = load_json_file(observer_path, label="durable control observer")
+    require_exact_keys(
+        observer,
+        required={
+            "schema",
+            "contract_sha256",
+            "live",
+            "repository_settings",
+            "control_workflow",
+            "control_ruleset",
+            "environments",
+            "suite_cases",
+        },
+        label="durable control observer",
+    )
+    parent_control_bytes = head_file_bytes(
+        client,
+        path="config/autonomous-release-control-plane.json",
+        head_sha=entry["workflow_sha"],
+    )
+    parent_control = parse_object_bytes(
+        parent_control_bytes,
+        label="parent control-plane contract",
+    )
+    observed_control = observer.get("control_workflow")
+    if (
+        observer.get("schema") != CONTROL_OBSERVER_SCHEMA
+        or observer.get("live") is not True
+        or observer.get("contract_sha256")
+        != hashlib.sha256(parent_control_bytes).hexdigest()
+        or observer.get("repository_settings")
+        != parent_control.get("repository_settings")
+        or observer.get("environments") != parent_control.get("environments")
+        or observer.get("suite_cases")
+        != len(parent_control.get("adversarial_suite", {}).get("cases", []))
+        or observer.get("control_ruleset") != {}
+        or not isinstance(observed_control, dict)
+        or observed_control.get("branch") != CONTROL_BRANCH
+        or observed_control.get("ref") != CONTROL_REF
+        or observed_control.get("sha") != entry["merge_sha"]
+        or observed_control.get("workflow_path") != CONTROL_WORKFLOW_PATH
+    ):
+        raise PermitInputError("durable control observer identity drifted")
+    observed_rulesets = observed_control.get("ruleset")
+    expected_rulesets = parent_control.get("control_workflow", {})
+    if not isinstance(observed_rulesets, dict):
+        raise PermitInputError("durable control observer omitted exact rulesets")
+    for key, expected_key in (("history", "ruleset"), ("successor", "successor_ruleset")):
+        receipt = observed_rulesets.get(key)
+        if (
+            not isinstance(receipt, dict)
+            or positive_integer(
+                receipt.get("id"), label=f"observed {key} ruleset ID"
+            )
+            < 1
+            or {field: receipt.get(field) for field in expected_rulesets[expected_key]}
+            != expected_rulesets[expected_key]
+        ):
+            raise PermitInputError(f"durable {key} control ruleset drifted")
+
+    signer_sha = successor["manifest"]["workflow_sha"]
+    if signer_sha not in {entry["workflow_sha"], entry["merge_sha"]}:
+        raise PermitInputError("control observer signer is outside the authorized lineage")
+    if signer_sha == entry["merge_sha"] and transition["state"] != "already-advanced":
+        raise PermitInputError("successor-signed observation cannot authorize control advance")
+    verify_attestation(
+        observer_path,
+        materialized / "control-observer.attestation.json",
+        repository=AUTHORITY_REPOSITORY,
+        workflow_sha=signer_sha,
+        source_sha=signer_sha,
+        github_token=client.token,
+        signer_workflow=f"Mindburn-Labs/.github/{PROMOTION_WORKFLOW_PATH}",
+    )
+
+
+
+def read_verified_promotion_chain(
+    args: argparse.Namespace,
+    client: GitHubReadClient,
+    *,
+    generation: int,
+    merge_sha: str,
+    expected_parent: dict[str, Any],
+    expected_successor: dict[str, Any],
+    control_sha: str,
+    materialization_label: str,
+    replay_with_kernel: bool,
+) -> tuple[
+    dict[str, Any],
+    dict[str, Any] | None,
+    dict[str, Any] | None,
+    dict[str, Any] | None,
+]:
+    ledger_client = GitHubLedgerClient(client.token, api_url=client.api_url)
+    root = promotion_namespace_root(generation=generation, merge_sha=merge_sha)
+    intent = read_record(
+        ledger_client,
+        namespace=f"{root}/intent",
+        record_type="authority-promotion",
+        phase="intent",
+    )
+    if intent is None:
+        raise PermitInputError("successor authority lacks a durable promotion intent")
+    entry = verify_promotion_intent(
+        args,
+        client,
+        intent=intent,
+        generation=generation,
+        merge_sha=merge_sha,
+        expected_parent=expected_parent,
+        expected_successor=expected_successor,
+        materialization_label=materialization_label,
+        replay_with_kernel=replay_with_kernel,
+    )
+    live_pull_request = client.get_json(
+        f"/repos/{AUTHORITY_REPOSITORY}/pulls/{entry['pull_request']}"
+    )
+    validate_merged_pull_request(
+        live_pull_request,
+        repository=AUTHORITY_REPOSITORY,
+        pull_request=entry["pull_request"],
+        base_sha=entry["base_sha"],
+        head_sha=entry["head_sha"],
+        merge_sha=entry["merge_sha"],
+    )
+    merged = read_record(
+        ledger_client,
+        namespace=f"{root}/merged",
+        record_type="authority-promotion",
+        phase="merged",
+    )
+    if merged is not None:
+        verify_promotion_merged(
+            client,
+            intent=intent,
+            merged=merged,
+            entry=entry,
+            generation=generation,
+        )
+    final = read_record(
+        ledger_client,
+        namespace=f"{root}/final",
+        record_type="authority-promotion",
+        phase="final",
+    )
+    if final is not None:
+        if merged is None:
+            raise PermitInputError("promotion final closure has no merged phase")
+        verify_promotion_final(
+            args,
+            client,
+            intent=intent,
+            merged=merged,
+            final=final,
+            entry=entry,
+            authority=expected_successor,
+            materialization_label=materialization_label,
+        )
+    successor = read_record(
+        ledger_client,
+        namespace=f"{root}/successor",
+        record_type="authority-promotion",
+        phase="successor",
+    )
+    if successor is not None:
+        if final is None:
+            raise PermitInputError("promotion successor closure has no final phase")
+        verify_promotion_successor(
+            args,
+            client,
+            final=final,
+            successor=successor,
+            entry=entry,
+            authority=expected_successor,
+            control_sha=control_sha,
+            materialization_label=materialization_label,
+        )
+    return entry, merged, final, successor
 
 
 def has_final_promotion_closure(
@@ -1416,94 +2428,29 @@ def has_final_promotion_closure(
     control_sha: str,
     active_workflow_sha: str,
 ) -> bool:
-    runs: list[dict[str, Any]] = []
-    for page in range(1, 11):
-        query = urllib.parse.urlencode(
-            {
-                "event": "workflow_dispatch",
-                "status": "completed",
-                "per_page": 100,
-                "page": page,
-            }
-        )
-        payload = client.get_json(
-            f"/repos/{AUTHORITY_REPOSITORY}/actions/workflows/"
-            f"promote-authority.yml/runs?{query}"
-        )
-        page_runs = payload.get("workflow_runs")
-        if not isinstance(page_runs, list) or any(
-            not isinstance(run, dict) for run in page_runs
-        ):
-            raise PermitInputError("promotion workflow runs response is malformed")
-        runs.extend(page_runs)
-        if len(page_runs) < 100:
-            break
-    else:
-        raise PermitInputError("promotion workflow run history exceeds recovery bound")
-    candidates = [
-        run
-        for run in runs
-        if isinstance(run, dict)
-        and isinstance(run.get("id"), int)
-        and run.get("name") == PROMOTION_WORKFLOW_NAME
-        and run.get("path") == PROMOTION_WORKFLOW_PATH
-        and run.get("head_sha") == control_sha
-        and run.get("event") == "workflow_dispatch"
-        and run.get("status") == "completed"
-        and run.get("conclusion") == "success"
-    ]
-    candidates.sort(key=run_sort_key, reverse=True)
-    for run in candidates:
-        artifact_id = artifact_for_run(
-            client,
-            AUTHORITY_REPOSITORY,
-            run["id"],
-            PROMOTION_RECEIPT_ARTIFACT,
-        )
-        if artifact_id is None:
-            continue
-        receipt_bytes, bundle_bytes = extract_final_promotion_receipt(
-            client.get_bytes(
-                f"/repos/{AUTHORITY_REPOSITORY}/actions/artifacts/{artifact_id}/zip",
-                accept="application/vnd.github+json",
-            )
-        )
-        try:
-            receipt = parse_json_strict(
-                receipt_bytes.decode("utf-8"), label="final promotion receipt"
-            )
-        except UnicodeDecodeError as exc:
-            raise PermitInputError("final promotion receipt is not UTF-8") from exc
-        if not isinstance(receipt, dict):
-            raise PermitInputError("final promotion receipt must be an object")
-        if (
-            receipt.get("schema") != PROMOTION_RECEIPT_SCHEMA
-            or receipt.get("phase") != "final"
-            or receipt.get("decision") != "ALLOW"
-            or receipt.get("control_workflow_sha") != control_sha
-            or receipt.get("merged_workflow_sha") != active_workflow_sha
-            or receipt.get("candidate_generation") != authority["generation"]
-            or receipt.get("promotion_run_id") != run["id"]
-            or receipt.get("promotion_run_attempt") != run.get("run_attempt")
-        ):
-            continue
-        closure = args.output_dir / "evidence" / "authority-closure" / str(run["id"])
-        closure.mkdir(parents=True, exist_ok=False)
-        receipt_path = closure / "final-observer-receipt.json"
-        bundle_path = closure / "final-observer-receipt.attestation.json"
-        receipt_path.write_bytes(receipt_bytes)
-        bundle_path.write_bytes(bundle_bytes)
-        verify_attestation(
-            receipt_path,
-            bundle_path,
-            repository=AUTHORITY_REPOSITORY,
-            workflow_sha=control_sha,
-            source_sha=control_sha,
-            github_token=client.token,
-            signer_workflow=f"Mindburn-Labs/.github/{PROMOTION_WORKFLOW_PATH}",
-        )
-        return True
-    return False
+    if authority["generation"] == 2:
+        # Generation 2 is admitted only by the separately verified bootstrap
+        # intent/closure/final chain checked by tick-guard.
+        return active_workflow_sha == control_sha
+    active_workflow_sha = require_sha(
+        active_workflow_sha, label="active authority SHA", length=40
+    )
+    parent_sha = authority["parent"]["workflow_sha"]
+    parent = head_authority(client, head_sha=parent_sha)
+    entry, _, final, successor = read_verified_promotion_chain(
+        args,
+        client,
+        generation=authority["generation"],
+        merge_sha=active_workflow_sha,
+        expected_parent=parent,
+        expected_successor=authority,
+        control_sha=control_sha,
+        materialization_label="final-check",
+        replay_with_kernel=False,
+    )
+    if entry["merge_sha"] != active_workflow_sha:
+        raise PermitInputError("promotion closure names another active authority")
+    return final is not None and successor is not None
 
 
 def verified_activated_recovery_entry(
@@ -1514,104 +2461,31 @@ def verified_activated_recovery_entry(
     control_sha: str,
     active_workflow_sha: str,
     repository_config: dict[str, Any],
-) -> dict[str, Any]:
+) -> dict[str, Any] | None:
     parent_sha = authority["parent"]["workflow_sha"]
     parent_authority = head_authority(client, head_sha=parent_sha)
-    matches: list[dict[str, Any]] = []
-    for pull_request_value in pull_requests_for_commit(
-        client, AUTHORITY_REPOSITORY, active_workflow_sha
-    ):
-        number = pull_request_value.get("number")
-        if not isinstance(number, int) or isinstance(number, bool) or number <= 0:
-            continue
-        try:
-            validate_merged_pull_request(
-                pull_request_value,
-                repository=AUTHORITY_REPOSITORY,
-                pull_request=number,
-                base_sha=parent_sha,
-                head_sha=nested_string(
-                    pull_request_value,
-                    "head",
-                    "sha",
-                    label="activated successor head SHA",
-                ),
-                merge_sha=active_workflow_sha,
-            )
-            head_sha = nested_string(
-                pull_request_value,
-                "head",
-                "sha",
-                label="activated successor head SHA",
-            )
-            if head_authority(client, head_sha=head_sha) != authority:
-                continue
-            run, reason = newest_run(client, AUTHORITY_REPOSITORY, head_sha, parent_sha)
-            if run is None:
-                raise PermitInputError(
-                    f"activated successor lacks its exact parent permit run: {reason}"
-                )
-            evidence = (
-                args.output_dir
-                / "evidence"
-                / "github-authority-activated-recovery"
-                / str(number)
-            )
-            permit_path, bundle_path, _, _ = write_attested_case(
-                client, AUTHORITY_REPOSITORY, run["id"], evidence
-            )
-            permit = load_json_file(permit_path, label="activated recovery permit")
-            if validate_permit(permit) != parent_authority:
-                raise PermitInputError("activated recovery permit authority drifted")
-            expected = {
-                "repository": AUTHORITY_REPOSITORY,
-                "pull_request": number,
-                "base_sha": parent_sha,
-                "head_sha": head_sha,
-                "merge_sha": active_workflow_sha,
-                "workflow_sha": parent_sha,
-                "run_id": run["id"],
-                "run_attempt": run["run_attempt"],
-            }
-            for field, expected_value in expected.items():
-                if permit.get(field) != expected_value:
-                    raise PermitInputError(
-                        f"activated recovery permit {field} is not exact"
-                    )
-            verify_attestation(
-                permit_path,
-                bundle_path,
-                repository=AUTHORITY_REPOSITORY,
-                workflow_sha=parent_sha,
-                source_sha=active_workflow_sha,
-                github_token=client.token,
-            )
-            matches.append(
-                {
-                    "repository": AUTHORITY_REPOSITORY,
-                    "pull_request": number,
-                    "base_sha": parent_sha,
-                    "head_sha": head_sha,
-                    "merge_sha": active_workflow_sha,
-                    "merge_tree_sha": permit["merge_tree_sha"],
-                    "permit_id": permit["permit_id"],
-                    "run_id": run["id"],
-                    "run_attempt": run["run_attempt"],
-                    "workflow_sha": parent_sha,
-                    "evidence": evidence.relative_to(args.output_dir).as_posix(),
-                    "merge_method": repository_config["merge_method"],
-                    "recovery": True,
-                }
-            )
-        except (OSError, PermitInputError) as exc:
-            raise PermitInputError(
-                f"activated authority recovery validation failed: {exc}"
-            ) from exc
-    if len(matches) != 1:
-        raise PermitInputError(
-            "exactly one merged pull request must explain the activated authority"
-        )
-    return matches[0]
+    entry, merged, final, successor = read_verified_promotion_chain(
+        args,
+        client,
+        generation=authority["generation"],
+        merge_sha=active_workflow_sha,
+        expected_parent=parent_authority,
+        expected_successor=authority,
+        control_sha=control_sha,
+        materialization_label="activated-recovery",
+        replay_with_kernel=False,
+    )
+    if merged is None:
+        raise PermitInputError("activated authority lacks its durable merged phase")
+    if successor is not None:
+        return None
+    if final is None and control_sha == active_workflow_sha:
+        raise PermitInputError("control advanced before durable final closure")
+    if control_sha not in {entry["workflow_sha"], active_workflow_sha}:
+        raise PermitInputError("control ref is outside the resumable promotion states")
+    if repository_config["merge_method"] != entry["merge_method"]:
+        raise PermitInputError("activated recovery merge method drifted")
+    return {**entry, "recovery": True}
 
 
 def recover_merged_authority_promotion(
@@ -1633,76 +2507,24 @@ def recover_merged_authority_promotion(
         raise PermitInputError(
             "main authority differs from the controller without an exact successor lineage"
         )
-    matches: list[dict[str, Any]] = []
-    for pull_request_value in pull_requests_for_commit(
-        client, AUTHORITY_REPOSITORY, main_sha
-    ):
-        number = pull_request_value.get("number")
-        if (
-            not isinstance(number, int)
-            or isinstance(number, bool)
-            or number <= 0
-            or pull_request_value.get("state") != "closed"
-            or pull_request_value.get("merged") is not True
-            or pull_request_value.get("draft") is True
-            or pull_request_value.get("merge_commit_sha") != main_sha
-            or nested_string(
-                pull_request_value,
-                "base",
-                "ref",
-                label="merged authority base ref",
-            )
-            != "main"
-            or nested_string(
-                pull_request_value,
-                "head",
-                "repo",
-                "full_name",
-                label="merged authority head repository",
-            )
-            != AUTHORITY_REPOSITORY
-        ):
-            continue
-        base_sha = nested_string(
-            pull_request_value, "base", "sha", label="merged authority base SHA"
-        )
-        head_sha = nested_string(
-            pull_request_value, "head", "sha", label="merged authority head SHA"
-        )
-        if head_authority(client, head_sha=head_sha) != main_authority:
-            continue
-        if not any(
-            is_authority_path(path)
-            for path in changed_paths(client, AUTHORITY_REPOSITORY, number)
-        ):
-            continue
-        run, reason = newest_run(client, AUTHORITY_REPOSITORY, head_sha, workflow_sha)
-        if run is None:
-            raise PermitInputError(
-                f"merged successor authority lacks its exact permit run: {reason}"
-            )
-        entry = verified_plan_entry(
-            args,
-            client,
-            authority=authority,
-            workflow_sha=workflow_sha,
-            repository_config=repository_config,
-            pull_request=number,
-            base_sha=base_sha,
-            head_sha=head_sha,
-            run=run,
-            recovery=True,
-        )
-        if entry["merge_sha"] != main_sha:
-            raise PermitInputError(
-                "merged successor does not match its signed merge SHA"
-            )
-        matches.append(entry)
-    if len(matches) != 1:
+    entry, _, final, successor = read_verified_promotion_chain(
+        args,
+        client,
+        generation=main_authority["generation"],
+        merge_sha=main_sha,
+        expected_parent=authority,
+        expected_successor=main_authority,
+        control_sha=require_sha(args.control_sha, label="control_sha", length=40),
+        materialization_label="merged-recovery",
+        replay_with_kernel=True,
+    )
+    if final is not None or successor is not None:
         raise PermitInputError(
-            "exactly one closed pull request must explain the unactivated successor"
+            "finalized successor is not the independently observed active authority"
         )
-    return matches[0]
+    if repository_config["merge_method"] != entry["merge_method"]:
+        raise PermitInputError("merged recovery merge method drifted")
+    return {**entry, "recovery": True}
 
 
 def plan(args: argparse.Namespace, client: GitHubReadClient) -> dict[str, Any]:
@@ -1716,7 +2538,12 @@ def plan(args: argparse.Namespace, client: GitHubReadClient) -> dict[str, Any]:
         label="active_workflow_sha",
         length=40,
     )
-    verify_observer_installation(client, contract=contract)
+    verify_observer_installation(
+        client,
+        contract=contract,
+        app_slug=args.observer_app_slug,
+        installation_id=args.observer_installation_id,
+    )
     if discover_effective_workflow_sha(client) != active_workflow_sha:
         raise PermitInputError("active release authority changed after discovery")
     observe_effective_stable_rules(client, workflow_sha=active_workflow_sha)
@@ -1734,6 +2561,10 @@ def plan(args: argparse.Namespace, client: GitHubReadClient) -> dict[str, Any]:
     if head_authority(client, head_sha=active_workflow_sha) != authority:
         raise PermitInputError(
             "local authority does not equal the active workflow tree"
+        )
+    if authority["generation"] == 2 and active_workflow_sha != control_sha:
+        raise PermitInputError(
+            "bootstrap generation must equal the verified immutable control SHA"
         )
     args.output_dir.mkdir(parents=True, exist_ok=False)
     ordinary: list[dict[str, Any]] = []
@@ -1846,13 +2677,7 @@ def plan(args: argparse.Namespace, client: GitHubReadClient) -> dict[str, Any]:
                     workflow_sha=active_workflow_sha,
                     repository_config=repository_config,
                 )
-                if recovery is None and not has_final_promotion_closure(
-                    args,
-                    client,
-                    authority=authority,
-                    control_sha=control_sha,
-                    active_workflow_sha=active_workflow_sha,
-                ):
+                if recovery is None and authority["generation"] > 2:
                     recovery = verified_activated_recovery_entry(
                         args,
                         client,
@@ -2135,6 +2960,7 @@ def validate_plan(value: dict[str, Any], *, control_sha: str) -> dict[str, Any]:
     if (
         len(ordinary) > 1
         or len(promotions) > 1
+        or (ordinary and promotions)
         or any(entry["repository"] == AUTHORITY_REPOSITORY for entry in ordinary)
         or any(entry["repository"] != AUTHORITY_REPOSITORY for entry in promotions)
         or any(
@@ -2145,8 +2971,7 @@ def validate_plan(value: dict[str, Any], *, control_sha: str) -> dict[str, Any]:
     ):
         raise PermitInputError("controller plan violates fixed serialization")
     if any(
-        entry["workflow_sha"] != active_workflow_sha
-        and entry["recovery"] is not True
+        entry["workflow_sha"] != active_workflow_sha and entry["recovery"] is not True
         for entry in ordinary
     ):
         raise PermitInputError("ordinary plan entries do not use the active authority")
@@ -2241,20 +3066,15 @@ def verify_merger_installation(
     *,
     contract: dict[str, Any],
     repository: str,
+    app_slug: str,
+    installation_id: int,
 ) -> None:
     merger = contract["apps"]["merger"]
-    installation = client.request("GET", "/installation")
-    account = installation.get("account") if isinstance(installation, dict) else None
     if (
-        not isinstance(installation, dict)
-        or installation.get("app_id") != merger["app_id"]
-        or installation.get("id") != merger["installation_id"]
-        or installation.get("permissions")
-        != {"contents": "write", "pull_requests": "read"}
-        or not isinstance(account, dict)
-        or account.get("login") != ORGANIZATION
+        app_slug != merger["slug"]
+        or installation_id != merger["installation_id"]
     ):
-        raise PermitInputError("merger App identity or permissions drifted")
+        raise PermitInputError("merger token action identity drifted")
     repositories = client.request("GET", "/installation/repositories?per_page=100")
     items = repositories.get("repositories") if isinstance(repositories, dict) else None
     if not isinstance(items, list) or {
@@ -2344,7 +3164,13 @@ def merge(args: argparse.Namespace) -> dict[str, Any]:
         if isinstance(item, dict)
     }
     client = GitHubApprovalClient(os.environ.get("GH_TOKEN", ""))
-    verify_merger_installation(client, contract=contract, repository=args.repository)
+    verify_merger_installation(
+        client,
+        contract=contract,
+        repository=args.repository,
+        app_slug=args.merger_app_slug,
+        installation_id=args.merger_installation_id,
+    )
     if (
         plan_value["merge_interlock"]["merger_app_id"]
         != contract["apps"]["merger"]["app_id"]
@@ -2564,13 +3390,26 @@ def build_parser() -> argparse.ArgumentParser:
     discover_parser = subparsers.add_parser("discover")
     discover_parser.add_argument("--contract", type=Path, required=True)
     discover_parser.add_argument("--control-sha", required=True)
+    discover_parser.add_argument("--observer-app-slug", required=True)
+    discover_parser.add_argument("--observer-installation-id", type=int, required=True)
     discover_parser.add_argument("--output", type=Path, required=True)
+    kernel_parser = subparsers.add_parser("verify-kernel-transition")
+    kernel_parser.add_argument("--contract", type=Path, required=True)
+    kernel_parser.add_argument("--kernel-verifier", type=Path, required=True)
+    kernel_parser.add_argument("--control-sha", required=True)
+    kernel_parser.add_argument("--parent-workflow-sha", required=True)
+    kernel_parser.add_argument("--parent-kernel-sha", required=True)
+    kernel_parser.add_argument("--candidate-kernel-sha", required=True)
+    kernel_parser.add_argument("--output-dir", type=Path, required=True)
+    kernel_parser.add_argument("--output", type=Path, required=True)
     plan_parser = subparsers.add_parser("plan")
     plan_parser.add_argument("--contract", type=Path, required=True)
     plan_parser.add_argument("--authority", type=Path, required=True)
     plan_parser.add_argument("--kernel-verifier", type=Path, required=True)
     plan_parser.add_argument("--control-sha", required=True)
     plan_parser.add_argument("--active-workflow-sha", required=True)
+    plan_parser.add_argument("--observer-app-slug", required=True)
+    plan_parser.add_argument("--observer-installation-id", type=int, required=True)
     plan_parser.add_argument("--output-dir", type=Path, required=True)
     plan_parser.add_argument("--output", type=Path, required=True)
     approve_parser = subparsers.add_parser("approve")
@@ -2589,6 +3428,8 @@ def build_parser() -> argparse.ArgumentParser:
     merge_parser.add_argument("--approvals", type=Path, required=True)
     merge_parser.add_argument("--control-sha", required=True)
     merge_parser.add_argument("--repository", required=True)
+    merge_parser.add_argument("--merger-app-slug", required=True)
+    merge_parser.add_argument("--merger-installation-id", type=int, required=True)
     merge_parser.add_argument("--output", type=Path, required=True)
     return parser
 
@@ -2603,9 +3444,7 @@ def main(argv: list[str]) -> int:
                 args,
                 GitHubLedgerClient(
                     os.environ.get("GH_TOKEN", ""),
-                    api_url=os.environ.get(
-                        "GITHUB_API_URL", "https://api.github.com"
-                    ),
+                    api_url=os.environ.get("GITHUB_API_URL", "https://api.github.com"),
                 ),
             )
         elif args.command == "discover":
@@ -2614,6 +3453,16 @@ def main(argv: list[str]) -> int:
                 GitHubReadClient(
                     os.environ.get("GH_TOKEN", ""),
                     api_url=os.environ.get("GITHUB_API_URL", "https://api.github.com"),
+                ),
+            )
+        elif args.command == "verify-kernel-transition":
+            result = verify_kernel_transition(
+                args,
+                GitHubReadClient(
+                    os.environ.get("GH_TOKEN", ""),
+                    api_url=os.environ.get(
+                        "GITHUB_API_URL", "https://api.github.com"
+                    ),
                 ),
             )
         elif args.command == "plan":

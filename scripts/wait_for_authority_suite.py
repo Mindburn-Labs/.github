@@ -463,13 +463,28 @@ def verify_case(
             authority=authority,
             attestation_token=client.token,
         )
+    parent_output = directory / "parent-kernel-permit.json"
     verify_permit_reduction(
         args.kernel_verifier,
         permit_path,
         context_path,
         review_paths,
-        directory / "parent-kernel-permit.json",
+        parent_output,
     )
+    candidate_verifier = getattr(args, "candidate_kernel_verifier", None)
+    if candidate_verifier is not None:
+        candidate_output = directory / "candidate-kernel-permit.json"
+        verify_permit_reduction(
+            candidate_verifier,
+            permit_path,
+            context_path,
+            review_paths,
+            candidate_output,
+        )
+        if candidate_output.read_bytes() != parent_output.read_bytes():
+            raise PermitInputError(
+                "parent and candidate Kernels disagree on exact permit reduction"
+            )
     return {
         "id": case["id"],
         "expected": expected,
@@ -603,6 +618,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-workflow-sha", required=True)
     parser.add_argument("--expected-authority", type=Path, required=True)
     parser.add_argument("--kernel-verifier", type=Path, required=True)
+    parser.add_argument("--candidate-kernel-verifier", type=Path)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--receipt", type=Path, required=True)
     parser.add_argument("--timeout-seconds", type=int, default=1800)

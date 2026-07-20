@@ -96,6 +96,30 @@
           "type": "deletion"
         },
         {
+          "type": "non_fast_forward"
+        }
+      ],
+      "target": "branch"
+    },
+    "successor_ruleset": {
+      "bypass_actors": [],
+      "conditions": {
+        "ref_name": {
+          "exclude": [],
+          "include": [
+            "refs/heads/authority/control-v1"
+          ]
+        },
+        "repository_id": {
+          "repository_ids": [
+            1159255601
+          ]
+        }
+      },
+      "enforcement": "active",
+      "name": "HELM Authority Control Successor",
+      "rules": [
+        {
           "parameters": {
             "update_allows_fetch_and_merge": false
           },
@@ -103,6 +127,11 @@
         }
       ],
       "target": "branch"
+    },
+    "successor_app": {
+      "app_id": null,
+      "installation_id": null,
+      "slug": "helm-authority-control-updater"
     },
     "workflow_path": ".github/workflows/promote-authority.yml"
   },
@@ -171,6 +200,23 @@
         "protected_branches": false
       },
       "name": "authority-promotion",
+      "protection_rule_types": [
+        "branch_policy"
+      ]
+    },
+    {
+      "branch_policies": [
+        {
+          "name": "authority/control-v1",
+          "type": "branch"
+        }
+      ],
+      "can_admins_bypass": false,
+      "deployment_branch_policy": {
+        "custom_branch_policies": true,
+        "protected_branches": false
+      },
+      "name": "authority-control",
       "protection_rule_types": [
         "branch_policy"
       ]

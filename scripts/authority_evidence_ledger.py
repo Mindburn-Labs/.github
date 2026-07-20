@@ -39,7 +39,7 @@ MAX_NAMESPACE_ENTRIES = (MAX_FILES * 2) + 1
 SEGMENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,119}\Z")
 RECORD_PHASES = {
     "ordinary-merge": {"intent", "closure"},
-    "authority-promotion": {"intent", "merged", "final"},
+    "authority-promotion": {"intent", "merged", "final", "successor"},
     "bootstrap": {"intent", "closure", "final"},
 }
 RECORD_TYPES = set(RECORD_PHASES)
@@ -107,7 +107,9 @@ class GitHubLedgerClient:
         except (urllib.error.URLError, TimeoutError) as exc:
             raise PermitInputError(f"GitHub {method} {path} failed: {exc}") from exc
         if len(body) > MAX_API_BYTES:
-            raise PermitInputError(f"GitHub {method} {path} exceeded the response limit")
+            raise PermitInputError(
+                f"GitHub {method} {path} exceeded the response limit"
+            )
         if not body:
             return APIResponse(None, etag)
         try:
@@ -211,7 +213,9 @@ def collect_inputs(
         relative = validate_relative_path(value, label="included evidence tree")
         directory = root / relative
         if not directory.is_dir() or directory.is_symlink():
-            raise PermitInputError(f"included evidence tree {relative} is not a directory")
+            raise PermitInputError(
+                f"included evidence tree {relative} is not a directory"
+            )
         for candidate in directory.rglob("*"):
             if candidate.is_symlink():
                 raise PermitInputError("evidence trees cannot contain symbolic links")
@@ -226,7 +230,11 @@ def collect_inputs(
         if relative == "ledger-manifest.json":
             raise PermitInputError("ledger-manifest.json is reserved")
         path = root / relative
-        if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(root):
+        if (
+            path.is_symlink()
+            or not path.is_file()
+            or not path.resolve().is_relative_to(root)
+        ):
             raise PermitInputError(f"evidence file {relative} escapes its input root")
         content = path.read_bytes()
         if not content or len(content) > MAX_FILE_BYTES:
@@ -249,10 +257,12 @@ def validate_inputs(inputs: dict[str, bytes]) -> dict[str, bytes]:
         if path == "ledger-manifest.json":
             raise PermitInputError("ledger-manifest.json is reserved")
         parts = PurePosixPath(path).parts
-        directories.update(
-            "/".join(parts[:index]) for index in range(1, len(parts))
-        )
-        if not isinstance(content, bytes) or not content or len(content) > MAX_FILE_BYTES:
+        directories.update("/".join(parts[:index]) for index in range(1, len(parts)))
+        if (
+            not isinstance(content, bytes)
+            or not content
+            or len(content) > MAX_FILE_BYTES
+        ):
             raise PermitInputError(f"evidence file {path} has an invalid size")
         total += len(content)
         if total > MAX_TOTAL_BYTES:
@@ -541,7 +551,9 @@ def verify_existing(
     )
     try:
         manifest = parse_json_strict(
-            decode_blob(manifest_blob, label="existing ledger manifest").decode("utf-8"),
+            decode_blob(manifest_blob, label="existing ledger manifest").decode(
+                "utf-8"
+            ),
             label="existing ledger manifest",
         )
     except UnicodeDecodeError as exc:
@@ -565,7 +577,9 @@ def verify_existing(
         },
         label="existing ledger manifest",
     )
-    comparable = {key: value for key, value in expected.items() if key != "ledger_parent_sha"}
+    comparable = {
+        key: value for key, value in expected.items() if key != "ledger_parent_sha"
+    }
     if {key: manifest.get(key) for key in comparable} != comparable:
         raise PermitInputError("existing ledger manifest does not match this record")
     for path, content in inputs.items():
@@ -602,6 +616,7 @@ def append_record(
     run_id: int,
     run_attempt: int,
     inputs: dict[str, bytes],
+    expected_parent_sha: str | None = None,
 ) -> dict[str, Any]:
     namespace = validate_relative_path(namespace, label="ledger namespace")
     inputs = validate_inputs(inputs)
@@ -611,6 +626,12 @@ def append_record(
         raise PermitInputError("phase is not supported for this record type")
     validate_record_namespace(namespace, record_type=record_type, phase=phase)
     workflow_sha = require_sha(workflow_sha, label="workflow_sha", length=40)
+    if expected_parent_sha is not None:
+        expected_parent_sha = require_sha(
+            expected_parent_sha,
+            label="expected ledger parent SHA",
+            length=40,
+        )
     for value, label in ((run_id, "run_id"), (run_attempt, "run_attempt")):
         if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
             raise PermitInputError(f"{label} must be a positive integer")
@@ -621,7 +642,9 @@ def append_record(
         label="ledger ref",
     )
     parent_sha = require_sha(
-        ref.get("object", {}).get("sha") if isinstance(ref.get("object"), dict) else None,
+        ref.get("object", {}).get("sha")
+        if isinstance(ref.get("object"), dict)
+        else None,
         label="ledger parent SHA",
         length=40,
     )
@@ -660,6 +683,8 @@ def append_record(
             inputs=inputs,
             ledger_head_sha=parent_sha,
         )
+    if expected_parent_sha is not None and parent_sha != expected_parent_sha:
+        raise PermitInputError("evidence ledger moved after the signed plan")
 
     blobs: dict[str, str] = {}
     all_files = {**inputs, "ledger-manifest.json": canonical_json(manifest)}
@@ -795,6 +820,22 @@ def stable_record_descriptor(receipt: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def materialize_record(record: dict[str, Any], output_dir: Path) -> None:
+    if output_dir.exists() or output_dir.is_symlink():
+        raise PermitInputError("ledger materialization output already exists")
+    output_dir.mkdir(parents=True)
+    inputs = record.get("inputs")
+    if not isinstance(inputs, dict) or not inputs:
+        raise PermitInputError("ledger record has no materializable inputs")
+    for relative, content in inputs.items():
+        relative = validate_relative_path(relative, label="materialized evidence path")
+        target = output_dir.joinpath(*PurePosixPath(relative).parts)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists() or target.is_symlink():
+            raise PermitInputError("ledger materialization contains a duplicate path")
+        target.write_bytes(content)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -807,6 +848,7 @@ def build_parser() -> argparse.ArgumentParser:
     append_parser.add_argument("--workflow-sha", required=True)
     append_parser.add_argument("--run-id", required=True, type=int)
     append_parser.add_argument("--run-attempt", required=True, type=int)
+    append_parser.add_argument("--expected-parent-sha", required=True)
     append_parser.add_argument("--input-root", required=True, type=Path)
     append_parser.add_argument("--include", action="append", default=[])
     append_parser.add_argument("--include-tree", action="append", default=[])
@@ -814,6 +856,14 @@ def build_parser() -> argparse.ArgumentParser:
     descriptor_parser = subparsers.add_parser("descriptor")
     descriptor_parser.add_argument("--receipt", required=True, type=Path)
     descriptor_parser.add_argument("--output", required=True, type=Path)
+    read_parser = subparsers.add_parser("read")
+    read_parser.add_argument("--namespace", required=True)
+    read_parser.add_argument(
+        "--record-type", required=True, choices=sorted(RECORD_TYPES)
+    )
+    read_parser.add_argument("--phase", required=True)
+    read_parser.add_argument("--output-dir", required=True, type=Path)
+    read_parser.add_argument("--output", required=True, type=Path)
     return parser
 
 
@@ -829,9 +879,7 @@ def main(argv: list[str]) -> int:
             value = append_record(
                 GitHubLedgerClient(
                     os.environ.get("GH_TOKEN", ""),
-                    api_url=os.environ.get(
-                        "GITHUB_API_URL", "https://api.github.com"
-                    ),
+                    api_url=os.environ.get("GITHUB_API_URL", "https://api.github.com"),
                 ),
                 namespace=args.namespace,
                 record_type=args.record_type,
@@ -840,14 +888,33 @@ def main(argv: list[str]) -> int:
                 run_id=args.run_id,
                 run_attempt=args.run_attempt,
                 inputs=inputs,
+                expected_parent_sha=args.expected_parent_sha,
             )
-        else:
+        elif args.command == "descriptor":
             value = stable_record_descriptor(
                 parse_json_strict(
                     args.receipt.read_text(encoding="utf-8"),
                     label="evidence ledger append receipt",
                 )
             )
+        else:
+            record = read_record(
+                GitHubLedgerClient(
+                    os.environ.get("GH_TOKEN", ""),
+                    api_url=os.environ.get("GITHUB_API_URL", "https://api.github.com"),
+                ),
+                namespace=args.namespace,
+                record_type=args.record_type,
+                phase=args.phase,
+            )
+            if record is None:
+                raise PermitInputError("evidence ledger record is absent")
+            materialize_record(record, args.output_dir)
+            value = {
+                **record["descriptor"],
+                "ledger_head_sha": record["ledger_head_sha"],
+                "idempotent": True,
+            }
         encoded = canonical_json(value)
         args.output.write_bytes(encoded)
         sys.stdout.buffer.write(encoded)

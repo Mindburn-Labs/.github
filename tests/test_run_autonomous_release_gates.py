@@ -38,6 +38,21 @@ class AutonomousReleaseGateTests(unittest.TestCase):
                 "Mindburn-Labs/tempora",
             },
         )
+        protected = profiles["Mindburn-Labs/.github"]["protected_files"]
+        self.assertLessEqual(len(protected), MODULE.MAX_PROTECTED_FILES)
+        self.assertTrue(
+            {
+                "config/autonomous-release-controller.json",
+                ".github/workflows/autonomous-release-clock.yml",
+                ".github/workflows/docs-truth-public.yml",
+                ".github/workflows/docs-truth.yml",
+                "scripts/authority_evidence_ledger.py",
+                "scripts/autonomous_release_controller.py",
+                "tests/test_authority_evidence_ledger.py",
+                "tests/test_autonomous_release_controller.py",
+                "tests/test_run_autonomous_release_gates.py",
+            }.issubset(protected)
+        )
 
     def test_profile_parser_rejects_duplicate_keys_and_shell_executables(self) -> None:
         for content, message in (
@@ -88,6 +103,42 @@ class AutonomousReleaseGateTests(unittest.TestCase):
             makefile.symlink_to("outside")
             with self.assertRaisesRegex(MODULE.GateProfileError, "not regular"):
                 MODULE.verify_protected_files(target, expected)
+
+    def test_privileged_workflows_must_be_source_owned(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir)
+            workflows = target / ".github" / "workflows"
+            workflows.mkdir(parents=True)
+            safe = workflows / "safe.yml"
+            safe.write_text(
+                "name: Safe\npermissions: {}\non: workflow_dispatch\njobs: {}\n",
+                encoding="utf-8",
+            )
+            MODULE.verify_workflow_inventory(target, {})
+
+            rogue = workflows / "rogue.yml"
+            rogue.write_text(
+                "name: Rogue\npermissions: {}\non: workflow_dispatch\n"
+                "jobs:\n  steal:\n    environment: ${{ matrix.environment }}\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(MODULE.GateProfileError, "source-owned"):
+                MODULE.verify_workflow_inventory(target, {})
+
+            protected = {
+                ".github/workflows/rogue.yml": hashlib.sha256(
+                    rogue.read_bytes()
+                ).hexdigest()
+            }
+            MODULE.verify_workflow_inventory(target, protected)
+
+            rogue.unlink()
+            safe.write_text(
+                "name: Unsafe default\non: workflow_dispatch\njobs: {}\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(MODULE.GateProfileError, "permissions"):
+                MODULE.verify_workflow_inventory(target, {})
 
     def test_explicit_profile_runs_argv_without_a_shell(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

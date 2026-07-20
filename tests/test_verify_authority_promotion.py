@@ -235,6 +235,27 @@ def verify_args(
                 max_response_bytes=1_048_576,
             )
         )
+    candidate_authority = json.loads(
+        (repository / "config" / "autonomous-release-authority.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    kernel_transition = permit_path.parent / "kernel-transition.json"
+    kernel_transition.write_text(
+        json.dumps(
+            {
+                "schema": MODULE.KERNEL_TRANSITION_SCHEMA,
+                "mode": "unchanged",
+                "control_workflow_sha": PARENT_SHA,
+                "parent_workflow_sha": PARENT_SHA,
+                "parent_kernel_sha": PARENT_KERNEL_SHA,
+                "candidate_kernel_sha": candidate_authority["kernel_sha"],
+                "ordinary_merge": None,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     return argparse.Namespace(
         permit=permit_path,
         permit_verifier=verifier,
@@ -244,6 +265,7 @@ def verify_args(
         candidate_repository=repository,
         candidate_sha=candidate_sha,
         candidate_pr=33,
+        kernel_transition=kernel_transition,
         expected_run_id=101,
         expected_run_attempt=1,
         expected_parent_generation=1,
@@ -275,7 +297,7 @@ class AuthorityPromotionTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(
                 MODULE.PermitInputError,
-                "Kernel-upgrade protocol",
+                "parent-verified upgrade",
             ):
                 MODULE.verify(
                     verify_args(
@@ -285,6 +307,71 @@ class AuthorityPromotionTests(unittest.TestCase):
                         build_fake_verifier(root),
                     ),
                 )
+
+    def test_parent_closed_kernel_upgrade_is_admissible(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repository, _candidate_sha, _candidate_tree = build_candidate(root)
+            candidate_kernel = "3" * 40
+            authority_path = repository / "config" / "autonomous-release-authority.json"
+            authority = json.loads(authority_path.read_text(encoding="utf-8"))
+            authority["kernel_sha"] = candidate_kernel
+            authority_path.write_text(json.dumps(authority) + "\n", encoding="utf-8")
+            (repository / ".github" / "workflows" / "ci.yml").write_text(
+                MODULE.WORKFLOW_TEMPLATE_PATH.read_text(encoding="utf-8").replace(
+                    MODULE.WORKFLOW_TEMPLATE_MARKER,
+                    candidate_kernel,
+                ),
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "-C", str(repository), "add", "-A"], check=True)
+            subprocess.run(
+                ["git", "-C", str(repository), "commit", "-m", "upgrade kernel"],
+                check=True,
+            )
+            candidate_sha = git(repository, "rev-parse", "HEAD")
+            candidate_tree = git(repository, "rev-parse", "HEAD^{tree}")
+            permit_path = root / "permit.json"
+            permit_path.write_text(
+                json.dumps(build_permit(candidate_sha, candidate_tree)) + "\n",
+                encoding="utf-8",
+            )
+            args = verify_args(
+                repository,
+                candidate_sha,
+                permit_path,
+                build_fake_verifier(root),
+            )
+            args.kernel_transition.write_text(
+                json.dumps(
+                    {
+                        "schema": MODULE.KERNEL_TRANSITION_SCHEMA,
+                        "mode": "upgrade",
+                        "control_workflow_sha": PARENT_SHA,
+                        "parent_workflow_sha": PARENT_SHA,
+                        "parent_kernel_sha": PARENT_KERNEL_SHA,
+                        "candidate_kernel_sha": candidate_kernel,
+                        "ordinary_merge": {
+                            "repository": MODULE.KERNEL_REPOSITORY,
+                            "pull_request": 44,
+                            "head_sha": "c" * 40,
+                            "merge_sha": candidate_kernel,
+                            "merge_tree_sha": "d" * 40,
+                            "permit_id": "sha256:" + "e" * 64,
+                            "workflow_sha": PARENT_SHA,
+                            "run_id": 102,
+                            "run_attempt": 1,
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            receipt = MODULE.verify(args)
+            self.assertEqual(receipt["kernel_sha"], candidate_kernel)
+            self.assertEqual(receipt["candidate_pull_request"], 33)
+            self.assertEqual(receipt["ratification_run_attempt"], 1)
+            self.assertRegex(receipt["kernel_transition_sha256"], r"^[0-9a-f]{64}$")
 
     def test_parent_owned_workflow_template_accepts_only_exact_semantics(self) -> None:
         MODULE.validate_candidate_workflow(

@@ -23,6 +23,7 @@ from autonomous_release_permit import (
 
 
 PERMIT_SCHEMA = "mindburn.release-permit/v2"
+KERNEL_TRANSITION_SCHEMA = "mindburn.release-authority-kernel-transition/v1"
 MODEL_REVIEWERS = {
     "anthropic": "claude-fable-5",
     "openai": "gpt-5.6-sol",
@@ -426,6 +427,82 @@ def validate_authority_shape(authority: Any, *, label: str) -> dict[str, Any]:
     return authority
 
 
+def validate_kernel_transition(
+    value: Any,
+    *,
+    parent_workflow_sha: str,
+    parent_kernel_sha: str,
+    candidate_kernel_sha: str,
+) -> dict[str, Any]:
+    transition = require_mapping(value, label="Kernel transition")
+    require_exact_keys(
+        transition,
+        required={
+            "schema",
+            "mode",
+            "control_workflow_sha",
+            "parent_workflow_sha",
+            "parent_kernel_sha",
+            "candidate_kernel_sha",
+            "ordinary_merge",
+        },
+        label="Kernel transition",
+    )
+    if (
+        transition["schema"] != KERNEL_TRANSITION_SCHEMA
+        or transition["control_workflow_sha"] != parent_workflow_sha
+        or transition["parent_workflow_sha"] != parent_workflow_sha
+        or transition["parent_kernel_sha"] != parent_kernel_sha
+        or transition["candidate_kernel_sha"] != candidate_kernel_sha
+    ):
+        raise PermitInputError("Kernel transition identity drifted")
+    ordinary = transition["ordinary_merge"]
+    if candidate_kernel_sha == parent_kernel_sha:
+        if transition["mode"] != "unchanged" or ordinary is not None:
+            raise PermitInputError("unchanged Kernel transition is not exact")
+        return transition
+    if transition["mode"] != "upgrade" or not isinstance(ordinary, dict):
+        raise PermitInputError(
+            "candidate Kernel lacks a parent-verified upgrade transition"
+        )
+    require_exact_keys(
+        ordinary,
+        required={
+            "repository",
+            "pull_request",
+            "head_sha",
+            "merge_sha",
+            "merge_tree_sha",
+            "permit_id",
+            "workflow_sha",
+            "run_id",
+            "run_attempt",
+        },
+        label="Kernel ordinary merge",
+    )
+    if (
+        ordinary["repository"] != KERNEL_REPOSITORY
+        or ordinary["merge_sha"] != candidate_kernel_sha
+        or ordinary["workflow_sha"] != parent_workflow_sha
+    ):
+        raise PermitInputError("Kernel ordinary merge identity drifted")
+    for field in ("head_sha", "merge_sha", "merge_tree_sha", "workflow_sha"):
+        require_sha(ordinary[field], label=f"Kernel ordinary merge {field}", length=40)
+    for field in ("pull_request", "run_id", "run_attempt"):
+        value = ordinary[field]
+        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+            raise PermitInputError(f"Kernel ordinary merge {field} is invalid")
+    permit_id = ordinary["permit_id"]
+    if not isinstance(permit_id, str) or not permit_id.startswith("sha256:"):
+        raise PermitInputError("Kernel ordinary merge permit_id is invalid")
+    require_sha(
+        permit_id.removeprefix("sha256:"),
+        label="Kernel ordinary merge permit_id",
+        length=64,
+    )
+    return transition
+
+
 def verify_permit_with_kernel(
     verifier: Path,
     permit: Path,
@@ -684,11 +761,15 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         raise PermitInputError(
             "candidate authority generation is not the next generation"
         )
-    if candidate_authority["kernel_sha"] != permit_authority["kernel_sha"]:
-        raise PermitInputError(
-            "candidate Kernel changes require a separately ratified full-source "
-            "Kernel-upgrade protocol"
-        )
+    validate_kernel_transition(
+        load_json_bytes(
+            args.kernel_transition.read_bytes(),
+            label=str(args.kernel_transition),
+        ),
+        parent_workflow_sha=parent_sha,
+        parent_kernel_sha=permit_authority["kernel_sha"],
+        candidate_kernel_sha=candidate_authority["kernel_sha"],
+    )
     parent = candidate_authority["parent"]
     if parent != {
         "generation": args.expected_parent_generation,
@@ -728,13 +809,18 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "schema": "mindburn.release-authority-promotion/v1",
         "candidate_generation": candidate_authority["generation"],
+        "candidate_pull_request": args.candidate_pr,
         "candidate_sha": candidate_sha,
         "candidate_tree_sha": candidate_tree,
         "kernel_sha": candidate_authority["kernel_sha"],
+        "kernel_transition_sha256": hashlib.sha256(
+            args.kernel_transition.read_bytes()
+        ).hexdigest(),
         "parent_generation": args.expected_parent_generation,
         "parent_workflow_sha": parent_sha,
         "ratification_permit_id": permit["permit_id"],
         "ratification_run_id": permit["run_id"],
+        "ratification_run_attempt": permit["run_attempt"],
     }
 
 
@@ -748,6 +834,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--candidate-repository", type=Path, required=True)
     parser.add_argument("--candidate-sha", required=True)
     parser.add_argument("--candidate-pr", type=int, required=True)
+    parser.add_argument("--kernel-transition", type=Path, required=True)
     parser.add_argument("--expected-run-id", type=int, required=True)
     parser.add_argument("--expected-run-attempt", type=int, required=True)
     parser.add_argument("--expected-parent-generation", type=int, required=True)

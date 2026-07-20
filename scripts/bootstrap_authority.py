@@ -58,7 +58,6 @@ from configure_machine_approval_gates import (
     validate_merger,
 )
 from submit_machine_approval import (
-    APPROVER_APP_ID,
     APPROVER_INSTALLATION_ID,
     APPROVER_SLUG,
     GitHubApprovalClient,
@@ -75,6 +74,7 @@ from verify_control_plane import (
     CONTROL_BRANCH,
     CONTROL_REF,
     CONTROL_RULESET_NAME,
+    CONTROL_SUCCESSOR_RULESET_NAME,
     load_json,
     validate_contract,
     verify_live_control_workflow,
@@ -352,6 +352,43 @@ def ensure_evidence_ledger_seed(
     expected_sha = require_sha(
         expected_sha, label="evidence ledger seed SHA", length=40
     )
+    commit = client.get(f"/repos/{REPOSITORY}/git/commits/{expected_sha}")
+    root_tree_sha = require_sha(
+        nested(commit, "tree", "sha", label="candidate root tree SHA"),
+        label="candidate root tree SHA",
+        length=40,
+    )
+    root_tree = client.get(f"/repos/{REPOSITORY}/git/trees/{root_tree_sha}")
+    root_entries = root_tree.get("tree")
+    if root_tree.get("truncated") is True or not isinstance(root_entries, list):
+        raise PermitInputError("candidate root tree cannot be checked for ledger paths")
+    helm_entries = [
+        entry
+        for entry in root_entries
+        if isinstance(entry, dict) and entry.get("path") == ".helm"
+    ]
+    if len(helm_entries) > 1:
+        raise PermitInputError("candidate root tree contains duplicate .helm entries")
+    if helm_entries:
+        helm_entry = helm_entries[0]
+        if helm_entry.get("type") != "tree":
+            raise PermitInputError("candidate reserves .helm as a non-directory")
+        helm_tree_sha = require_sha(
+            helm_entry.get("sha"), label="candidate .helm tree SHA", length=40
+        )
+        helm_tree = client.get(f"/repos/{REPOSITORY}/git/trees/{helm_tree_sha}")
+        helm_children = helm_tree.get("tree")
+        if helm_tree.get("truncated") is True or not isinstance(helm_children, list):
+            raise PermitInputError(
+                "candidate .helm tree cannot be checked for ledger paths"
+            )
+        if any(
+            isinstance(entry, dict) and entry.get("path") == "evidence"
+            for entry in helm_children
+        ):
+            raise PermitInputError(
+                "reviewed candidate must not pre-seed the reserved .helm/evidence tree"
+            )
     ref_path = LEDGER_REF.removeprefix("refs/")
     path = f"/repos/{REPOSITORY}/git/ref/{ref_path}"
     try:
@@ -403,9 +440,7 @@ def verify_evidence_ledger_descendant(
     )
     advanced = head_sha != seed_sha
     if advanced:
-        comparison = client.get(
-            f"/repos/{REPOSITORY}/compare/{seed_sha}...{head_sha}"
-        )
+        comparison = client.get(f"/repos/{REPOSITORY}/compare/{seed_sha}...{head_sha}")
         if (
             comparison.get("status") != "ahead"
             or not isinstance(comparison.get("merge_base_commit"), dict)
@@ -447,6 +482,25 @@ def verify_controller_baselines(
     contract = validate_controller_contract(
         load_json_file(args.controller_contract, label="controller contract")
     )
+    control_contract = validate_contract(
+        load_json(args.control_contract, label="control contract"),
+        load_json(args.adversarial_corpus, label="adversarial corpus"),
+    )
+    if (
+        control_contract["control_workflow"]["successor_app"]
+        != contract["apps"]["control_updater"]
+    ):
+        raise PermitInputError(
+            "controller and control-plane successor App identities differ"
+        )
+    bootstrap_contract = load_json(
+        args.bootstrap_contract, label="bootstrap contract"
+    )
+    if {
+        key: bootstrap_contract["merger"].get(key)
+        for key in ("slug", "app_id", "installation_id")
+    } != contract["apps"]["merger"]:
+        raise PermitInputError("controller and bootstrap merger identities differ")
     baseline = contract["evidence_ledger"]["baseline_main"][
         "Mindburn-Labs/helm-ai-kernel"
     ]
@@ -455,7 +509,9 @@ def verify_controller_baselines(
     )
     kernel_main = nested_string(kernel_ref, "object", "sha", label="Kernel main SHA")
     if kernel_main != baseline:
-        raise PermitInputError("Kernel main moved beyond the controller ledger baseline")
+        raise PermitInputError(
+            "Kernel main moved beyond the controller ledger baseline"
+        )
     if contract["evidence_ledger"]["bootstrap_pr"] != args.candidate_pr:
         raise PermitInputError("controller bootstrap PR identity drifted")
     return {
@@ -514,13 +570,11 @@ def reopen_pull_request(
         or nested(reopened, "head", "sha", label="reopened head SHA") != head_sha
         or (
             base_sha is not None
-            and nested(reopened, "base", "sha", label="reopened base SHA")
-            != base_sha
+            and nested(reopened, "base", "sha", label="reopened base SHA") != base_sha
         )
         or (
             head_ref is not None
-            and nested(reopened, "head", "ref", label="reopened head ref")
-            != head_ref
+            and nested(reopened, "head", "ref", label="reopened head ref") != head_ref
         )
     ):
         raise PermitInputError(
@@ -851,6 +905,9 @@ def install_control_workflow(
     )
     staged = control_ruleset_payload(contract, staged=True)
     final = control_ruleset_payload(contract, staged=False)
+    successor = contract["control_workflow"]["successor_ruleset"]
+    if successor.get("name") != CONTROL_SUCCESSOR_RULESET_NAME:
+        raise PermitInputError("control-successor ruleset name drifted")
     listed = client.request("GET", "/orgs/Mindburn-Labs/rulesets?per_page=100")
     if not isinstance(listed.body, list):
         raise PermitInputError("GitHub control-ruleset list is malformed")
@@ -859,8 +916,16 @@ def install_control_workflow(
         for item in listed.body
         if isinstance(item, dict) and item.get("name") == CONTROL_RULESET_NAME
     ]
+    successor_matches = [
+        item
+        for item in listed.body
+        if isinstance(item, dict)
+        and item.get("name") == successor["name"]
+    ]
     if len(matches) > 1:
         raise PermitInputError("multiple immutable control rulesets exist")
+    if len(successor_matches) > 1:
+        raise PermitInputError("multiple control-successor rulesets exist")
     if matches:
         ruleset_id = matches[0].get("id")
     else:
@@ -875,6 +940,28 @@ def install_control_workflow(
         ruleset_id = created.get("id")
     if not isinstance(ruleset_id, int) or ruleset_id <= 0:
         raise PermitInputError("immutable control ruleset ID is invalid")
+
+    if successor_matches:
+        successor_ruleset_id = successor_matches[0].get("id")
+    else:
+        created_successor = require_object(
+            client.request(
+                "POST",
+                "/orgs/Mindburn-Labs/rulesets",
+                payload=successor,
+            ),
+            label="created control-successor ruleset",
+        )
+        successor_ruleset_id = created_successor.get("id")
+    if not isinstance(successor_ruleset_id, int) or successor_ruleset_id <= 0:
+        raise PermitInputError("control-successor ruleset ID is invalid")
+    successor_path = f"/orgs/Mindburn-Labs/rulesets/{successor_ruleset_id}"
+    confirmed_successor = require_object(
+        client.request("GET", successor_path),
+        label="confirmed control-successor ruleset",
+    )
+    if controlled_ruleset(confirmed_successor) != successor:
+        raise PermitInputError("control-successor ruleset did not lock exactly")
 
     ruleset_path = f"/orgs/Mindburn-Labs/rulesets/{ruleset_id}"
     current_response = client.request("GET", ruleset_path)
@@ -952,6 +1039,8 @@ def install_control_workflow(
         "schema": "mindburn.release-authority-control-installation/v1",
         "ruleset_id": ruleset_id,
         "ruleset_name": CONTROL_RULESET_NAME,
+        "successor_ruleset_id": successor_ruleset_id,
+        "successor_ruleset_name": successor["name"],
         "ref": CONTROL_REF,
         "sha": expected_sha,
         "observer": observed,
@@ -1201,16 +1290,6 @@ def preflight_credentials(
                 "bootstrap executor read the wrong organization ruleset"
             )
 
-    observer_installation = observer_client.get_json("/installation")
-    observer_account = observer_installation.get("account")
-    if (
-        observer_installation.get("app_id") != OBSERVER_APP_ID
-        or observer_installation.get("id") != OBSERVER_INSTALLATION_ID
-        or not isinstance(observer_account, dict)
-        or observer_account.get("login") != "Mindburn-Labs"
-        or observer_installation.get("permissions") != OBSERVER_PERMISSIONS
-    ):
-        raise PermitInputError("bootstrap observer App identity or permissions drifted")
     observer_repositories = observer_client.get_json(
         "/installation/repositories?per_page=100"
     )
@@ -1228,21 +1307,6 @@ def preflight_credentials(
     if observer_ruleset.get("id") != STABLE_RULESET_ID:
         raise PermitInputError("bootstrap observer read the wrong organization ruleset")
 
-    approver_installation = approval_client.request("GET", "/installation")
-    approver_account = (
-        approver_installation.get("account")
-        if isinstance(approver_installation, dict)
-        else None
-    )
-    if (
-        not isinstance(approver_installation, dict)
-        or approver_installation.get("app_id") != APPROVER_APP_ID
-        or approver_installation.get("id") != APPROVER_INSTALLATION_ID
-        or not isinstance(approver_account, dict)
-        or approver_account.get("login") != "Mindburn-Labs"
-        or approver_installation.get("permissions") != {"pull_requests": "write"}
-    ):
-        raise PermitInputError("bootstrap approver App identity or permissions drifted")
     approver = verify_installation(
         approval_client,
         repository=REPOSITORY,
@@ -1727,6 +1791,8 @@ def confirmed_or_atomic_merge(
     client: GitHubMergeClient,
     *,
     merger: dict[str, Any],
+    approval_receipt: Path,
+    permit: Path,
 ) -> dict[str, Any]:
     main = client.get(f"/repos/{REPOSITORY}/git/ref/heads/main")
     main_sha = nested_string(main, "object", "sha", label="main SHA")
@@ -1739,8 +1805,8 @@ def confirmed_or_atomic_merge(
         merger_app_slug=merger["slug"],
         merger_installation_id=merger["installation_id"],
         merger_app_id=merger["app_id"],
-        approval_receipt=None,
-        permit=None,
+        approval_receipt=approval_receipt,
+        permit=permit,
     )
     if main_sha == ready["base_sha"]:
         return atomic_merge(merge_args, client)
@@ -2072,12 +2138,9 @@ def finalize(
     if verify_controller_baselines(args, read_client) != current_controller_baselines:
         raise PermitInputError("controller repository baselines moved before intent")
     intent_inputs = {
-        f"prepare/{name}/{path.name}": path.read_bytes()
-        for name, path in paths.items()
+        f"prepare/{name}/{path.name}": path.read_bytes() for name, path in paths.items()
     }
-    intent_inputs.update(
-        evidence_tree_inputs(liveness_dir, prefix="liveness")
-    )
+    intent_inputs.update(evidence_tree_inputs(liveness_dir, prefix="liveness"))
     intent_inputs.update(
         evidence_tree_inputs(args.review_evidence_dir, prefix="ratification/reviews")
     )
@@ -2103,9 +2166,7 @@ def finalize(
         merger_token,
         api_url=os.environ.get("GITHUB_API_URL", "https://api.github.com"),
     )
-    ledger_namespace = (
-        f"bootstrap/pr-{ready['pull_request']}/{ready['merge_sha']}"
-    )
+    ledger_namespace = f"bootstrap/pr-{ready['pull_request']}/{ready['merge_sha']}"
     intent_receipt = append_record(
         ledger_client,
         namespace=f"{ledger_namespace}/intent",
@@ -2115,12 +2176,15 @@ def finalize(
         run_id=ready["liveness_run_id"],
         run_attempt=ready["liveness_run_attempt"],
         inputs=intent_inputs,
+        expected_parent_sha=ledger_state["head_sha"],
     )
     write_json(args.ready.parent / "evidence-ledger-intent.json", intent_receipt)
     merge_receipt = confirmed_or_atomic_merge(
         ready,
         merge_client,
         merger=bootstrap_contract["merger"],
+        approval_receipt=paths["machine_approval"],
+        permit=liveness_permit_path,
     )
     closure_receipt = append_record(
         ledger_client,
@@ -2138,6 +2202,7 @@ def finalize(
             "final-control-plane.json": canonical_json(control),
             "final-control-plane-observer.json": canonical_json(observer_control),
         },
+        expected_parent_sha=intent_receipt["ledger_head_sha"],
     )
     write_json(args.ready.parent / "evidence-ledger-closure.json", closure_receipt)
     ruleset_receipt = transition(
@@ -2177,6 +2242,7 @@ def finalize(
             "final-control-plane.json": canonical_json(control),
             "final-control-plane-observer.json": canonical_json(observer_control),
         },
+        expected_parent_sha=closure_receipt["ledger_head_sha"],
     )
     write_json(
         args.ready.parent / "evidence-ledger-final.json",
