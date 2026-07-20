@@ -1,0 +1,37 @@
+name: Verify authority liveness recovery v1
+
+on:
+  workflow_dispatch:
+    inputs:
+      request_path:
+        description: Repository-relative authority/recovery-v1 JSON request to validate.
+        required: true
+        default: authority/recovery-v1.example.json
+        type: string
+
+# This source-only workflow never receives a write token, environment, secret,
+# OIDC identity, or deployment capability. It validates a recovery plan only.
+permissions:
+  contents: read
+
+jobs:
+  verify-source-only-plan:
+    name: Verify source-only recovery plan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout selected source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Validate exact recovery contract
+        env:
+          RECOVERY_REQUEST: ${{ inputs.request_path }}
+        run: |
+          case "$RECOVERY_REQUEST" in
+            authority/*.json) ;;
+            *) echo "request_path must remain below authority/" >&2; exit 2 ;;
+          esac
+          python3 scripts/authority_liveness_recovery.py \
+            --request "$RECOVERY_REQUEST" \
+            --schema authority/recovery-v1.schema.json \
+            --output -
