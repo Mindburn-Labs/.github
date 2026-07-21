@@ -29,10 +29,18 @@ def archive(entries: dict[str, bytes]) -> bytes:
 
 
 class FakeJobClient:
-    def __init__(self, *, artifacts=None, jobs=None, artifact_archive=b"") -> None:
+    def __init__(
+        self,
+        *,
+        artifacts=None,
+        jobs=None,
+        artifact_archive=b"",
+        artifact_archives=None,
+    ) -> None:
         self.artifacts = artifacts or []
         self.jobs = jobs or []
         self.artifact_archive = artifact_archive
+        self.artifact_archives = artifact_archives or {}
         self.token = "read-token"
 
     def get_json(self, path: str):
@@ -45,6 +53,9 @@ class FakeJobClient:
     def get_bytes(self, path: str, *, accept: str = "") -> bytes:
         del accept
         if "/actions/artifacts/" in path and path.endswith("/zip"):
+            artifact_id = int(path.split("/actions/artifacts/", 1)[1].split("/", 1)[0])
+            if artifact_id in self.artifact_archives:
+                return self.artifact_archives[artifact_id]
             return self.artifact_archive
         raise AssertionError(path)
 
@@ -226,6 +237,147 @@ class AuthoritySuiteTests(unittest.TestCase):
                 attestation_token=client.token,
                 directory=Path(tmpdir) / "case",
             )
+
+    def test_review_envelopes_require_exact_artifacts(self) -> None:
+        client = FakeJobClient(
+            artifacts=[
+                {"id": 9, "name": "release-review-anthropic", "expired": False},
+                {"id": 10, "name": "release-review-openai", "expired": False},
+            ],
+            artifact_archives={
+                9: archive({"review-anthropic.json": b'{"provider":"anthropic"}'}),
+                10: archive({"review-openai.json": b'{"provider":"openai"}'}),
+            },
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            directory = Path(tmpdir) / "case"
+            directory.mkdir()
+            paths = MODULE.write_review_envelopes(
+                client,
+                "Mindburn-Labs/lab",
+                7,
+                directory,
+            )
+        self.assertEqual([path.name for path in paths], [
+            "review-anthropic.json",
+            "review-openai.json",
+        ])
+
+    def test_deny_permit_replays_reviews_with_parent_kernel(self) -> None:
+        workflow_sha = "a" * 40
+        head_sha = "b" * 40
+        merge_sha = "c" * 40
+        authority = {
+            "schema": "mindburn.release-authority/v1",
+            "generation": 1,
+            "kernel_sha": "d" * 40,
+            "gate_profiles_sha256": "e" * 64,
+            "adversarial_corpus_sha256": "f" * 64,
+            "parent": None,
+        }
+        context = {
+            "repository": "Mindburn-Labs/lab",
+            "pull_request": 7,
+            "head_sha": head_sha,
+            "workflow_sha": workflow_sha,
+            "run_id": 9,
+            "run_attempt": 1,
+            "authority": authority,
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            directory = Path(tmpdir)
+            context_path = directory / "context.json"
+            context_bytes = json.dumps(context).encode("utf-8")
+            context_path.write_bytes(context_bytes)
+            permit_path = directory / "release-permit.json"
+            permit_path.write_text(
+                json.dumps(
+                    {
+                        "schema": "mindburn.release-permit/v2",
+                        "permit_id": "sha256:" + "1" * 64,
+                        "decision": "DENY",
+                        "repository": "Mindburn-Labs/lab",
+                        "pull_request": 7,
+                        "base_ref": "refs/heads/main",
+                        "base_sha": "2" * 40,
+                        "head_sha": head_sha,
+                        "merge_sha": merge_sha,
+                        "merge_tree_sha": "3" * 40,
+                        "workflow_repository": "Mindburn-Labs/.github",
+                        "workflow_path": ".github/workflows/ci.yml",
+                        "workflow_ref": "workflow-ref",
+                        "workflow_sha": workflow_sha,
+                        "run_id": 9,
+                        "run_attempt": 1,
+                        "issued_at": "2026-07-21T00:00:00Z",
+                        "authority": authority,
+                        "context_sha256": MODULE.hashlib.sha256(context_bytes).hexdigest(),
+                        "reviews": [
+                            {
+                                "reviewer": {
+                                    "provider": "anthropic",
+                                    "model": "claude-fable-5",
+                                },
+                                "verdict": "ALLOW",
+                                "response_sha256": "4" * 64,
+                                "blocking_findings": 0,
+                                "advisory_findings": 0,
+                            },
+                            {
+                                "reviewer": {
+                                    "provider": "openai",
+                                    "model": "gpt-5.6-sol",
+                                },
+                                "verdict": "DENY",
+                                "response_sha256": "5" * 64,
+                                "blocking_findings": 1,
+                                "advisory_findings": 0,
+                            },
+                        ],
+                        "reasons": [
+                            {
+                                "code": "BLOCKING_FINDING",
+                                "reviewer": "openai/gpt-5.6-sol",
+                                "detail": "blocking review",
+                            },
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            bundle_path = directory / "release-permit.attestation.json"
+            bundle_path.write_text("{}", encoding="utf-8")
+            review_paths = (
+                directory / "review-anthropic.json",
+                directory / "review-openai.json",
+            )
+            for path in review_paths:
+                path.write_text("{}", encoding="utf-8")
+            with (
+                mock.patch.object(MODULE, "verify_attestation"),
+                mock.patch.object(MODULE, "replay_permit_with_parent_kernel") as replay,
+            ):
+                MODULE.validate_deny_permit(
+                    permit_path,
+                    bundle_path,
+                    context_path,
+                    run={"id": 9, "run_attempt": 1},
+                    repository="Mindburn-Labs/lab",
+                    case={
+                        "id": "deny-review-replay",
+                        "pull_request": 7,
+                        "head_sha": head_sha,
+                    },
+                    workflow_sha=workflow_sha,
+                    authority=authority,
+                    attestation_token="observer-token",
+                    kernel_verifier=Path("/parent-kernel"),
+                    review_paths=review_paths,
+                )
+        replay.assert_called_once()
+        self.assertEqual(replay.call_args.args[0], Path("/parent-kernel"))
+        self.assertEqual(replay.call_args.args[3], review_paths)
+        self.assertEqual(replay.call_args.kwargs["expected"], "DENY")
 
 
 if __name__ == "__main__":

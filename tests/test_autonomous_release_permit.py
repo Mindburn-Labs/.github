@@ -505,6 +505,7 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertIn("copilot-requests: write", model_job)
         self.assertNotIn('prompt="$(<permit-input/review-prompt.txt)"', workflow)
         self.assertIn("needs.model-review.result == 'success'", workflow)
+        self.assertIn("needs.workflow-provenance.result == 'success'", workflow)
         self.assertIn("HELM_AUTHORITY_APPROVER_TOKEN", workflow)
         self.assertIn("permission-pull-requests: write", workflow)
         model_review = workflow[

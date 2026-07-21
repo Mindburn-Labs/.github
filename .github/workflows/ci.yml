@@ -405,10 +405,12 @@ jobs:
     if: >-
       github.event_name == 'pull_request' &&
       github.event.pull_request.draft == false &&
+      needs.workflow-provenance.result == 'success' &&
       needs.repository-gates.result == 'success' &&
       needs.prepare.result == 'success' &&
       needs.model-review.result == 'success'
     needs:
+      - workflow-provenance
       - repository-gates
       - prepare
       - model-review

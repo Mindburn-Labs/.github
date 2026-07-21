@@ -9,6 +9,7 @@ import io
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import time
 from typing import Any
@@ -52,6 +53,11 @@ PROVENANCE_ARTIFACT = "release-workflow-provenance"
 PROVENANCE_SCHEMA = "mindburn.release-workflow-provenance/v1"
 MAX_PROVENANCE_BYTES = 64 << 10
 MAX_PROVENANCE_BUNDLE_BYTES = 4 << 20
+MAX_REVIEW_BYTES = 2 << 20
+REVIEW_ARTIFACTS = (
+    ("release-review-anthropic", "review-anthropic.json"),
+    ("release-review-openai", "review-openai.json"),
+)
 
 
 def validate_trigger(trigger: dict[str, Any], contract: dict[str, Any]) -> dict[str, Any]:
@@ -96,6 +102,8 @@ def validate_deny_permit(
     workflow_sha: str,
     authority: dict[str, Any],
     attestation_token: str,
+    kernel_verifier: Path,
+    review_paths: tuple[Path, Path],
 ) -> dict[str, Any]:
     permit = load_json_file(permit_path, label=f"{case['id']} DENY permit")
     require_exact_keys(permit, required=set(PERMIT_KEYS), label="DENY permit")
@@ -195,6 +203,13 @@ def validate_deny_permit(
         workflow_sha=workflow_sha,
         source_sha=permit["merge_sha"],
         github_token=attestation_token,
+    )
+    replay_permit_with_parent_kernel(
+        kernel_verifier,
+        permit_path,
+        context_path,
+        review_paths,
+        expected="DENY",
     )
     return permit
 
@@ -352,6 +367,25 @@ def extract_workflow_provenance(archive: bytes) -> tuple[bytes, bytes]:
     return provenance, attestation
 
 
+def extract_review_envelope(archive: bytes, *, filename: str) -> bytes:
+    try:
+        with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
+            entries = bundle.infolist()
+            if len(entries) != 1 or entries[0].filename != filename:
+                raise PermitInputError(
+                    f"review artifact must contain exactly {filename}"
+                )
+            entry = entries[0]
+            if entry.is_dir() or entry.file_size <= 0 or entry.file_size > MAX_REVIEW_BYTES:
+                raise PermitInputError("review artifact exceeds the size limit")
+            review = bundle.read(entry)
+    except zipfile.BadZipFile as exc:
+        raise PermitInputError("review artifact is not a valid ZIP archive") from exc
+    if not review or len(review) > MAX_REVIEW_BYTES:
+        raise PermitInputError("review artifact exceeds the size limit")
+    return review
+
+
 def write_attested_case(
     client: GitHubReadClient,
     repository: str,
@@ -382,6 +416,69 @@ def write_attested_case(
     bundle_path.write_bytes(bundle_bytes)
     context_path.write_bytes(context_bytes)
     return permit_path, bundle_path, context_path
+
+
+def write_review_envelopes(
+    client: GitHubReadClient,
+    repository: str,
+    run_id: int,
+    directory: Path,
+) -> tuple[Path, Path]:
+    paths: list[Path] = []
+    for artifact_name, filename in REVIEW_ARTIFACTS:
+        artifact_id = artifact_for_run(client, repository, run_id, artifact_name)
+        if artifact_id is None:
+            raise PermitInputError(f"proof run is missing {artifact_name}")
+        review = extract_review_envelope(
+            client.get_bytes(
+                f"/repos/{repository}/actions/artifacts/{artifact_id}/zip",
+                accept="application/vnd.github+json",
+            ),
+            filename=filename,
+        )
+        path = directory / filename
+        path.write_bytes(review)
+        paths.append(path)
+    if len(paths) != 2:
+        raise PermitInputError("proof run did not yield the exact review quorum")
+    return paths[0], paths[1]
+
+
+def replay_permit_with_parent_kernel(
+    kernel_verifier: Path,
+    permit_path: Path,
+    context_path: Path,
+    review_paths: tuple[Path, Path],
+    *,
+    expected: str,
+) -> None:
+    if expected not in {"ALLOW", "DENY"}:
+        raise PermitInputError("parent Kernel replay has an invalid expected decision")
+    replay_path = permit_path.parent / "parent-kernel-replay.json"
+    command = [str(kernel_verifier), "--context", str(context_path)]
+    for review_path in review_paths:
+        command.extend(("--review", str(review_path)))
+    command.extend(("--output", str(replay_path)))
+    process = subprocess.run(
+        command,
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    expected_status = 0 if expected == "ALLOW" else 3
+    if process.returncode != expected_status:
+        detail = process.stderr.decode("utf-8", errors="replace").strip()
+        raise PermitInputError(
+            f"parent Kernel replay returned {process.returncode}, expected {expected_status}: {detail}"
+        )
+    if not replay_path.is_file():
+        raise PermitInputError("parent Kernel replay did not emit a permit")
+    replayed = load_json_file(replay_path, label="parent Kernel replay permit")
+    permit = load_json_file(permit_path, label="candidate permit")
+    if replayed != permit:
+        raise PermitInputError(
+            "candidate permit does not match the parent Kernel reduction of review envelopes"
+        )
 
 
 def candidate_runs(
@@ -453,6 +550,7 @@ def verify_case(
         run["id"],
         directory,
     )
+    review_paths = write_review_envelopes(client, repository, run["id"], directory)
     if expected == "ALLOW":
         permit = verify_candidate_permit(
             permit_path,
@@ -466,6 +564,13 @@ def verify_case(
             expected_authority=authority,
             kernel_verifier=args.kernel_verifier,
             attestation_token=client.token,
+        )
+        replay_permit_with_parent_kernel(
+            args.kernel_verifier,
+            permit_path,
+            context_path,
+            review_paths,
+            expected="ALLOW",
         )
         for source, name in (
             (permit_path, "canary-permit.json"),
@@ -484,6 +589,8 @@ def verify_case(
             workflow_sha=workflow_sha,
             authority=authority,
             attestation_token=client.token,
+            kernel_verifier=args.kernel_verifier,
+            review_paths=review_paths,
         )
     return {
         "id": case["id"],
