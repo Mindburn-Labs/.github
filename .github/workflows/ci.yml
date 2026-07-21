@@ -121,6 +121,13 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Set up pinned Kernel toolchain
+        if: ${{ github.repository == 'Mindburn-Labs/helm-ai-kernel' }}
+        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00
+        with:
+          go-version: "1.25.12"
+          cache-dependency-path: "target/**/go.sum"
+
       - name: Verify exact merge-parent binding
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}

@@ -40,6 +40,7 @@ class AutonomousReleaseGateTests(unittest.TestCase):
             {
                 "Mindburn-Labs/.github",
                 "Mindburn-Labs/contracts-autonomous-release-lab",
+                "Mindburn-Labs/helm-ai-kernel",
             },
         )
         self.assertEqual(
@@ -61,6 +62,27 @@ class AutonomousReleaseGateTests(unittest.TestCase):
         self.assertEqual(
             profiles["Mindburn-Labs/contracts-autonomous-release-lab"]["protected_files"],
             {},
+        )
+        kernel_profile = profiles["Mindburn-Labs/helm-ai-kernel"]
+        self.assertEqual(
+            kernel_profile["commands"],
+            [
+                ["make", "lint"],
+                ["make", "test"],
+                ["make", "build"],
+                ["make", "verify-fixtures"],
+                ["make", "verify-boundary"],
+                ["make", "crucible"],
+                ["go", "test", "./tests/conformance/..."],
+            ],
+        )
+        self.assertEqual(
+            set(kernel_profile["protected_files"]),
+            {"Makefile", "core/go.mod", "core/go.sum", "go.work"},
+        )
+        self.assertEqual(
+            set(kernel_profile["protected_trees"]),
+            {"protocols", "reference_packs", "schemas", "scripts", "tests", "tools"},
         )
         authority = json.loads(
             (ROOT / "config" / "autonomous-release-authority.json").read_text(

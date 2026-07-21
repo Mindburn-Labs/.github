@@ -597,6 +597,9 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertIn("ref: ${{ github.workflow_sha }}", workflow)
         self.assertIn("ref: ${{ github.sha }}", workflow)
         self.assertIn('--merge-sha "$MERGE_SHA"', workflow)
+        self.assertIn("name: Set up pinned Kernel toolchain", workflow)
+        self.assertIn("github.repository == 'Mindburn-Labs/helm-ai-kernel'", workflow)
+        self.assertIn('go-version: "1.25.12"', workflow)
         self.assertIn("persist-credentials: false", workflow)
 
 

@@ -22,7 +22,50 @@
         },
         "tests": {
           "exclude": [],
-          "sha256": "8883f9775ed37c720c6b5f19c4694c7e45fb16112bef2db45e7fc9cb4f7cd33a"
+          "sha256": "50d2ee63b42e8612ae78fc9389a9abdad0e1a4868646a483a6e924760e7bb67a"
+        }
+      }
+    },
+    "Mindburn-Labs/helm-ai-kernel": {
+      "commands": [
+        ["make", "lint"],
+        ["make", "test"],
+        ["make", "build"],
+        ["make", "verify-fixtures"],
+        ["make", "verify-boundary"],
+        ["make", "crucible"],
+        ["go", "test", "./tests/conformance/..."]
+      ],
+      "protected_files": {
+        "Makefile": "de44bb8c0cf9c269a21f2eaed46506cc246e947d04a1152a6356f11b64432048",
+        "core/go.mod": "ee4b305c831609942cb3938305cffb59d6b4b277ba4c5aefddb1e27c0e63a878",
+        "core/go.sum": "72555ae50df063217dd66d5babae7938f8f245e1af754bf87e914144ad9115cf",
+        "go.work": "259fa9b0f33ee1396d7a72b20c57d265f228eb29f1081c8836fe0a4b2ef04f6c"
+      },
+      "protected_trees": {
+        "protocols": {
+          "exclude": [],
+          "sha256": "9db98ff43049066a4f3c7f745803f503236b280cb92fa3abd023e3f3e50832d8"
+        },
+        "reference_packs": {
+          "exclude": [],
+          "sha256": "4a9859c40ee78da28a0dc8832f5cdb6857793b95ca6569c938386744edbb9daf"
+        },
+        "schemas": {
+          "exclude": [],
+          "sha256": "17161fb0cb61551f598e1f7bb82cd789bc7d8c76c78bbe20a584c78508ad8519"
+        },
+        "scripts": {
+          "exclude": [],
+          "sha256": "e17ae33d9b1c24babc9dc997ff75481ac376f874fcdbfb4d8c8cfd0adb8fec16"
+        },
+        "tests": {
+          "exclude": [],
+          "sha256": "7065d3e9b1163787b7b62c565afda25a3d3c53d64a42c02598f2665b3e574b58"
+        },
+        "tools": {
+          "exclude": [],
+          "sha256": "fc4b3d18622afa0c7d7fed3e7c87b91a51ee752821e9b85adc47f66eebb243e8"
         }
       }
     },
