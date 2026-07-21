@@ -129,8 +129,11 @@ jobs:
           WORKFLOW_PATH: .github/workflows/ci.yml
           WORKFLOW_REF: ${{ github.workflow_ref }}
           WORKFLOW_SHA: ${{ github.workflow_sha }}
-          ANTHROPIC_MODEL: claude-fable-5
-          OPENAI_MODEL: gpt-5.6-sol
+          # Must stay in sync with the model-review matrix below: prepare binds
+          # these into the immutable review input and the reducer matches each
+          # reviewer envelope against them. Changing one alone fails the permit.
+          ANTHROPIC_MODEL: claude-opus-4.8
+          OPENAI_MODEL: gpt-5.3-codex
           MAX_PATCH_BYTES: "524288"
           MAX_CHANGED_BLOB_BYTES: "8388608"
         run: |
@@ -177,9 +180,9 @@ jobs:
       matrix:
         include:
           - provider: anthropic
-            model: claude-fable-5
+            model: claude-opus-4.8
           - provider: openai
-            model: gpt-5.6-sol
+            model: gpt-5.3-codex
     steps:
       - name: Checkout exact GitHub merge commit for read-only context
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
