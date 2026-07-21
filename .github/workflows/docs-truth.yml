@@ -14,6 +14,16 @@ on:
 jobs:
   docs-truth:
     name: docs-truth
-    uses: ./.github/workflows/docs-truth-public.yml
+    # SHA-pinned to a merged commit, never `./`. On a `pull_request` run the
+    # caller and any `./`-resolved reusable workflow are both read from the PR's
+    # merge tree, so a local path would let a candidate branch rewrite the very
+    # workflow that verifies it — while `secrets:` below hands that rewritten
+    # workflow the org read token. Pinning loads the verifier from trusted
+    # history instead. Every other caller in the org already does this; `.github`
+    # was the last repo on the local path (HELM-198).
+    #
+    # Changing docs-truth-public.yml therefore takes two PRs: land the change,
+    # then bump this pin. That is the intended cost.
+    uses: Mindburn-Labs/.github/.github/workflows/docs-truth-public.yml@3ce0af631a00853274a42a016977083ff06b619f
     secrets:
-      MINDBURN_ORG_READ_TOKEN: ${{ secrets.PLATFORM_DESIGN_SYSTEM_REPO_READ_TOKEN }}
+      MINDBURN_ORG_READ_TOKEN: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}
