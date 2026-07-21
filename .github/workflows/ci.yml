@@ -30,6 +30,68 @@ jobs:
       - name: Validate repository contract and workspace truth
         run: REQUIRE_WORKSPACE_CONTEXT=0 make lint test
 
+  workflow-provenance:
+    name: Candidate workflow provenance
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == false }}
+    permissions:
+      contents: read
+      id-token: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout immutable attestation signer
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: Mindburn-Labs/.github
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+          path: policy
+
+      - name: Set up pinned attestation runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "24.15.0"
+          cache: npm
+          cache-dependency-path: policy/tools/offline-attest/package-lock.json
+
+      - name: Install integrity-locked offline attestation signer
+        run: npm ci --ignore-scripts --no-audit --no-fund --prefix policy/tools/offline-attest
+
+      - name: Bind exact candidate workflow execution
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MERGE_SHA: ${{ github.sha }}
+          WORKFLOW_PATH: .github/workflows/ci.yml
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg schema "mindburn.release-workflow-provenance/v1" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg workflow_path "$WORKFLOW_PATH" \
+            --arg workflow_sha "$WORKFLOW_SHA" \
+            --arg head_sha "$HEAD_SHA" \
+            --arg merge_sha "$MERGE_SHA" \
+            --argjson run_id "$GITHUB_RUN_ID" \
+            --argjson run_attempt "$GITHUB_RUN_ATTEMPT" \
+            '{schema: $schema, repository: $repository, workflow_path: $workflow_path,
+              workflow_sha: $workflow_sha, head_sha: $head_sha, merge_sha: $merge_sha,
+              run_id: $run_id, run_attempt: $run_attempt}' \
+            > release-workflow-provenance.json
+          node policy/tools/offline-attest/attest.mjs \
+            release-workflow-provenance.json \
+            release-workflow-provenance.attestation.json
+
+      - name: Upload signed workflow provenance
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-workflow-provenance
+          path: |
+            release-workflow-provenance.json
+            release-workflow-provenance.attestation.json
+          if-no-files-found: error
+          retention-days: 14
+
   repository-gates:
     name: Deterministic repository gates
     if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == false }}

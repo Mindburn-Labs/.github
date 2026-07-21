@@ -18,11 +18,11 @@
         },
         "scripts": {
           "exclude": [],
-          "sha256": "88f2818ebd4b081c3ac1abd8492a4ed476b0328420c801650293252ad1ec4d17"
+          "sha256": "c542784b2466083a1254bdcdd568d273daba330491f85f0770af8e6cfde09889"
         },
         "tests": {
           "exclude": [],
-          "sha256": "d4527d7c849dda8e4e51fd4bcbb867c81af7a075837a88bd08a554f4000bae36"
+          "sha256": "dfdf0c6eadfb111abfa93fe864887ff6f6ffd551d889f1f0490980448c60291d"
         }
       }
     },
