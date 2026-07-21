@@ -91,7 +91,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: Mindburn-Labs/dev-orchestration
-          ref: 3d8f07723dff90aaa83473a3e8134f6ae93d501b
+          ref: 4338b9ae6b76284aeee7a4cfe9f8d6ef9f101156
           path: workspace/dev-orchestration
           fetch-depth: 1
           persist-credentials: false
