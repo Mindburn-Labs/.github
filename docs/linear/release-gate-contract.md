@@ -30,6 +30,23 @@ Configure Linear Releases and workflow automation with these rules:
 4. `Done` is allowed only for issues included in a completed release or for
    non-release work with explicit source-owned completion evidence.
 
+## Machine Authority Boundary
+
+Linear is a delivery-record system. Its automations, linked evidence, release
+records, and status changes do **not** authorize a pull-request merge,
+deployment, or production release. The same boundary applies to a draft or
+green PR, CI, DCO, a human review, `/review`, `/ultrareview`, labels, identity,
+and commit trailers: they may be required evidence, but none is merge or
+release authority by itself.
+
+For a protected release path, workspace policy requires source-owned
+deterministic gates, permits from two independent providers, and an exact-head
+approval-only App interlock. This repository does not currently prove that
+those controls are live. Keep private and internal release paths on hold until
+their source and runtime receipts prove them. A release also requires its
+manifest/GitOps, immutable artifact, deployment, smoke, rollback, and
+EvidencePack evidence; Linear cannot substitute for any of those receipts.
+
 ## Release Note Minimum
 
 Each release note must include:
@@ -54,5 +71,7 @@ Each release note must include:
 
 - This document does not configure Linear by itself.
 - This repository is not release evidence.
+- Linear state, automation, and attached evidence never approve a protected
+  merge, deployment, or release.
 - Do not move production, security, or protected-boundary issues to `Done`
   based only on GitHub merge state.
