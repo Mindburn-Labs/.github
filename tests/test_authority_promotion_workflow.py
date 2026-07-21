@@ -52,6 +52,13 @@ class AuthorityPromotionWorkflowTests(unittest.TestCase):
         self.assertIn("verify_authority_promotion.py", workflow)
         self.assertIn("name: release-permit-input", workflow)
         self.assertIn("--trusted-context promotion/ratification-input/context.json", workflow)
+        verified_bundle = workflow[
+            workflow.index("name: Upload verified promotion bundle") : workflow.index(
+                "  stage:",
+            )
+        ]
+        self.assertIn("promotion/release-permit.attestation.json", verified_bundle)
+        self.assertIn("promotion/ratification-input/context.json", verified_bundle)
         self.assertIn("wait_for_authority_suite.py", workflow)
         self.assertIn("verify_control_plane.py", workflow)
         self.assertIn("--canary-context promotion/suite/canary-context.json", workflow)
@@ -81,7 +88,21 @@ class AuthorityPromotionWorkflowTests(unittest.TestCase):
         self.assertIn("Sign independent final promotion receipt", workflow)
         self.assertIn("needs.observe_final.result != 'success'", workflow)
         self.assertIn('current_main="$(gh api repos/Mindburn-Labs/.github/git/ref/heads/main', workflow)
-        self.assertIn('merge_args+=(--merge-sha "$expected_merge_sha")', workflow)
+        recovery = workflow[workflow.index("  recover:") :]
+        self.assertIn("PRE_ACTIVATION_OBSERVER_RESULT", recovery)
+        self.assertIn(
+            'if [[ "$PRE_ACTIVATION_OBSERVER_RESULT" != "success" ]]; then',
+            recovery,
+        )
+        self.assertIn(
+            "stable ruleset remains bound to the parent authority",
+            recovery,
+        )
+        self.assertIn('merge_args+=(--merge-sha "$expected_merge_sha")', recovery)
+        self.assertLess(
+            recovery.index('if [[ "$PRE_ACTIVATION_OBSERVER_RESULT" != "success" ]]; then'),
+            recovery.index('merge_args+=(--merge-sha "$expected_merge_sha")'),
+        )
         self.assertNotIn("path: candidate-kernel", workflow)
         self.assertNotIn("candidate-permit-verify", workflow)
 

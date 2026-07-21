@@ -209,6 +209,8 @@ jobs:
           name: verified-authority-promotion
           path: |
             promotion/release-permit.json
+            promotion/release-permit.attestation.json
+            promotion/ratification-input/context.json
             promotion/authority-promotion.json
             promotion/candidate-authority.json
             promotion/pull-request.json
@@ -957,12 +959,17 @@ jobs:
         env:
           CANDIDATE_REF: ${{ needs.verify-candidate.outputs.candidate_ref }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PRE_ACTIVATION_OBSERVER_RESULT: ${{ needs.observe_pre_activation.result }}
         run: |
           set -euo pipefail
           expected_merge_sha="$(jq -er '.merge_sha' promotion/release-permit.json)"
           current_main="$(gh api repos/Mindburn-Labs/.github/git/ref/heads/main --jq '.object.sha')"
           merge_args=()
           if [[ "$current_main" = "$expected_merge_sha" ]]; then
+            if [[ "$PRE_ACTIVATION_OBSERVER_RESULT" != "success" ]]; then
+              echo "::error::Pre-activation observer did not ALLOW; stable ruleset remains bound to the parent authority"
+              exit 1
+            fi
             merge_args+=(--merge-sha "$expected_merge_sha")
           elif [[ "$current_main" != "${{ needs.verify-candidate.outputs.parent_sha }}" ]]; then
             echo "::error::Main is outside the exact parent/merge recovery states"
