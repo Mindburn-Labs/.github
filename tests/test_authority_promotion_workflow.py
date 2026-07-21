@@ -103,6 +103,16 @@ class AuthorityPromotionWorkflowTests(unittest.TestCase):
             recovery.index('if [[ "$PRE_ACTIVATION_OBSERVER_RESULT" != "success" ]]; then'),
             recovery.index('merge_args+=(--merge-sha "$expected_merge_sha")'),
         )
+        rebind = workflow[workflow.index("  rebind:") : workflow.index("  observe_pre_activation:")]
+        self.assertLess(
+            rebind.index("Recheck live control plane before credential use"),
+            rebind.index("Mint short-lived ruleset-only promoter token"),
+        )
+        self.assertLess(
+            recovery.index("Recheck live control plane before credential use"),
+            recovery.index("Mint least-privilege short-lived promoter token"),
+        )
+        self.assertIn("promotion/control-plane-recovery.json", recovery)
         self.assertNotIn("path: candidate-kernel", workflow)
         self.assertNotIn("candidate-permit-verify", workflow)
 

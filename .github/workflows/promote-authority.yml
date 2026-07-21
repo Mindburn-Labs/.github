@@ -458,6 +458,16 @@ jobs:
           name: helm-authority-merge
           path: promotion
 
+      - name: Recheck live control plane before credential use
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/verify_control_plane.py \
+            --contract broker/config/autonomous-release-control-plane.json \
+            --adversarial-corpus broker/tests/fixtures/autonomous-release-adversarial.json \
+            --output promotion/control-plane-rebind.json
+
       - name: Mint short-lived ruleset-only promoter token
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
@@ -940,6 +950,16 @@ jobs:
           name: helm-authority-promotion-stage
           path: promotion
 
+      - name: Recheck live control plane before credential use
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 broker/scripts/verify_control_plane.py \
+            --contract broker/config/autonomous-release-control-plane.json \
+            --adversarial-corpus broker/tests/fixtures/autonomous-release-adversarial.json \
+            --output promotion/control-plane-recovery.json
+
       - name: Mint least-privilege short-lived promoter token
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
@@ -986,6 +1006,8 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: helm-authority-rollback
-          path: ruleset-rollback.json
+          path: |
+            ruleset-rollback.json
+            promotion/control-plane-recovery.json
           if-no-files-found: error
           retention-days: 90
