@@ -1,8 +1,8 @@
 ---
 organization: Mindburn-Labs
 schema_version: final-production-inventory-v1
-generated_at: '2026-07-14'
-generated_by: autonomous-release-permit live organization inventory refresh
+generated_at: '2026-07-16'
+generated_by: GitHub organization inventory reconciliation
 source_truth_priority:
 - source_code_and_route_registries
 - generated_contracts_and_sdks
@@ -12,8 +12,8 @@ source_truth_priority:
 - runbooks_and_architecture_docs
 - org_inventory
 inventory_summary:
-  total_repositories: 48
-  active_repositories: 47
+  total_repositories: 50
+  active_repositories: 49
   archived_repositories:
   - orggenome-compiler
   deleted_repositories:
@@ -21,6 +21,8 @@ inventory_summary:
   - platform-design-system
   public_repositories:
   - ".github"
+  - contracts-autonomous-release-canary
+  - contracts-autonomous-release-lab
   - helm-agent-integrations
   - helm-ai-kernel
   - homebrew-tap
@@ -33,9 +35,9 @@ inventory_summary:
 release_readiness:
   repository_inventory: verified
   production_promotion_allowed: false
-  reason: Repository existence is verified. Production sync remains disabled until
-    owner approvals, production apply evidence, and production smoke are recorded
-    for the current release-manifest generation.
+  reason: Repository existence is verified against the live GitHub organization inventory.
+    Production promotion remains disabled because the release candidate and required
+    cross-product evidence do not yet prove the HELM workstation scope.
 repositories:
 - name: ".github"
   visibility: public
@@ -48,7 +50,7 @@ repositories:
 - name: app-helm-console
   visibility: private
   archived: false
-  updated_at: '2026-07-13T11:40:47Z'
+  updated_at: '2026-07-16T17:46:04Z'
 - name: app-helm-docs
   visibility: private
   archived: false
@@ -56,7 +58,15 @@ repositories:
 - name: app-mindburn-web
   visibility: private
   archived: false
-  updated_at: '2026-07-13T23:18:57Z'
+  updated_at: '2026-07-15T11:55:42Z'
+- name: contracts-autonomous-release-canary
+  visibility: public
+  archived: false
+  updated_at: '2026-07-15T15:50:08Z'
+- name: contracts-autonomous-release-lab
+  visibility: public
+  archived: false
+  updated_at: '2026-07-14T13:05:45Z'
 - name: contracts-catalog
   visibility: private
   archived: false
@@ -64,7 +74,7 @@ repositories:
 - name: docs
   visibility: private
   archived: false
-  updated_at: '2026-07-13T23:44:22Z'
+  updated_at: '2026-07-16T17:44:43Z'
 - name: docs-engineering-handbook
   visibility: private
   archived: false
@@ -72,11 +82,11 @@ repositories:
 - name: docs_for_team
   visibility: internal
   archived: false
-  updated_at: '2026-07-13T23:46:49Z'
+  updated_at: '2026-07-16T17:49:08Z'
 - name: dev-orchestration
   visibility: private
   archived: false
-  updated_at: '2026-07-09T13:09:19Z'
+  updated_at: '2026-07-16T14:42:03Z'
 - name: gitops-apps
   visibility: private
   archived: false
@@ -84,19 +94,19 @@ repositories:
 - name: gitops-platform
   visibility: private
   archived: false
-  updated_at: '2026-07-13T09:47:29Z'
+  updated_at: '2026-07-16T01:50:45Z'
 - name: helm-agent-integrations
   visibility: public
   archived: false
-  updated_at: '2026-07-12T19:01:46Z'
+  updated_at: '2026-07-15T12:00:43Z'
 - name: helm-ai-enterprise
   visibility: private
   archived: false
-  updated_at: '2026-07-11T23:31:16Z'
+  updated_at: '2026-07-15T23:43:29Z'
 - name: helm-ai-kernel
   visibility: public
   archived: false
-  updated_at: '2026-07-13T12:10:03Z'
+  updated_at: '2026-07-16T13:43:43Z'
 - name: helm-compiler-lab
   visibility: private
   archived: false
@@ -104,7 +114,7 @@ repositories:
 - name: helm-desktop
   visibility: private
   archived: false
-  updated_at: '2026-07-13T11:27:13Z'
+  updated_at: '2026-07-16T15:17:05Z'
 - name: helm-rollout-evidence
   visibility: private
   archived: false
@@ -112,7 +122,7 @@ repositories:
 - name: homebrew-tap
   visibility: public
   archived: false
-  updated_at: '2026-07-08T12:20:36Z'
+  updated_at: '2026-07-14T15:10:43Z'
 - name: infra-clusters
   visibility: private
   archived: false
@@ -140,11 +150,11 @@ repositories:
 - name: integration-mindburn-platform
   visibility: private
   archived: false
-  updated_at: '2026-07-12T19:12:37Z'
+  updated_at: '2026-07-16T18:16:53Z'
 - name: mindburn-infra
   visibility: internal
   archived: false
-  updated_at: '2026-07-13T23:46:45Z'
+  updated_at: '2026-07-16T18:31:39Z'
 - name: ml-orggenome-compiler
   visibility: private
   archived: false
@@ -156,7 +166,7 @@ repositories:
 - name: pkg-mindburn-helm-ds
   visibility: private
   archived: false
-  updated_at: '2026-07-13T20:27:21Z'
+  updated_at: '2026-07-14T15:14:52Z'
 - name: pkg-mindburn-web-ds
   visibility: private
   archived: false
@@ -164,7 +174,7 @@ repositories:
 - name: platform-actions
   visibility: private
   archived: false
-  updated_at: '2026-07-12T18:46:33Z'
+  updated_at: '2026-07-16T15:58:52Z'
 - name: platform-agent-capabilities
   visibility: private
   archived: false
@@ -184,7 +194,7 @@ repositories:
 - name: platform-policies
   visibility: private
   archived: false
-  updated_at: '2026-07-02T00:36:59Z'
+  updated_at: '2026-07-16T15:15:42Z'
 - name: platform-templates
   visibility: private
   archived: false
@@ -200,19 +210,19 @@ repositories:
 - name: svc-agent-sandbox-runner
   visibility: private
   archived: false
-  updated_at: '2026-07-02T00:37:23Z'
+  updated_at: '2026-07-16T14:40:34Z'
 - name: svc-helm-certification
   visibility: private
   archived: false
-  updated_at: '2026-07-08T18:05:18Z'
+  updated_at: '2026-07-14T20:29:14Z'
 - name: svc-helm-control-plane
   visibility: private
   archived: false
-  updated_at: '2026-07-12T19:44:10Z'
+  updated_at: '2026-07-16T18:04:35Z'
 - name: svc-helm-data-plane
   visibility: private
   archived: false
-  updated_at: '2026-07-02T00:37:32Z'
+  updated_at: '2026-07-16T18:31:39Z'
 - name: svc-high-risk-loop-bridge
   visibility: private
   archived: false
@@ -224,7 +234,7 @@ repositories:
 - name: tempora
   visibility: private
   archived: false
-  updated_at: '2026-07-12T19:13:31Z'
+  updated_at: '2026-07-15T14:10:49Z'
 - name: worker-helm-launch-worker
   visibility: private
   archived: false

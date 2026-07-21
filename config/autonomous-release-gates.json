@@ -6,7 +6,7 @@
         ["make", "test"]
       ],
       "protected_files": {
-        "Makefile": "4559934af490cb54f61405c8471fca1e9d287ea5c719ff90192d33c1ec180925"
+        "Makefile": "3a10649c692fc084b0f029ce24b664ad35166911594ffce118bc40b01e6cbdbe"
       },
       "protected_trees": {
         "config": {
@@ -18,11 +18,11 @@
         },
         "scripts": {
           "exclude": [],
-          "sha256": "c542784b2466083a1254bdcdd568d273daba330491f85f0770af8e6cfde09889"
+          "sha256": "ebc923ec0b9c675bb1e0bc1a2f75c1b482b5c17453e17e98531f1f70129d2ccb"
         },
         "tests": {
           "exclude": [],
-          "sha256": "dfdf0c6eadfb111abfa93fe864887ff6f6ffd551d889f1f0490980448c60291d"
+          "sha256": "a6c23bf458e23793a46bebae334cf46a98d4a76b2028a96dfece819cc3056507"
         }
       }
     },

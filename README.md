@@ -55,6 +55,16 @@ Private/internal human approvals remain in place. This code-merge authority is
 not deployment, customer-production, billing, or migration authority; those
 effects require separate bounded permits and receipts.
 
+## Docs Truth Pre-Merge Contracts
+
+The central ledger may register a new Markdown file before its source PR merges by using this exact notes prefix:
+
+```text
+pre-merge docs-truth contract for Mindburn-Labs/REPO#PR@HEAD_SHA expires=YYYY-MM-DD; note
+```
+
+The reusable gate omits that row only when the PR is still open, its immutable head adds the exact file, the file is absent from the default branch, and the expiry is no more than seven days away. A moved or closed PR, malformed marker, unsafe path, mismatched repository, or unverifiable API response remains fail-closed.
+
 ## Validation
 
 ```bash
