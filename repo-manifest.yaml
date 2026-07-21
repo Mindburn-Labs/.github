@@ -1,7 +1,7 @@
 ---
 organization: Mindburn-Labs
 schema_version: final-production-inventory-v1
-generated_at: '2026-07-16'
+generated_at: '2026-07-22'
 generated_by: GitHub organization inventory reconciliation
 source_truth_priority:
 - source_code_and_route_registries
@@ -29,6 +29,7 @@ inventory_summary:
   internal_repositories:
   - docs_for_team
   - mindburn-infra
+  - platform-actions
   production_release_status: not_released
   production_release_source: integration-mindburn-platform/manifests/release-candidate.yaml
   production_release_evidence: integration-mindburn-platform/manifests/final-state-evidence.yaml
@@ -42,23 +43,27 @@ repositories:
 - name: ".github"
   visibility: public
   archived: false
-  updated_at: '2026-07-08T12:04:21Z'
+  updated_at: '2026-07-21T12:03:37Z'
 - name: app-developer-portal
   visibility: private
   archived: false
   updated_at: '2026-07-02T00:34:51Z'
+- name: app-helm-admin
+  visibility: private
+  archived: false
+  updated_at: '2026-07-20T13:36:49Z'
 - name: app-helm-console
   visibility: private
   archived: false
-  updated_at: '2026-07-16T17:46:04Z'
+  updated_at: '2026-07-21T02:00:26Z'
 - name: app-helm-docs
   visibility: private
   archived: false
-  updated_at: '2026-07-13T23:18:40Z'
+  updated_at: '2026-07-21T12:44:37Z'
 - name: app-mindburn-web
   visibility: private
   archived: false
-  updated_at: '2026-07-15T11:55:42Z'
+  updated_at: '2026-07-21T06:44:53Z'
 - name: contracts-autonomous-release-canary
   visibility: public
   archived: false
@@ -66,15 +71,19 @@ repositories:
 - name: contracts-autonomous-release-lab
   visibility: public
   archived: false
-  updated_at: '2026-07-14T13:05:45Z'
+  updated_at: '2026-07-20T20:21:09Z'
 - name: contracts-catalog
   visibility: private
   archived: false
-  updated_at: '2026-07-11T22:04:44Z'
+  updated_at: '2026-07-21T13:04:52Z'
+- name: dev-orchestration
+  visibility: private
+  archived: false
+  updated_at: '2026-07-21T08:14:15Z'
 - name: docs
   visibility: private
   archived: false
-  updated_at: '2026-07-16T17:44:43Z'
+  updated_at: '2026-07-21T13:37:12Z'
 - name: docs-engineering-handbook
   visibility: private
   archived: false
@@ -82,19 +91,15 @@ repositories:
 - name: docs_for_team
   visibility: internal
   archived: false
-  updated_at: '2026-07-16T17:49:08Z'
-- name: dev-orchestration
-  visibility: private
-  archived: false
-  updated_at: '2026-07-16T14:42:03Z'
+  updated_at: '2026-07-21T13:38:57Z'
 - name: gitops-apps
   visibility: private
   archived: false
-  updated_at: '2026-07-07T20:02:02Z'
+  updated_at: '2026-07-21T00:38:28Z'
 - name: gitops-platform
   visibility: private
   archived: false
-  updated_at: '2026-07-16T01:50:45Z'
+  updated_at: '2026-07-21T08:27:02Z'
 - name: helm-agent-integrations
   visibility: public
   archived: false
@@ -102,19 +107,19 @@ repositories:
 - name: helm-ai-enterprise
   visibility: private
   archived: false
-  updated_at: '2026-07-15T23:43:29Z'
+  updated_at: '2026-07-21T14:45:36Z'
 - name: helm-ai-kernel
   visibility: public
   archived: false
-  updated_at: '2026-07-16T13:43:43Z'
+  updated_at: '2026-07-21T12:32:45Z'
 - name: helm-compiler-lab
   visibility: private
   archived: false
-  updated_at: '2026-07-02T00:35:29Z'
+  updated_at: '2026-07-21T12:51:46Z'
 - name: helm-desktop
   visibility: private
   archived: false
-  updated_at: '2026-07-16T15:17:05Z'
+  updated_at: '2026-07-21T02:00:16Z'
 - name: helm-rollout-evidence
   visibility: private
   archived: false
@@ -122,43 +127,43 @@ repositories:
 - name: homebrew-tap
   visibility: public
   archived: false
-  updated_at: '2026-07-14T15:10:43Z'
+  updated_at: '2026-07-21T13:22:05Z'
 - name: infra-clusters
   visibility: private
   archived: false
-  updated_at: '2026-07-06T00:10:20Z'
+  updated_at: '2026-07-21T12:53:42Z'
 - name: infra-live
   visibility: private
   archived: false
-  updated_at: '2026-07-02T00:35:44Z'
+  updated_at: '2026-07-21T12:52:08Z'
 - name: infra-networking
   visibility: private
   archived: false
-  updated_at: '2026-07-06T00:37:06Z'
+  updated_at: '2026-07-21T12:53:37Z'
 - name: integration-agent-evals
   visibility: private
   archived: false
-  updated_at: '2026-07-12T18:19:42Z'
+  updated_at: '2026-07-16T20:09:24Z'
 - name: integration-ai-flows
   visibility: private
   archived: false
-  updated_at: '2026-07-02T00:36:01Z'
+  updated_at: '2026-07-21T12:53:55Z'
 - name: integration-helm
   visibility: private
   archived: false
-  updated_at: '2026-07-08T19:55:30Z'
+  updated_at: '2026-07-21T12:52:31Z'
 - name: integration-mindburn-platform
   visibility: private
   archived: false
-  updated_at: '2026-07-16T18:16:53Z'
+  updated_at: '2026-07-21T12:59:00Z'
 - name: mindburn-infra
   visibility: internal
   archived: false
-  updated_at: '2026-07-16T18:31:39Z'
+  updated_at: '2026-07-21T14:21:01Z'
 - name: ml-orggenome-compiler
   visibility: private
   archived: false
-  updated_at: '2026-07-02T00:36:18Z'
+  updated_at: '2026-07-21T12:56:03Z'
 - name: orggenome-compiler
   visibility: private
   archived: true
@@ -166,76 +171,72 @@ repositories:
 - name: pkg-mindburn-helm-ds
   visibility: private
   archived: false
-  updated_at: '2026-07-14T15:14:52Z'
+  updated_at: '2026-07-21T02:00:34Z'
 - name: pkg-mindburn-web-ds
   visibility: private
   archived: false
-  updated_at: '2026-07-02T00:36:29Z'
+  updated_at: '2026-07-20T20:20:18Z'
 - name: platform-actions
-  visibility: private
+  visibility: internal
   archived: false
-  updated_at: '2026-07-16T15:58:52Z'
+  updated_at: '2026-07-21T12:53:16Z'
 - name: platform-agent-capabilities
   visibility: private
   archived: false
-  updated_at: '2026-07-12T18:49:25Z'
+  updated_at: '2026-07-21T12:52:40Z'
 - name: platform-agent-substrate
   visibility: private
   archived: false
-  updated_at: '2026-07-12T18:50:36Z'
+  updated_at: '2026-07-21T12:52:31Z'
 - name: platform-mcp-registry
   visibility: private
   archived: false
-  updated_at: '2026-07-02T00:36:45Z'
+  updated_at: '2026-07-21T12:53:23Z'
 - name: platform-observability
   visibility: private
   archived: false
-  updated_at: '2026-07-02T00:36:57Z'
+  updated_at: '2026-07-21T12:54:28Z'
 - name: platform-policies
   visibility: private
   archived: false
-  updated_at: '2026-07-16T15:15:42Z'
+  updated_at: '2026-07-21T12:53:32Z'
 - name: platform-templates
   visibility: private
   archived: false
-  updated_at: '2026-07-02T00:37:03Z'
+  updated_at: '2026-07-21T12:54:48Z'
 - name: platform-terraform-modules
   visibility: private
   archived: false
-  updated_at: '2026-07-02T00:37:08Z'
+  updated_at: '2026-07-21T12:54:00Z'
 - name: svc-agent-control-plane
   visibility: private
   archived: false
-  updated_at: '2026-07-02T00:37:14Z'
+  updated_at: '2026-07-21T12:54:07Z'
 - name: svc-agent-sandbox-runner
   visibility: private
   archived: false
-  updated_at: '2026-07-16T14:40:34Z'
+  updated_at: '2026-07-21T12:53:41Z'
 - name: svc-helm-certification
   visibility: private
   archived: false
-  updated_at: '2026-07-14T20:29:14Z'
+  updated_at: '2026-07-21T12:55:02Z'
 - name: svc-helm-control-plane
   visibility: private
   archived: false
-  updated_at: '2026-07-16T18:04:35Z'
+  updated_at: '2026-07-21T13:38:36Z'
 - name: svc-helm-data-plane
   visibility: private
   archived: false
-  updated_at: '2026-07-16T18:31:39Z'
+  updated_at: '2026-07-21T14:20:54Z'
 - name: svc-high-risk-loop-bridge
   visibility: private
   archived: false
-  updated_at: '2026-07-02T00:37:37Z'
+  updated_at: '2026-07-21T12:53:40Z'
 - name: svc-orggenome-inference
   visibility: private
   archived: false
-  updated_at: '2026-07-08T15:02:04Z'
-- name: tempora
-  visibility: private
-  archived: false
-  updated_at: '2026-07-15T14:10:49Z'
+  updated_at: '2026-07-21T12:53:34Z'
 - name: worker-helm-launch-worker
   visibility: private
   archived: false
-  updated_at: '2026-07-02T00:37:47Z'
+  updated_at: '2026-07-21T12:55:57Z'
