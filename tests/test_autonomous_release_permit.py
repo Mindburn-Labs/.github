@@ -241,7 +241,7 @@ def prepare_args(
         anthropic_model="claude-fable-5",
         openai_model="gpt-5.6-sol",
         authority_manifest=ROOT / "config" / "autonomous-release-authority.json",
-        kernel_sha="83cc3eeb1cf512bed44b560254b11a342cee5b15",
+        kernel_sha="daa1316e09d88b136258fbc14d1b276af7f6324a",
         gate_profiles=ROOT / "config" / "autonomous-release-gates.json",
         adversarial_corpus=ROOT / "tests" / "fixtures" / "autonomous-release-adversarial.json",
         target_dir=repo,
@@ -268,8 +268,14 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertEqual(len(context["merge_tree_sha"]), 40)
         self.assertEqual(context["workflow_ref"], "refs/heads/main")
         self.assertEqual(context["schema"], "mindburn.release-permit-context/v2")
-        self.assertEqual(context["authority"]["generation"], 1)
-        self.assertIsNone(context["authority"]["parent"])
+        self.assertEqual(context["authority"]["generation"], 2)
+        self.assertEqual(
+            context["authority"]["parent"],
+            {
+                "generation": 1,
+                "workflow_sha": "b1f705679e95bcaf7addfd62db11be38716f2b9a",
+            },
+        )
         self.assertEqual(
             context["required_reviewers"],
             [
@@ -707,7 +713,7 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertEqual(workflow.count("= \"$EXPECTED_WORKFLOW_SHA\""), 2)
         self.assertEqual(workflow.count("= \"$GITHUB_RUN_ATTEMPT\""), 2)
         self.assertEqual(
-            workflow.count("ref: 83cc3eeb1cf512bed44b560254b11a342cee5b15"),
+            workflow.count("ref: daa1316e09d88b136258fbc14d1b276af7f6324a"),
             2,
         )
         self.assertIn("attestations: write", workflow)
