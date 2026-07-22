@@ -318,6 +318,31 @@ class AutonomousReleasePermitTests(unittest.TestCase):
             context = json.loads((output / "context.json").read_text(encoding="utf-8"))
         self.assertEqual(context["workflow_ref"], "refs/heads/authority@next")
 
+    def test_prepare_accepts_matching_workflow_sha_ref(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo, base, head, merge = build_repo(root)
+            output = root / "permit-input"
+            args = prepare_args(repo, base, head, merge, output)
+            args.workflow_ref = (
+                "Mindburn-Labs/.github/.github/workflows/ci.yml@" + args.workflow_sha
+            )
+            MODULE.prepare(args)
+
+            context = json.loads((output / "context.json").read_text(encoding="utf-8"))
+        self.assertEqual(context["workflow_ref"], args.workflow_sha)
+
+    def test_prepare_rejects_mismatched_workflow_sha_ref(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo, base, head, merge = build_repo(root)
+            args = prepare_args(repo, base, head, merge, root / "permit-input")
+            args.workflow_ref = (
+                "Mindburn-Labs/.github/.github/workflows/ci.yml@" + "4" * 40
+            )
+            with self.assertRaisesRegex(MODULE.PermitInputError, "must name a branch or tag ref"):
+                MODULE.prepare(args)
+
     def test_prepare_rejects_non_branch_workflow_ref(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

@@ -168,10 +168,12 @@ def parse_workflow_ref(
     return workflow_ref[len(source_prefix) :]
 
 
-def normalize_workflow_ref(ref: str) -> str:
-    if not (ref.startswith("refs/heads/") or ref.startswith("refs/tags/")):
-        raise PermitInputError("workflow_ref must name a branch or tag ref")
-    return ref
+def normalize_workflow_ref(ref: str, workflow_sha: str) -> str:
+    if ref == workflow_sha:
+        return ref
+    if ref.startswith(("refs/heads/", "refs/tags/")):
+        return ref
+    raise PermitInputError("workflow_ref must name a branch or tag ref or match workflow_sha")
 
 
 def prepare(args: argparse.Namespace) -> None:
@@ -210,7 +212,7 @@ def prepare(args: argparse.Namespace) -> None:
             "authority workflow cannot review its own head or merge commit",
         )
 
-    workflow_ref = normalize_workflow_ref(workflow_ref)
+    workflow_ref = normalize_workflow_ref(workflow_ref, args.workflow_sha)
 
     merge_parents = run_git(
         target,
