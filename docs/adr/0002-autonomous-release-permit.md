@@ -116,6 +116,11 @@ OpenAI. Activation therefore requires treating Copilot or Actions outage,
 misrouting, malformed output, and missing-provider evidence as fail-closed
 conditions rather than claiming infrastructure independence.
 
+Before the Copilot CLI is installed or invoked, each provider job asserts that
+its short-lived GitHub authentication context is nonempty. A missing context
+fails the job with `missing provider secrets in this run context`; it never
+becomes a skipped or successful review and no review envelope is emitted.
+
 ## Proposed no-human authority architecture
 
 The following describes an execution-capable design present in source, not

@@ -216,6 +216,16 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Require provider authentication context
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${GITHUB_TOKEN:-}" ]]; then
+            echo "::error::missing provider secrets in this run context"
+            exit 1
+          fi
+
       - name: Install dependency-closed integrity-checked Copilot CLI
         env:
           EXPECTED_INTEGRITY: sha512-4pyNKunm7GEzQZ+09Dwr4BwixJVNcQGBeqiZPKWBGxcSipwj90t8tidLYdNjgmXJoLerANhXZcY52wJW/HubEA==
