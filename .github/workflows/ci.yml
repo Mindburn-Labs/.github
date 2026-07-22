@@ -122,7 +122,7 @@ jobs:
           WORKFLOW_SHA: ${{ github.workflow_sha }}
           ANTHROPIC_MODEL: claude-fable-5
           OPENAI_MODEL: gpt-5.6-sol
-          KERNEL_SHA: 83cc3eeb1cf512bed44b560254b11a342cee5b15
+          KERNEL_SHA: daa1316e09d88b136258fbc14d1b276af7f6324a
           MAX_PATCH_BYTES: "524288"
           MAX_CHANGED_BLOB_BYTES: "8388608"
         run: |
