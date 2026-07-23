@@ -1,0 +1,11 @@
+{
+  "adversarial_corpus_sha256": "5488b02dd38d8a41cb329f0703538e75fe8917f85277edc111de6a87d77223f8",
+  "gate_profiles_sha256": "7226f61aba6e1eddbf14a4fee5328d986a4a343ca459b6b2ef4cf6c7307305f8",
+  "generation": 2,
+  "kernel_sha": "daa1316e09d88b136258fbc14d1b276af7f6324a",
+  "parent": {
+    "generation": 1,
+    "workflow_sha": "b1f705679e95bcaf7addfd62db11be38716f2b9a"
+  },
+  "schema": "mindburn.release-authority/v1"
+}
