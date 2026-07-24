@@ -1,0 +1,2 @@
+# Local HELM runtime state and key material must not be tracked in this repository.
+/data/
