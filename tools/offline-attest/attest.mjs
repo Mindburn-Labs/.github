@@ -66,8 +66,8 @@ const parsedWorkflowRef = parseWorkflowRef(workflowRef);
 if (!parsedWorkflowRef) {
   fail("GITHUB_WORKFLOW_REF does not identify a GitHub Actions workflow");
 }
-const workflowRepository = parsedWorkflowRef?.repository;
-const workflowPath = parsedWorkflowRef?.path;
+const workflowRepository = parsedWorkflowRef.repository;
+const workflowPath = parsedWorkflowRef.path;
 const sourceRef = requiredEnvironment("GITHUB_REF");
 const sourceSha = requiredEnvironment("GITHUB_SHA");
 const statement = {

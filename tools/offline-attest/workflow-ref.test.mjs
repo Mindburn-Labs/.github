@@ -79,6 +79,35 @@ test("parses @ in both the filename and the branch name", () => {
   });
 });
 
+test("parses a SHA-pinned workflow identity", () => {
+  const result = parseWorkflowRef(
+    "Mindburn-Labs/.github/.github/workflows/ci.yml@c585fc546d398c183f71bf5b4f66fa2d90c57e35",
+  );
+  assert.deepEqual(result, {
+    repository: "Mindburn-Labs/.github",
+    path: ".github/workflows/ci.yml",
+    ref: "c585fc546d398c183f71bf5b4f66fa2d90c57e35",
+  });
+});
+
+test("parses @ in the filename with a SHA-pinned identity", () => {
+  const result = parseWorkflowRef(
+    "Mindburn-Labs/.github/.github/workflows/ci@v2.yml@c585fc546d398c183f71bf5b4f66fa2d90c57e35",
+  );
+  assert.deepEqual(result, {
+    repository: "Mindburn-Labs/.github",
+    path: ".github/workflows/ci@v2.yml",
+    ref: "c585fc546d398c183f71bf5b4f66fa2d90c57e35",
+  });
+});
+
+test("rejects an empty workflow filename", () => {
+  assert.equal(
+    parseWorkflowRef("Mindburn-Labs/.github/.github/workflows/@refs/heads/main"),
+    null,
+  );
+});
+
 test("rejects a ref without the fully-qualified refs/ prefix", () => {
   assert.equal(
     parseWorkflowRef(

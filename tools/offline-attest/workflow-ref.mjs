@@ -9,12 +9,18 @@
 // the workflow path and corrupting provenance metadata.
 //
 // Workflow *filenames* may also legally contain "@" (they cannot contain
-// "/"), so the first "@" after the marker is ambiguous too. The only
-// unambiguous anchor is the "@refs/" boundary: GITHUB_WORKFLOW_REF always
-// carries a fully-qualified ref ("refs/heads/...", "refs/tags/...",
-// "refs/pull/..."), and "@refs/" cannot occur inside a slash-free filename.
-// The separator is therefore the first "@refs/" after the marker.
+// "/"), so neither the first nor the last "@" is a safe separator by
+// itself. The workflow identity after the separator has exactly two legal
+// shapes: a fully-qualified ref ("refs/heads/...", "refs/tags/...",
+// "refs/pull/...") or an immutable 40-hex commit SHA (reusable workflows
+// and this estate's own ruleset-pinned permit invocations). A slash-free
+// filename can produce neither shape as the full remainder of the string,
+// so the separator is the first "@" after the marker whose remainder
+// matches one of them.
 export const WORKFLOW_REF_MARKER = "/.github/workflows/";
+
+const REF_SUFFIX = /^refs\/.+$/;
+const SHA_SUFFIX = /^[0-9a-f]{40}$/;
 
 /**
  * Parses a GITHUB_WORKFLOW_REF value into its repository, workflow path,
@@ -23,16 +29,24 @@ export const WORKFLOW_REF_MARKER = "/.github/workflows/";
  * @param {string} workflowRef
  * @returns {{ repository: string, path: string, ref: string } | null}
  *   `null` when `workflowRef` does not identify a GitHub Actions workflow
- *   (no `/.github/workflows/` marker, or no "@refs/" ref boundary after
- *   the marker).
+ *   (no `/.github/workflows/` marker, empty workflow filename, or no "@"
+ *   after the marker followed by a fully-qualified ref or 40-hex SHA).
  */
 export function parseWorkflowRef(workflowRef) {
   const markerIndex = workflowRef.indexOf(WORKFLOW_REF_MARKER);
-  const separatorIndex =
-    markerIndex === -1
-      ? -1
-      : workflowRef.indexOf("@refs/", markerIndex + WORKFLOW_REF_MARKER.length);
-  if (markerIndex <= 0 || separatorIndex === -1) {
+  if (markerIndex <= 0) {
+    return null;
+  }
+  const filenameStart = markerIndex + WORKFLOW_REF_MARKER.length;
+  let separatorIndex = workflowRef.indexOf("@", filenameStart);
+  while (separatorIndex !== -1) {
+    const remainder = workflowRef.slice(separatorIndex + 1);
+    if (REF_SUFFIX.test(remainder) || SHA_SUFFIX.test(remainder)) {
+      break;
+    }
+    separatorIndex = workflowRef.indexOf("@", separatorIndex + 1);
+  }
+  if (separatorIndex === -1 || separatorIndex === filenameStart) {
     return null;
   }
   return {
