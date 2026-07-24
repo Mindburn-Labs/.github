@@ -10,6 +10,8 @@ import {
   TSAWitness,
 } from "@sigstore/sign";
 
+import { parseWorkflowRef } from "./workflow-ref.mjs";
+
 const MAX_SUBJECT_BYTES = 2 * 1024 * 1024;
 const INTOTO_PAYLOAD_TYPE = "application/vnd.in-toto+json";
 const SLSA_PREDICATE_TYPE = "https://slsa.dev/provenance/v1";
@@ -60,14 +62,12 @@ const digest = createHash("sha256").update(subject).digest("hex");
 const serverUrl = requiredEnvironment("GITHUB_SERVER_URL");
 const repository = requiredEnvironment("GITHUB_REPOSITORY");
 const workflowRef = requiredEnvironment("GITHUB_WORKFLOW_REF");
-const workflowSeparator = workflowRef.lastIndexOf("@");
-const workflowMarker = "/.github/workflows/";
-const workflowMarkerIndex = workflowRef.indexOf(workflowMarker);
-if (workflowMarkerIndex <= 0 || workflowSeparator <= workflowMarkerIndex + 1) {
+const parsedWorkflowRef = parseWorkflowRef(workflowRef);
+if (!parsedWorkflowRef) {
   fail("GITHUB_WORKFLOW_REF does not identify a GitHub Actions workflow");
 }
-const workflowRepository = workflowRef.slice(0, workflowMarkerIndex);
-const workflowPath = workflowRef.slice(workflowMarkerIndex + 1, workflowSeparator);
+const workflowRepository = parsedWorkflowRef.repository;
+const workflowPath = parsedWorkflowRef.path;
 const sourceRef = requiredEnvironment("GITHUB_REF");
 const sourceSha = requiredEnvironment("GITHUB_SHA");
 const statement = {
