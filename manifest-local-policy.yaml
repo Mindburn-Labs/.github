@@ -4,6 +4,14 @@ aliases:
     reason: local checkout uses explicit alias
 
 manifest_only:
+  app-helm-admin:
+    reason: active HELM operator-review dashboard is not checked out in the canonical workspace
+    owner: repo-maintainers
+    expires: 2026-08-21
+  contracts-autonomous-release-canary:
+    reason: disposable public HELM autonomous-release interlock canary is not checked out in the canonical workspace
+    owner: repo-maintainers
+    expires: 2026-08-21
   helm-rollout-evidence:
     reason: release evidence repo not checked out locally
     owner: release-platform
