@@ -56,3 +56,34 @@ test("returns null when the marker starts at position 0 (no repository segment)"
     null,
   );
 });
+
+test("parses a workflow filename containing @", () => {
+  const result = parseWorkflowRef(
+    "Mindburn-Labs/.github/.github/workflows/ci@nightly.yml@refs/heads/main",
+  );
+  assert.deepEqual(result, {
+    repository: "Mindburn-Labs/.github",
+    path: ".github/workflows/ci@nightly.yml",
+    ref: "refs/heads/main",
+  });
+});
+
+test("parses @ in both the filename and the branch name", () => {
+  const result = parseWorkflowRef(
+    "Mindburn-Labs/.github/.github/workflows/ci@nightly.yml@refs/heads/release@2026",
+  );
+  assert.deepEqual(result, {
+    repository: "Mindburn-Labs/.github",
+    path: ".github/workflows/ci@nightly.yml",
+    ref: "refs/heads/release@2026",
+  });
+});
+
+test("rejects a ref without the fully-qualified refs/ prefix", () => {
+  assert.equal(
+    parseWorkflowRef(
+      "Mindburn-Labs/.github/.github/workflows/ci.yml@main",
+    ),
+    null,
+  );
+});
