@@ -243,8 +243,7 @@ def prepare_args(
         run_id=101,
         run_attempt=1,
         issued_at="2026-07-14T10:00:00Z",
-        anthropic_model="claude-fable-5",
-        openai_model="gpt-5.6-sol",
+        reviewer=["google/gemini-3-flash", "openai/gpt-5-mini"],
         authority_manifest=ROOT / "config" / "autonomous-release-authority.json",
         kernel_sha="daa1316e09d88b136258fbc14d1b276af7f6324a",
         gate_profiles=ROOT / "config" / "autonomous-release-gates.json",
@@ -285,8 +284,8 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertEqual(
             context["required_reviewers"],
             [
-                {"provider": "anthropic", "model": "claude-fable-5"},
-                {"provider": "openai", "model": "gpt-5.6-sol"},
+                {"provider": "google", "model": "gemini-3-flash"},
+                {"provider": "openai", "model": "gpt-5-mini"},
             ],
         )
         self.assertIn("+head", patch)
@@ -315,12 +314,13 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         # ...and the elision is declared in both places, never silent.
         self.assertIn("DECLARED ELISIONS", patch)
         self.assertIn("generated.index", patch)
-        records = context["elided_derived_paths"]
-        self.assertEqual(len(records), 1)
-        self.assertEqual(records[0]["path"], "generated.index")
-        self.assertEqual(len(records[0]["post_image_sha256"]), 64)
-        self.assertEqual(records[0]["lines_added"], 200)
-        self.assertGreater(records[0]["post_image_bytes"], 0)
+        # The declaration lives in the patch, carrying the withheld post-image hash.
+        stub = [line for line in patch.splitlines() if "generated.index" in line and "withheld" in line]
+        self.assertEqual(len(stub), 1)
+        self.assertIn("+200/-0 lines", stub[0])
+        self.assertRegex(stub[0], r"sha256 [0-9a-f]{64}")
+        # It must NOT go in context.json: the verifier rejects unknown context keys.
+        self.assertNotIn("elided_derived_paths", context)
 
     def test_prepare_elision_shrinks_the_patch(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -346,7 +346,7 @@ class AutonomousReleasePermitTests(unittest.TestCase):
             output = root / "permit-input"
             context = json.loads((output / "context.json").read_text(encoding="utf-8"))
             patch = (output / "patch.diff").read_text(encoding="utf-8")
-        self.assertEqual(context["elided_derived_paths"], [])
+        self.assertNotIn("elided_derived_paths", context)
         self.assertNotIn("DECLARED ELISIONS", patch)
         self.assertIn("+head", patch)
 
@@ -518,8 +518,8 @@ class AutonomousReleasePermitTests(unittest.TestCase):
                 argparse.Namespace(
                     context=permit_input / "context.json",
                     raw=raw,
-                    provider="anthropic",
-                    model="claude-fable-5",
+                    provider="google",
+                    model="gemini-3-flash",
                     output=output,
                     max_response_bytes=1_048_576,
                 ),
