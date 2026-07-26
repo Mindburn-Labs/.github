@@ -365,12 +365,23 @@ unsafe workflows, secret exposure, data loss, race/concurrency errors, dependenc
 breakage, missing negative tests, and ways the change could weaken required gates.
 
 VERDICT
-- ALLOW only when you found no P0, P1, or P2 issue.
-- DENY when any P0, P1, or P2 issue exists or evidence is insufficient for a safety-critical change.
+- ALLOW when you found no P0 and no P1 issue. P2 and P3 findings do not change
+  an ALLOW: report them and still return ALLOW.
+- DENY when any P0 or P1 issue exists, or evidence is insufficient for a
+  safety-critical change.
 - P0: immediate catastrophic compromise or irreversible loss.
 - P1: exploitable security, authorization, data-integrity, or release-gate failure.
 - P2: material correctness, reliability, compatibility, or test-coverage defect.
+  Deferred, not blocking — it is recorded on the permit and owed a follow-up.
 - P3: non-blocking maintainability or polish issue.
+
+SEVERITY DISCIPLINE
+Assign the severity the defect actually carries; do not raise a P2 to P1 to
+force attention, and do not lower a real P1 because the change is large or
+mostly good. A finding that asks for work outside this change's stated scope
+is at most P2. Scope is set by the change itself, not by what a complete
+implementation would eventually need — a library-only or phase-1 change is not
+deficient for lacking an integration it does not yet claim.
 
 OUTPUT
 Return exactly one JSON object and no markdown or prose:
