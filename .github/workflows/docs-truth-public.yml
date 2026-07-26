@@ -33,6 +33,7 @@ on:
 
 jobs:
   docs-truth:
+    timeout-minutes: 20
     name: docs-truth
     runs-on: ubuntu-latest
     steps:
