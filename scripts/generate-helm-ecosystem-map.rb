@@ -351,7 +351,7 @@ def render_markdown(state)
   lines.concat markdown_table(
     ["If you are working on...", "Start here"],
     [
-      ["HELM product strategy, Company Builder, Company OS, Network, or design-partner reuse", "`docs/ai/helm-ai2027-economy-and-growth-strategy.md`, then its 2026-07-24 extension `docs/superpowers/specs/2026-07-24-double-ai-native-company-formation-design.md` (AI-native formation-doubling mission, VOC metric), then `docs/architecture/source-truth.md`"],
+      ["HELM product strategy, Company Builder, Company OS, Network, or design-partner reuse", "`docs/ai/helm-ai2027-economy-and-growth-strategy.md`, its 2026-07-24 extension `docs/superpowers/specs/2026-07-24-double-ai-native-company-formation-design.md` (AI-native formation-doubling mission, VOC metric), and the 2026-07-26 VOC measurement contract `docs/superpowers/specs/2026-07-26-voc-measurement-contract.md`, then `docs/architecture/source-truth.md`"],
       ["Kernel verdicts, receipts, EvidencePacks, conformance", "`helm-ai-kernel`"],
       ["Paid HELM AI Enterprise backend/product logic", "`helm-ai-enterprise`, then `svc-helm-control-plane`"],
       ["Console UX", "Future React console repo; backend truth from `svc-helm-control-plane`"],
