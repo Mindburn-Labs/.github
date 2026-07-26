@@ -367,6 +367,28 @@ jobs:
               echo "Reason codes:"
               jq -r '.reasons[]? | "- " + .code + " [" + (.reviewer // "quorum") + "]"' release-permit.json
             } >> "$GITHUB_STEP_SUMMARY"
+
+            # Also emit the verdict into the job log. The step summary and the
+            # uploaded artifact are the only places this used to appear, so a
+            # denial read as the single line "denied or could not be verified"
+            # and the reason codes could be recovered only by downloading the
+            # artifact zip. This gate blocks merges; its reason must be legible
+            # where people look first.
+            # .detail carries reviewer-model prose. Collapse newlines so one
+            # reason is one line, and refuse to let any of it begin a line with
+            # "::" — Actions parses those as workflow commands, so unfiltered
+            # model output would be an injection sink into this run.
+            echo "::group::HELM autonomous release permit"
+            {
+              jq -r '"decision: " + .decision, "permit_id: " + .permit_id' release-permit.json
+              jq -r '.reviews[]? | "reviewer " + .reviewer.provider + "/" + .reviewer.model
+                     + ": " + .verdict
+                     + " (blocking=" + (.blocking_findings|tostring)
+                     + " advisory=" + (.advisory_findings|tostring) + ")"' release-permit.json
+              jq -r '.reasons[]? | "reason: " + .code + " [" + (.reviewer // "quorum") + "]"
+                     + (if .detail then " - " + (.detail | gsub("[\\r\\n\\t]+"; " ")) else "" end)' release-permit.json
+            } | sed 's/^/  /'
+            echo "::endgroup::"
           fi
           if [[ "$verifier_status" -ne 0 ]]; then
             echo "::error::HELM autonomous release permit denied or could not be verified"
