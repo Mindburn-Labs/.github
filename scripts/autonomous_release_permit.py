@@ -315,10 +315,18 @@ def prepare(args: argparse.Namespace) -> None:
     # files in the same patch. Sending it to a metered model on every push buys
     # nothing.
     #
-    # Silently shrinking what a security reviewer sees would be a hole, so each
-    # elision is declared twice: as a stub inside patch.diff, and as an entry in
-    # context.json, which is covered by context_sha256 and therefore bound into
-    # the permit. A reviewer that disagrees with an elision can deny on it.
+    # Silently shrinking what a security reviewer sees would be a hole, so every
+    # elision is declared in patch.diff itself, with the post-image SHA256 of what
+    # was withheld. A reviewer that disagrees with an elision can deny on it.
+    #
+    # The declaration deliberately does NOT go in context.json: the verifier's
+    # requireKeys(context, ..., optional=nil) rejects any key it does not know, so
+    # adding one there would fail every permit until the kernel verifier and the
+    # pinned authority.kernel_sha were bumped in lockstep. The declaration
+    # therefore carries exactly the trust level of the patch it describes — which
+    # is the same artifact-chain binding (run_id, run_attempt, workflow_sha) that
+    # protects every other byte the reviewer reads. Binding it to context_sha256
+    # is strictly better and is the follow-up, gated on that verifier change.
     elide = sorted(set(args.elide_derived))
     for path in elide:
         if path != path.strip() or path.startswith("/") or ".." in path.split("/"):
@@ -410,9 +418,6 @@ def prepare(args: argparse.Namespace) -> None:
             {"provider": "anthropic", "model": args.anthropic_model},
             {"provider": "openai", "model": args.openai_model},
         ],
-        # Bound into context_sha256, so an elision cannot be added after the fact
-        # without invalidating the permit.
-        "elided_derived_paths": elided_records,
     }
     (output / "context.json").write_text(
         json.dumps(context, indent=2, sort_keys=True) + "\n",
