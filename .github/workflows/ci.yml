@@ -125,6 +125,18 @@ jobs:
           KERNEL_SHA: daa1316e09d88b136258fbc14d1b276af7f6324a
           MAX_PATCH_BYTES: "524288"
           MAX_CHANGED_BLOB_BYTES: "8388608"
+          # --elide-derived below withholds the BODY of generated artifacts from
+          # the review patch while declaring each one, with its post-image
+          # SHA256, to the reviewer. It lives here, in the SHA-pinned workflow
+          # repository, and deliberately not in a file the pull request can edit:
+          # a list the PR controls would let a change add its own path and hide
+          # itself. Paths absent from a given repository are ignored.
+          #
+          # tools/boundary/protected.manifest is a sorted SHA256 index of the
+          # kernel's protected surface, regenerated and byte-compared by
+          # `make verify-boundary` in the same run. It was 78KB of the 106KB in
+          # one pull request and carries nothing a reviewer can act on: its
+          # content is a function of the other files in the same patch.
         run: |
           set -euo pipefail
           python3 policy/scripts/autonomous_release_permit.py prepare \
@@ -150,7 +162,8 @@ jobs:
             --target-dir target \
             --output-dir permit-input \
             --max-patch-bytes "$MAX_PATCH_BYTES" \
-            --max-changed-blob-bytes "$MAX_CHANGED_BLOB_BYTES"
+            --max-changed-blob-bytes "$MAX_CHANGED_BLOB_BYTES" \
+            --elide-derived tools/boundary/protected.manifest
 
       - name: Upload immutable review input
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
