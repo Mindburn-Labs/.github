@@ -748,7 +748,7 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertIn("raw-anthropic-attempt-1.txt", outcome["artifacts"])
         self.assertNotIn("raw-anthropic-attempt-2.txt", outcome["artifacts"])
 
-    def test_workflow_keeps_model_jobs_read_only_and_pinned(self) -> None:
+    def test_workflow_keeps_candidate_pr_lanes_unprivileged_and_pinned(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8",
         )
@@ -765,7 +765,8 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         signer_lock = (ROOT / "tools" / "offline-attest" / "package-lock.json").read_text(
             encoding="utf-8",
         )
-        self.assertIn("copilot-requests: write", workflow)
+        self.assertNotIn("\non:\n  pull_request:", workflow)
+        self.assertNotIn("copilot-requests: write", workflow)
         self.assertNotIn("pull_request_target", workflow)
         self.assertNotIn("cancel-in-progress", workflow)
         self.assertIn("run_copilot_model_review.sh", workflow)
@@ -807,8 +808,8 @@ class AutonomousReleasePermitTests(unittest.TestCase):
             workflow.count("ref: daa1316e09d88b136258fbc14d1b276af7f6324a"),
             2,
         )
-        self.assertIn("attestations: write", workflow)
-        self.assertIn("id-token: write", workflow)
+        self.assertNotIn("attestations: write", workflow)
+        self.assertNotIn("id-token: write", workflow)
         self.assertNotIn("uses: actions/attest@", workflow)
         self.assertIn("npm ci --ignore-scripts", workflow)
         self.assertIn("policy/tools/offline-attest/attest.mjs", workflow)

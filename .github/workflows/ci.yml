@@ -1,13 +1,9 @@
 name: HELM Autonomous Release Permit
 
 on:
-  pull_request:
-    types:
-      - opened
-      - reopened
-      - synchronize
-      - ready_for_review
-      - edited
+  # P0 containment: candidate PRs must not receive model-review, OIDC, or
+  # attestation authority. HELM-198 must replace this with an unprivileged
+  # static PR lane plus an immutable trusted broker before it is restored.
   push:
     branches:
       - main
@@ -178,7 +174,6 @@ jobs:
     needs: prepare
     permissions:
       contents: read
-      copilot-requests: write
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -297,9 +292,7 @@ jobs:
       - prepare
       - model-review
     permissions:
-      attestations: write
       contents: read
-      id-token: write
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
