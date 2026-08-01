@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -182,8 +184,25 @@ def build_repo(root: Path, change_kind: str = "text") -> tuple[Path, str, str, s
     subprocess.run(["git", "-C", str(repo), "init", "-b", "main"], check=True)
     subprocess.run(["git", "-C", str(repo), "config", "user.name", "Permit Test"], check=True)
     subprocess.run(["git", "-C", str(repo), "config", "user.email", "permit@example.test"], check=True)
-    (repo / "example.txt").write_text("base\n", encoding="utf-8")
-    subprocess.run(["git", "-C", str(repo), "add", "example.txt"], check=True)
+    if change_kind == "long-json-hunk":
+        quality_gates = repo / "scripts" / "ci" / "quality-gates.json"
+        quality_gates.parent.mkdir(parents=True)
+        quality_gates.write_text(
+            json.dumps(
+                {
+                    "gates": [
+                        {"id": f"gate-{index}", "command": "make test"}
+                        for index in range(200)
+                    ]
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    else:
+        (repo / "example.txt").write_text("base\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
     subprocess.run(["git", "-C", str(repo), "commit", "-m", "base"], check=True)
     base = git(repo, "rev-parse", "HEAD")
     subprocess.run(["git", "-C", str(repo), "checkout", "-b", "feature"], check=True)
@@ -209,6 +228,11 @@ def build_repo(root: Path, change_kind: str = "text") -> tuple[Path, str, str, s
             '{"verdict":"ALLOW","findings":[]}\n',
             encoding="utf-8",
         )
+    elif change_kind == "long-json-hunk":
+        quality_gates = repo / "scripts" / "ci" / "quality-gates.json"
+        gates = json.loads(quality_gates.read_text(encoding="utf-8"))
+        gates["gates"][100]["command"] = "cd core && make test"
+        quality_gates.write_text(json.dumps(gates, indent=2) + "\n", encoding="utf-8")
     else:
         raise ValueError(f"unsupported test change kind: {change_kind}")
     subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
@@ -292,9 +316,29 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertIn("+head", patch)
         self.assertNotIn("+head", prompt)
         self.assertIn("Inspect it in chunks", prompt)
+        self.assertIn("patch-manifest.json", prompt)
         self.assertIn("zero authorization weight", prompt)
         self.assertIn("The governing workflow is Mindburn-Labs/.github/", prompt)
         self.assertIn("exact pinned reducer source and tests", prompt)
+
+    def test_prepare_certifies_long_json_hunk_lengths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo, base, head, merge = build_repo(root, change_kind="long-json-hunk")
+            output = root / "permit-input"
+            MODULE.prepare(prepare_args(repo, base, head, merge, output))
+            patch = (output / "patch.diff").read_text(encoding="utf-8")
+            manifest = json.loads((output / "patch-manifest.json").read_text(encoding="utf-8"))
+
+        match = re.search(r"^@@ -(\d+),(\d+) \+(\d+),(\d+) @@$", patch, re.MULTILINE)
+        self.assertIsNotNone(match)
+        body = patch[match.end() :].splitlines()
+        old_lines = sum(line.startswith((" ", "-")) for line in body)
+        new_lines = sum(line.startswith((" ", "+")) for line in body)
+        self.assertEqual(manifest["schema"], "mindburn.release-review-patch/v1")
+        self.assertEqual(manifest["patch_sha256"], hashlib.sha256(patch.encode()).hexdigest())
+        self.assertEqual(manifest["patch_bytes"], len(patch.encode()))
+        self.assertEqual(manifest["hunks"], [{"old_lines": old_lines, "new_lines": new_lines}])
 
     def test_prepare_elides_declared_derived_artifact(self) -> None:
         """The body goes; the declaration, hash and line counts stay."""
