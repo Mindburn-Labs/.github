@@ -35,6 +35,8 @@ jobs:
     if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == false }}
     permissions:
       contents: read
+    outputs:
+      resolved_base_sha: ${{ steps.merge-parent-binding.outputs.resolved_base_sha }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -60,17 +62,41 @@ jobs:
           node-version: "22"
 
       - name: Verify exact merge-parent binding
+        id: merge-parent-binding
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PAYLOAD_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           MERGE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          test "$(git -C target rev-parse HEAD)" = "$MERGE_SHA"
+          if [[ "$(git -C target rev-parse HEAD)" != "$MERGE_SHA" ]]; then
+            echo "::error::checkout is not the ephemeral merge commit ($MERGE_SHA)"
+            exit 1
+          fi
           read -r first_parent second_parent extra_parent < <(git -C target show -s --format='%P' "$MERGE_SHA")
-          test -z "${extra_parent:-}"
-          test "$first_parent" = "$BASE_SHA"
-          test "$second_parent" = "$HEAD_SHA"
+          if [[ -n "${extra_parent:-}" ]]; then
+            echo "::error::merge commit $MERGE_SHA has more than two parents; refusing"
+            exit 1
+          fi
+          if [[ "$second_parent" != "$HEAD_SHA" ]]; then
+            echo "::error::merge second parent $second_parent is not the pull request head $HEAD_SHA"
+            exit 1
+          fi
+
+          # GitHub can rebuild the ephemeral merge against a newer base after
+          # the event payload is captured. Bind to the resolved first parent,
+          # but require that it is genuine history of the named base branch.
+          git -C target fetch --no-tags --quiet origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          live_base="$(git -C target rev-parse "refs/remotes/origin/${BASE_REF}")"
+          if ! git -C target merge-base --is-ancestor "$first_parent" "$live_base"; then
+            echo "::error::merge first parent $first_parent is not an ancestor of ${BASE_REF} ($live_base) — the merge was not built on the base branch"
+            exit 1
+          fi
+          if [[ "$first_parent" != "$PAYLOAD_BASE_SHA" ]]; then
+            echo "::notice::base advanced since the webhook payload (payload=$PAYLOAD_BASE_SHA resolved=$first_parent); binding the permit to the resolved base"
+          fi
+          echo "resolved_base_sha=$first_parent" >> "$GITHUB_OUTPUT"
 
       - name: Run required repository gates
         env:
@@ -111,7 +137,7 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           PULL_REQUEST: ${{ github.event.pull_request.number }}
           BASE_REF: refs/heads/${{ github.event.pull_request.base.ref }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_SHA: ${{ needs.repository-gates.outputs.resolved_base_sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           MERGE_SHA: ${{ github.sha }}
           RUN_ID: ${{ github.run_id }}
@@ -369,9 +395,21 @@ jobs:
             --context permit-input/context.json \
             "${review_args[@]}" \
             --output release-permit.json \
-            > permit-output.json
+            > permit-output.json 2> permit-verify.stderr
           verifier_status=$?
           set -e
+
+          if [[ ! -f release-permit.json ]]; then
+            echo "::group::permit verifier failure"
+            echo "  exit status: $verifier_status"
+            echo "  stderr:"
+            sed 's/^/    /; s/^\( *\)::/\1(escaped) ::/' permit-verify.stderr || true
+            echo "  stdout:"
+            sed 's/^/    /; s/^\( *\)::/\1(escaped) ::/' permit-output.json || true
+            echo "::endgroup::"
+            echo "::error::HELM release permit could not be produced (verifier exit $verifier_status). This is a gate failure, not a review denial — do not change the pull request in response to it."
+            exit 1
+          fi
 
           if [[ -f release-permit.json ]]; then
             {
@@ -403,8 +441,15 @@ jobs:
             } | sed 's/^/  /'
             echo "::endgroup::"
           fi
+
+          decision="$(jq -r '.decision // "unknown"' release-permit.json)"
+          reason_count="$(jq -r '[.reasons[]?] | length' release-permit.json)"
           if [[ "$verifier_status" -ne 0 ]]; then
-            echo "::error::HELM autonomous release permit denied or could not be verified"
+            if [[ "$reason_count" -eq 0 ]]; then
+              echo "::error::HELM release permit returned '$decision' with zero reason codes — the gate cannot explain its own verdict. Treat as a gate defect and escalate; do not re-run expecting a different result."
+            else
+              echo "::error::HELM release permit denied ($decision) — see the reason codes above."
+            fi
             exit 1
           fi
 

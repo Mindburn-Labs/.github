@@ -897,6 +897,20 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertIn("--merge-sha \"$MERGE_SHA\"", workflow)
         self.assertIn("persist-credentials: false", workflow)
 
+    def test_workflow_resolves_base_and_distinguishes_verifier_failures(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8",
+        )
+        self.assertIn("resolved_base_sha: ${{ steps.merge-parent-binding.outputs.resolved_base_sha }}", workflow)
+        self.assertIn('merge-base --is-ancestor "$first_parent" "$live_base"', workflow)
+        self.assertIn('echo "resolved_base_sha=$first_parent" >> "$GITHUB_OUTPUT"', workflow)
+        self.assertIn("BASE_SHA: ${{ needs.repository-gates.outputs.resolved_base_sha }}", workflow)
+        self.assertNotIn("\n          BASE_SHA: ${{ github.event.pull_request.base.sha }}", workflow)
+        self.assertIn("> permit-output.json 2> permit-verify.stderr", workflow)
+        self.assertIn("if [[ ! -f release-permit.json ]]", workflow)
+        self.assertIn("This is a gate failure, not a review denial", workflow)
+        self.assertIn("with zero reason codes", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()
