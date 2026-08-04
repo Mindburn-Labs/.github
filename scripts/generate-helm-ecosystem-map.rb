@@ -18,6 +18,7 @@ ESTATE_INVENTORY_PATH = File.join(WORKSPACE_ROOT, "production-readiness", "estat
 MIGRATION_INDEX_PATH = File.join(WORKSPACE_ROOT, "production-readiness", "estate", "migration-index.json")
 TEAM_DOC_PATH = File.join(WORKSPACE_ROOT, "docs_for_team", "docs", "onboarding", "helm-ecosystem-directory-map.md")
 ROOT_DOC_PATH = File.join(WORKSPACE_ROOT, "docs", "architecture", "helm-ecosystem-directory-map.md")
+HANDBOOK_DOC_PATH = File.join(WORKSPACE_ROOT, "docs-engineering-handbook", "docs", "architecture", "helm-ecosystem-directory-map.md")
 ROUTING_DOC_PATH = File.join(WORKSPACE_ROOT, "docs_for_team", "docs", "onboarding", "helm-task-routing.md")
 
 OPTIONS = {
@@ -102,7 +103,7 @@ def group_for(name)
   case name
   when ".github"
     "GitHub Metadata"
-  when "app-developer-portal", "app-helm-console", "app-mindburn-web"
+  when "app-developer-portal", "app-helm-console", "app-helm-docs", "app-mindburn-web"
     "Frontend / User Surfaces"
   when "app-docs-platform", "platform-design-system"
     "Archived UI / Design"
@@ -142,12 +143,23 @@ def local_checkout_for(name, local_dirs, aliases)
   "no"
 end
 
+# Canon v1.1 D-17 naming: estate snapshots may still carry legacy
+# commercial-surface names; always render the canon name with the legacy alias.
+D17_SYSTEM_NAMES = {
+  "Paid HELM AI Enterprise" => 'HELM AI OS (legacy name "Paid HELM AI Enterprise")',
+  "Paid HELM AI" => 'HELM Cloud (legacy name "Paid HELM AI")'
+}.freeze
+
+def d17_system(name)
+  D17_SYSTEM_NAMES.fetch(name, name)
+end
+
 def strict_classification(name, estate_entry)
   return "manifest-only; local estate entry absent" unless estate_entry
 
   kind = estate_entry["kind"]
   domain = estate_entry["domain"]
-  system = estate_entry["system"]
+  system = d17_system(estate_entry["system"])
   lifecycle = estate_entry["lifecycle_state"]
   "`#{kind}`; #{domain} / #{system}; lifecycle `#{lifecycle}`"
 end
@@ -156,7 +168,7 @@ def manifest_classification(repo, estate_entry)
   return strict_classification(repo.fetch("name"), estate_entry) unless repo["archived"] == true
 
   if estate_entry
-    "`archived_repo`; #{estate_entry["domain"]} / #{estate_entry["system"]}; lifecycle `archived`"
+    "`archived_repo`; #{estate_entry["domain"]} / #{d17_system(estate_entry["system"])}; lifecycle `archived`"
   else
     "`archived_repo`; manifest archived"
   end
@@ -179,7 +191,7 @@ end
 def local_classification(name, estate_entry, compat_policy, deleted_names)
   if deleted_names.include?(name)
     if estate_entry
-      return "`deleted_repo_local_snapshot`; #{estate_entry["domain"]} / #{estate_entry["system"]}; lifecycle `deleted`"
+      return "`deleted_repo_local_snapshot`; #{estate_entry["domain"]} / #{d17_system(estate_entry["system"])}; lifecycle `deleted`"
     end
     return "`deleted_repo_local_snapshot`; local snapshot of deleted GitHub repo"
   end
@@ -315,6 +327,7 @@ def render_markdown(state)
   lines << "- Code, route registries, schemas, generated contracts, release manifests, and GitOps evidence outrank prose docs."
   lines << "- UI code is never an authorization boundary."
   lines << "- RLM output is advisory evidence only; it does not verify HELM behavior by itself."
+  lines << "- HELM is the only Mindburn Labs product. Company Builder, Company OS, and HELM Network are product motions inside HELM; pilot work becomes reusable HELM blueprints and evidence."
   lines << "- Local `*-wt-*` directories are task checkout directories by naming convention, not separate products or canonical repos."
   lines << "- Compatibility/local-only directories are not GitHub repository truth unless they appear in `.github-repo/repo-manifest.yaml`."
   lines << ""
@@ -351,12 +364,12 @@ def render_markdown(state)
   lines.concat markdown_table(
     ["If you are working on...", "Start here"],
     [
-      ["HELM product strategy, Company Builder, Company OS, Network, or design-partner reuse", "`docs/ai/helm-ai2027-economy-and-growth-strategy.md`, its 2026-07-24 extension `docs/superpowers/specs/2026-07-24-double-ai-native-company-formation-design.md` (AI-native formation-doubling mission, VOC metric), and the 2026-07-26 VOC measurement contract `docs/superpowers/specs/2026-07-26-voc-measurement-contract.md`, then `docs/architecture/source-truth.md`"],
+      ["HELM product strategy, Company Builder, Company OS, Network, or pilot roles (canon §6.1.2: Artheris — designated HELM Cloud pilot, Building, scope unsigned; MS Realty and IronWrap — blueprint tracks; Tempora — arms-length evidence source)", "strategy canon `docs/ai/mindburn-labs-vision-paper.md` (v1.1; the former AI-2027 strategy and its 2026-07-24 extension are superseded — see their banners), then `docs/architecture/source-truth.md`"],
       ["Kernel verdicts, receipts, EvidencePacks, conformance", "`helm-ai-kernel`"],
-      ["Paid HELM AI Enterprise backend/product logic", "`helm-ai-enterprise`, then `svc-helm-control-plane`"],
-      ["Console UX", "Future React console repo; backend truth from `svc-helm-control-plane`"],
-      ["Public docs", "Future website/docs React repo plus headless contract docs"],
-      ["Public marketing site", "Future website/docs React repo"],
+      ['HELM AI OS (legacy name "Paid HELM AI Enterprise") backend/product logic', "`helm-ai-enterprise`, then `svc-helm-control-plane`"],
+      ["Console UX", "`app-helm-console`; backend truth from `svc-helm-control-plane`"],
+      ["Public docs", "`app-helm-docs`; source content and claims remain governed by their owning repos"],
+      ["Public marketing site", "`app-mindburn-web`; public claims remain evidence-gated"],
       ["Connector contracts or packs", "`helm-ai-enterprise`, `contracts-catalog`, `svc-helm-certification`, `integration-helm`"],
       ["Production release state", "`integration-mindburn-platform`, `gitops-apps`, `gitops-platform`"],
       ["Infrastructure/server access", "`mindburn-infra`, `docs_for_team`"],
@@ -457,7 +470,7 @@ def validate_state!(state, markdown)
 end
 
 def write_outputs(markdown)
-  [TEAM_DOC_PATH, ROOT_DOC_PATH].each do |path|
+  [TEAM_DOC_PATH, ROOT_DOC_PATH, HANDBOOK_DOC_PATH].each do |path|
     FileUtils.mkdir_p(File.dirname(path))
     File.write(path, markdown)
   end
@@ -471,12 +484,14 @@ if options[:write]
   write_outputs(markdown)
   puts "Wrote #{TEAM_DOC_PATH}"
   puts "Wrote #{ROOT_DOC_PATH}"
+  puts "Wrote #{HANDBOOK_DOC_PATH}"
 end
 
 if options[:check]
   expected = {
     TEAM_DOC_PATH => markdown,
-    ROOT_DOC_PATH => markdown
+    ROOT_DOC_PATH => markdown,
+    HANDBOOK_DOC_PATH => markdown
   }
   stale = expected.filter_map do |path, content|
     if !File.exist?(path)
@@ -496,7 +511,7 @@ if options[:json]
     "manifest_repositories" => state.fetch(:manifest_repos).count,
     "local_directories" => state.fetch(:local_dirs).count,
     "migration_entries" => state.fetch(:migration_entries).count,
-    "outputs" => [TEAM_DOC_PATH, ROOT_DOC_PATH]
+    "outputs" => [TEAM_DOC_PATH, ROOT_DOC_PATH, HANDBOOK_DOC_PATH]
   }
   puts JSON.pretty_generate(summary)
 end
