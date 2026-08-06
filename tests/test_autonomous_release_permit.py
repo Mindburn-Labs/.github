@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -182,8 +184,25 @@ def build_repo(root: Path, change_kind: str = "text") -> tuple[Path, str, str, s
     subprocess.run(["git", "-C", str(repo), "init", "-b", "main"], check=True)
     subprocess.run(["git", "-C", str(repo), "config", "user.name", "Permit Test"], check=True)
     subprocess.run(["git", "-C", str(repo), "config", "user.email", "permit@example.test"], check=True)
-    (repo / "example.txt").write_text("base\n", encoding="utf-8")
-    subprocess.run(["git", "-C", str(repo), "add", "example.txt"], check=True)
+    if change_kind == "long-json-hunk":
+        quality_gates = repo / "scripts" / "ci" / "quality-gates.json"
+        quality_gates.parent.mkdir(parents=True)
+        quality_gates.write_text(
+            json.dumps(
+                {
+                    "gates": [
+                        {"id": f"gate-{index}", "command": "make test"}
+                        for index in range(200)
+                    ]
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    else:
+        (repo / "example.txt").write_text("base\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
     subprocess.run(["git", "-C", str(repo), "commit", "-m", "base"], check=True)
     base = git(repo, "rev-parse", "HEAD")
     subprocess.run(["git", "-C", str(repo), "checkout", "-b", "feature"], check=True)
@@ -209,6 +228,11 @@ def build_repo(root: Path, change_kind: str = "text") -> tuple[Path, str, str, s
             '{"verdict":"ALLOW","findings":[]}\n',
             encoding="utf-8",
         )
+    elif change_kind == "long-json-hunk":
+        quality_gates = repo / "scripts" / "ci" / "quality-gates.json"
+        gates = json.loads(quality_gates.read_text(encoding="utf-8"))
+        gates["gates"][100]["command"] = "cd core && make test"
+        quality_gates.write_text(json.dumps(gates, indent=2) + "\n", encoding="utf-8")
     else:
         raise ValueError(f"unsupported test change kind: {change_kind}")
     subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
@@ -292,9 +316,29 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertIn("+head", patch)
         self.assertNotIn("+head", prompt)
         self.assertIn("Inspect it in chunks", prompt)
+        self.assertIn("patch-manifest.json", prompt)
         self.assertIn("zero authorization weight", prompt)
         self.assertIn("The governing workflow is Mindburn-Labs/.github/", prompt)
         self.assertIn("exact pinned reducer source and tests", prompt)
+
+    def test_prepare_certifies_long_json_hunk_lengths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            repo, base, head, merge = build_repo(root, change_kind="long-json-hunk")
+            output = root / "permit-input"
+            MODULE.prepare(prepare_args(repo, base, head, merge, output))
+            patch = (output / "patch.diff").read_text(encoding="utf-8")
+            manifest = json.loads((output / "patch-manifest.json").read_text(encoding="utf-8"))
+
+        match = re.search(r"^@@ -(\d+),(\d+) \+(\d+),(\d+) @@$", patch, re.MULTILINE)
+        self.assertIsNotNone(match)
+        body = patch[match.end() :].splitlines()
+        old_lines = sum(line.startswith((" ", "-")) for line in body)
+        new_lines = sum(line.startswith((" ", "+")) for line in body)
+        self.assertEqual(manifest["schema"], "mindburn.release-review-patch/v1")
+        self.assertEqual(manifest["patch_sha256"], hashlib.sha256(patch.encode()).hexdigest())
+        self.assertEqual(manifest["patch_bytes"], len(patch.encode()))
+        self.assertEqual(manifest["hunks"], [{"old_lines": old_lines, "new_lines": new_lines}])
 
     def test_prepare_elides_declared_derived_artifact(self) -> None:
         """The body goes; the declaration, hash and line counts stay."""
@@ -748,97 +792,25 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertIn("raw-anthropic-attempt-1.txt", outcome["artifacts"])
         self.assertNotIn("raw-anthropic-attempt-2.txt", outcome["artifacts"])
 
-    def test_workflow_keeps_candidate_pr_lanes_unprivileged_and_pinned(self) -> None:
+    def test_workflow_keeps_pr_gates_deterministic_and_unprivileged(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8",
         )
-        helper = (ROOT / "scripts" / "autonomous_release_permit.py").read_text(
-            encoding="utf-8",
-        )
-        review_runner = (ROOT / "scripts" / "run_copilot_model_review.sh").read_text(
-            encoding="utf-8",
-        )
-        model_review_job = workflow.split("\n  model-review:", 1)[1].split("\n  permit:", 1)[0]
-        signer = (ROOT / "tools" / "offline-attest" / "attest.mjs").read_text(
-            encoding="utf-8",
-        )
-        signer_lock = (ROOT / "tools" / "offline-attest" / "package-lock.json").read_text(
-            encoding="utf-8",
-        )
-        self.assertNotIn("\non:\n  pull_request:", workflow)
-        self.assertNotIn("copilot-requests: write", workflow)
+        self.assertIn("\non:\n  pull_request:\n", workflow)
+        self.assertIn("name: HELM Deterministic Repository Gates", workflow)
+        self.assertIn("name: Deterministic repository gates", workflow)
+        self.assertIn("permissions: {}", workflow)
         self.assertNotIn("pull_request_target", workflow)
-        self.assertNotIn("cancel-in-progress", workflow)
-        self.assertIn("run_copilot_model_review.sh", workflow)
-        self.assertIn("timeout-minutes: 30", model_review_job)
-        self.assertIn("--available-tools=view", review_runner)
-        self.assertNotIn("--available-tools=read", review_runner)
-        self.assertIn("--allow-tool=read", review_runner)
-        self.assertIn('--add-dir="$permit_input_dir"', review_runner)
-        self.assertIn('--add-dir="$verifier_source_dir"', review_runner)
-        for denied_tool in ("shell", "write", "url", "memory"):
-            self.assertIn(f"--deny-tool={denied_tool}", review_runner)
-        self.assertIn("--no-custom-instructions", review_runner)
-        self.assertIn("--disable-builtin-mcps", review_runner)
-        self.assertIn("--no-remote-export", review_runner)
-        self.assertIn("--disallow-temp-dir", review_runner)
-        self.assertIn("COPILOT_CACHE_HOME", review_runner)
-        self.assertIn("--kill-after=30s", review_runner)
-        self.assertIn("@github/copilot-linux-x64@1.0.70", workflow)
-        self.assertIn(
-            "sha512-4pyNKunm7GEzQZ+09Dwr4BwixJVNcQGBeqiZPKWBGxcSipwj90t8tidLYdNjgmXJoLerANhXZcY52wJW/HubEA==",
-            workflow,
-        )
-        self.assertNotIn("npm install --global", workflow)
-        self.assertNotIn('path: target\n', workflow[workflow.index("model-review:"):])
-        self.assertNotIn('prompt="$(<permit-input/review-prompt.txt)"', workflow)
-        self.assertIn("No target checkout or network context is available", helper)
-        self.assertIn("name: HELM Autonomous Release Permit", workflow)
-        self.assertIn("name: local-validation", workflow)
-        self.assertIn("push:\n    branches:\n      - main", workflow)
-        self.assertIn("repository: Mindburn-Labs/.github", workflow)
-        self.assertNotIn("repository: Mindburn-Labs/platform-actions", workflow)
-        self.assertIn("ref: ${{ github.workflow_sha }}", workflow)
-        self.assertIn("WORKFLOW_REF: ${{ github.workflow_ref }}", workflow)
-        self.assertNotIn("WORKFLOW_REF: refs/heads/", workflow)
-        self.assertEqual(workflow.count("name: Verify current authority generation"), 2)
-        self.assertEqual(workflow.count("= \"$EXPECTED_WORKFLOW_SHA\""), 2)
-        self.assertEqual(workflow.count("= \"$GITHUB_RUN_ATTEMPT\""), 2)
-        self.assertEqual(
-            workflow.count("ref: daa1316e09d88b136258fbc14d1b276af7f6324a"),
-            2,
-        )
-        self.assertNotIn("attestations: write", workflow)
-        self.assertNotIn("id-token: write", workflow)
-        self.assertNotIn("uses: actions/attest@", workflow)
-        self.assertIn("npm ci --ignore-scripts", workflow)
-        self.assertIn("policy/tools/offline-attest/attest.mjs", workflow)
-        self.assertIn("release-permit.attestation.json", workflow)
-        self.assertIn("new DSSEBundleBuilder", signer)
-        self.assertIn('new CIContextProvider("sigstore")', signer)
-        self.assertIn('"@sigstore/sign": "5.0.0"', signer_lock)
-        self.assertNotIn("@actions/attest", signer_lock)
-        self.assertIn("config/autonomous-release-authority.json", workflow)
-        self.assertIn("tests/fixtures/autonomous-release-adversarial.json", workflow)
-        self.assertIn("path: verifier-source", workflow)
-        self.assertIn("core/pkg/releasepermit", workflow)
-        self.assertIn("core/cmd/release-permit-verify", workflow)
-        self.assertIn("Exactly two review envelopes are required", workflow)
-        self.assertIn("exact distinct-provider quorum", workflow)
-        self.assertIn("returned an empty response", review_runner)
-        self.assertIn("autonomous_release_permit.py", review_runner)
-        self.assertIn("--output-format=json", review_runner)
-        self.assertIn("--transport-format copilot-jsonl", review_runner)
-        self.assertIn("for transport_attempt in 1 2; do", review_runner)
-        self.assertIn('attempt_copilot_home="$COPILOT_HOME/attempt-$transport_attempt"', review_runner)
-        self.assertIn("exhausted bounded transport retries", review_runner)
-        self.assertIn("Return exactly one complete JSON object", review_runner)
-        self.assertIn("name: Upload non-authoritative provider diagnostic", workflow)
-        self.assertIn("name: release-diagnostic-${{ matrix.provider }}", workflow)
-        self.assertIn("raw-${{ matrix.provider }}-attempt-*.txt", workflow)
-        self.assertIn("stderr-${{ matrix.provider }}-attempt-*.txt", workflow)
-        self.assertIn("if: ${{ always() }}", workflow)
-        self.assertIn("retention-days: 1", workflow)
+        for forbidden in (
+            "\n  prepare:",
+            "\n  model-review:",
+            "\n  permit:",
+            "copilot-requests: write",
+            "attestations: write",
+            "id-token: write",
+            "run_copilot_model_review.sh",
+        ):
+            self.assertNotIn(forbidden, workflow)
 
     def test_workflow_requires_deterministic_repository_gates(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
@@ -851,8 +823,18 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertIn('--repository "$GITHUB_REPOSITORY"', workflow)
         self.assertIn("ref: ${{ github.workflow_sha }}", workflow)
         self.assertIn("ref: ${{ github.sha }}", workflow)
-        self.assertIn("--merge-sha \"$MERGE_SHA\"", workflow)
+        self.assertIn('rev-parse HEAD)" != "$MERGE_SHA"', workflow)
+        self.assertIn('"$second_parent" != "$HEAD_SHA"', workflow)
         self.assertIn("persist-credentials: false", workflow)
+
+    def test_workflow_binds_the_ephemeral_merge_to_real_base_history(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8",
+        )
+        self.assertIn('merge-base --is-ancestor "$first_parent" "$live_base"', workflow)
+        self.assertIn("PAYLOAD_BASE_SHA", workflow)
+        self.assertIn("HEAD_SHA", workflow)
+        self.assertNotIn("resolved_base_sha", workflow)
 
 
 if __name__ == "__main__":

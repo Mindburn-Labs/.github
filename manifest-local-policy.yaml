@@ -20,3 +20,7 @@ manifest_only:
     reason: archived 2026-06-10; split into ml-orggenome-compiler + svc-orggenome-inference; local checkout removed
     owner: ml-platform
     expires: 2027-06-30
+  tempora:
+    reason: active Tempora repository is maintained outside the canonical Mindburn polyrepo workspace
+    owner: repo-maintainers
+    expires: 2026-09-06
