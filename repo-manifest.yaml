@@ -1,7 +1,7 @@
 ---
 organization: Mindburn-Labs
 schema_version: final-production-inventory-v1
-generated_at: '2026-07-22'
+generated_at: '2026-08-06'
 generated_by: GitHub organization inventory reconciliation
 source_truth_priority:
 - source_code_and_route_registries
@@ -12,8 +12,8 @@ source_truth_priority:
 - runbooks_and_architecture_docs
 - org_inventory
 inventory_summary:
-  total_repositories: 50
-  active_repositories: 49
+  total_repositories: 53
+  active_repositories: 52
   archived_repositories:
   - orggenome-compiler
   deleted_repositories:
@@ -30,6 +30,7 @@ inventory_summary:
   - docs_for_team
   - mindburn-infra
   - platform-actions
+  - tg-knowledge-scraper
   production_release_status: not_released
   production_release_source: integration-mindburn-platform/manifests/release-candidate.yaml
   production_release_evidence: integration-mindburn-platform/manifests/final-state-evidence.yaml
@@ -124,6 +125,10 @@ repositories:
   visibility: private
   archived: false
   updated_at: '2026-07-02T00:35:35Z'
+- name: helm-skills
+  visibility: private
+  archived: false
+  updated_at: '2026-07-24T13:41:59Z'
 - name: homebrew-tap
   visibility: public
   archived: false
@@ -236,6 +241,14 @@ repositories:
   visibility: private
   archived: false
   updated_at: '2026-07-21T12:53:34Z'
+- name: tempora
+  visibility: private
+  archived: false
+  updated_at: '2026-08-05T18:21:22Z'
+- name: tg-knowledge-scraper
+  visibility: internal
+  archived: false
+  updated_at: '2026-07-17T23:29:00Z'
 - name: worker-helm-launch-worker
   visibility: private
   archived: false
