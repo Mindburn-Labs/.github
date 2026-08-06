@@ -1,20 +1,105 @@
-name: Continuous Integration
+name: HELM Deterministic Repository Gates
 
 on:
   pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+      - edited
   push:
     branches:
       - main
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   local-validation:
+    name: local-validation
+    if: ${{ github.repository == 'Mindburn-Labs/.github' }}
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
       - name: Validate repository contract and workspace truth
+        run: REQUIRE_WORKSPACE_CONTEXT=0 make lint test
+
+  repository-gates:
+    name: Deterministic repository gates
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == false }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact GitHub merge commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: target
+
+      - name: Checkout immutable organization gate profiles
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: Mindburn-Labs/.github
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+          path: policy
+
+      - name: Set up pinned Node.js runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+
+      - name: Verify exact merge-parent binding
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PAYLOAD_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MERGE_SHA: ${{ github.sha }}
         run: |
-          REQUIRE_WORKSPACE_CONTEXT=0 make lint test
+          set -euo pipefail
+          if [[ "$(git -C target rev-parse HEAD)" != "$MERGE_SHA" ]]; then
+            echo "::error::checkout is not the ephemeral merge commit ($MERGE_SHA)"
+            exit 1
+          fi
+          read -r first_parent second_parent extra_parent < <(git -C target show -s --format='%P' "$MERGE_SHA")
+          if [[ -n "${extra_parent:-}" ]]; then
+            echo "::error::merge commit $MERGE_SHA has more than two parents; refusing"
+            exit 1
+          fi
+          if [[ "$second_parent" != "$HEAD_SHA" ]]; then
+            echo "::error::merge second parent $second_parent is not the pull request head $HEAD_SHA"
+            exit 1
+          fi
+
+          # GitHub can rebuild the ephemeral merge against a newer base after
+          # the event payload is captured. Bind to the resolved first parent,
+          # but require that it is genuine history of the named base branch.
+          git -C target fetch --no-tags --quiet origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          live_base="$(git -C target rev-parse "refs/remotes/origin/${BASE_REF}")"
+          if ! git -C target merge-base --is-ancestor "$first_parent" "$live_base"; then
+            echo "::error::merge first parent $first_parent is not an ancestor of ${BASE_REF} ($live_base) — the merge was not built on the base branch"
+            exit 1
+          fi
+          if [[ "$first_parent" != "$PAYLOAD_BASE_SHA" ]]; then
+            echo "::notice::base advanced since the webhook payload (payload=$PAYLOAD_BASE_SHA resolved=$first_parent); binding the permit to the resolved base"
+          fi
+
+      - name: Run required repository gates
+        env:
+          CI: "true"
+        run: |
+          set -euo pipefail
+          python3 policy/scripts/run_autonomous_release_gates.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --target target \
+            --profiles policy/config/autonomous-release-gates.json

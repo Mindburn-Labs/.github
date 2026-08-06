@@ -4,6 +4,14 @@ aliases:
     reason: local checkout uses explicit alias
 
 manifest_only:
+  app-helm-admin:
+    reason: active HELM operator-review dashboard is not checked out in the canonical workspace
+    owner: repo-maintainers
+    expires: 2026-08-21
+  contracts-autonomous-release-canary:
+    reason: disposable public HELM autonomous-release interlock canary is not checked out in the canonical workspace
+    owner: repo-maintainers
+    expires: 2026-08-21
   helm-rollout-evidence:
     reason: release evidence repo not checked out locally
     owner: release-platform
@@ -12,3 +20,7 @@ manifest_only:
     reason: archived 2026-06-10; split into ml-orggenome-compiler + svc-orggenome-inference; local checkout removed
     owner: ml-platform
     expires: 2027-06-30
+  tempora:
+    reason: active Tempora repository is maintained outside the canonical Mindburn polyrepo workspace
+    owner: repo-maintainers
+    expires: 2026-09-06

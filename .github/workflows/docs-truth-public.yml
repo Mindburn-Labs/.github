@@ -33,16 +33,23 @@ on:
 
 jobs:
   docs-truth:
+    timeout-minutes: 20
     name: docs-truth
     runs-on: ubuntu-latest
     steps:
       - name: Resolve subject repo
         id: subject
         shell: bash
+        env:
+          INPUT_REPO: ${{ inputs.repo }}
         run: |
-          repo="${{ inputs.repo }}"
+          repo="$INPUT_REPO"
           if [ -z "$repo" ]; then
             repo="${GITHUB_REPOSITORY#*/}"
+          fi
+          if [ "$repo" != ".github" ] && { [[ ! "$repo" =~ ^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$ ]] || [[ "$repo" == *".."* ]]; }; then
+            echo "::error::Invalid subject repository name"
+            exit 1
           fi
           local_name="$repo"
           if [ "$repo" = ".github" ]; then
@@ -51,44 +58,98 @@ jobs:
           echo "repo=$repo" >> "$GITHUB_OUTPUT"
           echo "local_name=$local_name" >> "$GITHUB_OUTPUT"
 
+      # A reusable workflow's `secrets: required: true` only checks that the
+      # caller declared the key, not that the value is non-empty or usable. So
+      # a deleted secret surfaces as actions/checkout's "Input required and not
+      # supplied: token", and an under-scoped one as a bare 403 — both read as
+      # checkout bugs. The 2026-07-16 sweep cost days to that ambiguity
+      # (HELM-311). Fail here instead, naming the actual cause. Probe the entire
+      # private read-set: a public subject can be readable while the private
+      # ledger or runner checkout still fails.
+      - name: Verify org read token
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}
+          SUBJECT_REPO: ${{ steps.subject.outputs.repo }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::MINDBURN_ORG_READ_TOKEN resolved empty. The caller declared the secret but no value reached this run — it was deleted, or an org secret's visibility does not cover this repo."
+            exit 1
+          fi
+          for repo in "$SUBJECT_REPO" .github docs dev-orchestration; do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer $TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/Mindburn-Labs/$repo")
+            if [ "$code" != "200" ]; then
+              echo "::error::MINDBURN_ORG_READ_TOKEN cannot read Mindburn-Labs/$repo (HTTP $code). 401=invalid or expired; 403=valid but insufficient scope; 404=token has no access to this repo. Checkout would fail next with a misleading git error."
+              exit 1
+            fi
+          done
+
       - name: Checkout subject repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: Mindburn-Labs/${{ steps.subject.outputs.repo }}
           path: workspace/${{ steps.subject.outputs.local_name }}
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.repo != '' && 'main' || github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
+          persist-credentials: false
           token: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}
 
       - name: Checkout .github inventory
         if: steps.subject.outputs.repo != '.github'
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: Mindburn-Labs/.github
           path: workspace/.github-repo
           fetch-depth: 1
+          persist-credentials: false
           token: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}
 
       - name: Checkout docs truth ledger
         if: steps.subject.outputs.repo != 'docs'
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: Mindburn-Labs/docs
           path: workspace/docs
           fetch-depth: 1
+          persist-credentials: false
           token: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}
 
       - name: Checkout docs-truth runner
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: Mindburn-Labs/dev-orchestration
-          ref: 3d8f07723dff90aaa83473a3e8134f6ae93d501b
+          ref: 4338b9ae6b76284aeee7a4cfe9f8d6ef9f101156
           path: workspace/dev-orchestration
           fetch-depth: 1
+          persist-credentials: false
           token: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}
+
+      - name: Verify pre-merge contract implementation
+        if: steps.subject.outputs.repo != '.github' && steps.subject.outputs.repo != 'docs' && github.repository == format('Mindburn-Labs/{0}', steps.subject.outputs.repo)
+        shell: bash
+        run: |
+          echo "e0d29e03c4c4ad8bc5f20955ce53c2d944f4af280b0e7442c61f9bd0b732ff9d  workspace/.github-repo/scripts/stage-docs-truth-premerge-contracts.rb" | sha256sum --check
+
+      - name: Stage verified pre-merge ledger contracts
+        if: steps.subject.outputs.repo != '.github' && steps.subject.outputs.repo != 'docs' && github.repository == format('Mindburn-Labs/{0}', steps.subject.outputs.repo)
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          ruby "$GITHUB_WORKSPACE/workspace/.github-repo/scripts/stage-docs-truth-premerge-contracts.rb" \
+            --ledger "$GITHUB_WORKSPACE/workspace/docs/audit/markdown-estate-ledger.csv" \
+            --root "$GITHUB_WORKSPACE/workspace/${{ steps.subject.outputs.local_name }}" \
+            --repo "${{ steps.subject.outputs.repo }}"
 
       - name: Run docs truth gate
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_CHANGED_BASE: ${{ inputs.changed_base }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           args=(
             --mode local
@@ -96,11 +157,16 @@ jobs:
             --repo "${{ steps.subject.outputs.repo }}"
             --report "$RUNNER_TEMP/docs-truth-report.json"
           )
-          changed_base="${{ inputs.changed_base }}"
-          if [ -z "$changed_base" ] && [ "${{ github.event_name }}" = "pull_request" ]; then
-            changed_base="${{ github.event.pull_request.base.sha }}"
+          changed_base="$INPUT_CHANGED_BASE"
+          if [ -z "$changed_base" ] && [ "$EVENT_NAME" = "pull_request" ]; then
+            changed_base="$PR_BASE_SHA"
           fi
           if [ -n "$changed_base" ]; then
+            if [[ ! "$changed_base" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || \
+              { [[ ! "$changed_base" =~ ^[0-9a-fA-F]{40}$ ]] && ! git check-ref-format --allow-onelevel "$changed_base" >/dev/null 2>&1; }; then
+              echo "::error::Invalid changed-base ref"
+              exit 1
+            fi
             args+=(--changed-base "$changed_base")
           fi
           ruby "$GITHUB_WORKSPACE/workspace/dev-orchestration/estate-control-plane/scripts/docs-truth-org.rb" "${args[@]}"

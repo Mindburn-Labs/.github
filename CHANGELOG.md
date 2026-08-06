@@ -5,6 +5,7 @@ All notable changes to the `.github` organization configurations repository will
 ## [Unreleased]
 
 ### Changed
+- Bound concurrent docs-truth ledger contracts to an expiring source PR head and exact added path instead of trusting a free-text exemption.
 - Added the MIN-408 Linear release gate contract for release pipelines,
   merge-to-verification behavior, and evidence-backed `Done` transitions.
 - Removed the deleted `orggenome-compiler` archive from the verified organization inventory.
