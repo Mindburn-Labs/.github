@@ -71,14 +71,6 @@ def read_json(path, required: true)
   JSON.parse(File.read(path))
 end
 
-def top_level_directories
-  raise "#{WORKSPACE_ROOT} is missing" unless Dir.exist?(WORKSPACE_ROOT)
-
-  Dir.children(WORKSPACE_ROOT).select do |name|
-    File.directory?(File.join(WORKSPACE_ROOT, name))
-  end.sort
-end
-
 def manifest_repositories
   read_yaml(MANIFEST_PATH).fetch("repositories")
 end
@@ -121,7 +113,7 @@ def group_for(name)
     "Platform / Policy Substrate"
   when /^infra-/, /^gitops-/, "mindburn-infra"
     "Infrastructure / GitOps"
-  when "docs-engineering-handbook", "docs_for_team", "dev-orchestration", "homebrew-tap"
+  when "docs", "docs-engineering-handbook", "docs_for_team", "dev-orchestration", "homebrew-tap"
     "Docs / Onboarding / Local Ops"
   when "ml-orggenome-compiler"
     "OrgGenome / ML"
@@ -134,13 +126,12 @@ def estate_by_name(entries)
   entries.each_with_object({}) { |entry, memo| memo[entry.fetch("name")] = entry }
 end
 
-def local_checkout_for(name, local_dirs, aliases)
-  return "yes" if local_dirs.include?(name)
-
+def expected_workspace_path_for(name, aliases, manifest_only_policy)
   alias_entry = aliases[name]
-  return "alias `#{alias_entry.fetch("local_path")}`" if alias_entry && local_dirs.include?(alias_entry.fetch("local_path"))
+  return "alias `#{alias_entry.fetch("local_path")}`" if alias_entry
+  return "not required locally" if manifest_only_policy.key?(name)
 
-  "no"
+  "`#{name}`"
 end
 
 # Canon v1.1 D-17 naming: estate snapshots may still carry legacy
@@ -182,44 +173,18 @@ def markdown_table(headers, rows)
   lines
 end
 
-def compatibility_dirs(local_dirs, estate_entries)
-  from_estate = estate_entries.select { |entry| entry["kind"] == "compatibility_repo" }.map { |entry| entry["name"] }
-  from_names = local_dirs.select { |name| name.match?(/\Acontracts-(api|event|proto|schema)-catalog\z/) || name.match?(/\Apkg-helm-client-/) }
-  (from_estate + from_names).uniq.sort
-end
-
-def local_classification(name, estate_entry, compat_policy, deleted_names)
-  if deleted_names.include?(name)
-    if estate_entry
-      return "`deleted_repo_local_snapshot`; #{estate_entry["domain"]} / #{d17_system(estate_entry["system"])}; lifecycle `deleted`"
-    end
-    return "`deleted_repo_local_snapshot`; local snapshot of deleted GitHub repo"
-  end
-
-  return "task checkout directory by naming convention" if name.include?("-wt-")
-
-  if compat_policy.fetch("compatibility_directories", {}).key?(name)
-    policy = compat_policy.fetch("compatibility_directories").fetch(name)
-    return "compatibility; canonical `#{policy.fetch("canonical")}`; action `#{policy.fetch("action")}`; expires `#{policy.fetch("expires")}`"
-  end
-
-  return strict_classification(name, estate_entry) if estate_entry
-
-  "local directory; no estate entry"
+def compatibility_policy_names(compat_policy)
+  compat_policy.fetch("compatibility_directories", {}).keys.sort
 end
 
 def render_markdown(state)
   manifest_summary = state.fetch(:manifest_summary)
   manifest_repos = state.fetch(:manifest_repos)
   estate = state.fetch(:estate_by_name)
-  local_dirs = state.fetch(:local_dirs)
   aliases = state.fetch(:aliases)
   migration_entries = state.fetch(:migration_entries)
   compat_policy = state.fetch(:compat_policy)
   manifest_only_policy = state.fetch(:manifest_only_policy)
-  deleted_names = Array(manifest_summary.fetch("deleted_repositories", []))
-  generated_at = state.fetch(:generated_at)
-  snapshot_date = Date.parse(generated_at).iso8601
 
   manifest_rows = manifest_repos.sort_by { |repo| repo.fetch("name") }.map do |repo|
     name = repo.fetch("name")
@@ -227,36 +192,21 @@ def render_markdown(state)
       group_for(name),
       "`#{name}`",
       "`#{repo.fetch("visibility")}`",
-      local_checkout_for(name, local_dirs, aliases),
+      expected_workspace_path_for(name, aliases, manifest_only_policy),
       manifest_classification(repo, estate[name])
     ]
   end
 
   manifest_names = manifest_repos.map { |repo| repo.fetch("name") }
-  alias_local_paths = aliases.values.map { |entry| entry.fetch("local_path") }
-  local_only_names = local_dirs.reject { |name| manifest_names.include?(name) }.sort
-  local_only_rows = local_only_names.map do |name|
+  manifest_only_rows = manifest_only_policy.sort_by { |name, _| name }.map do |name, policy|
     [
       "`#{name}`",
-      alias_local_paths.include?(name) ? "manifest alias target" : "local-only",
-      local_classification(name, estate[name], compat_policy, deleted_names)
+      "`not required locally`",
+      policy.fetch("reason")
     ]
   end
 
-  missing_rows = manifest_repos.filter_map do |repo|
-    name = repo.fetch("name")
-    checkout = local_checkout_for(name, local_dirs, aliases)
-    next unless checkout == "no"
-
-    policy = manifest_only_policy[name]
-    [
-      "`#{name}`",
-      policy ? "`policy-waived`" : "`BLOCKER`",
-      policy ? policy.fetch("reason") : "missing local checkout and no manifest-only policy"
-    ]
-  end
-
-  compat_rows = compatibility_dirs(local_dirs, state.fetch(:estate_entries)).map do |name|
+  compat_rows = compatibility_policy_names(compat_policy).map do |name|
     policy = compat_policy.fetch("compatibility_directories", {})[name]
     [
       "`#{name}`",
@@ -275,26 +225,18 @@ def render_markdown(state)
     ]
   end
 
-  task_rows = local_dirs.select { |name| name.include?("-wt-") }.sort.map do |name|
-    [
-      "`#{name}`",
-      "task checkout directory by naming convention",
-      "not canonical repo truth"
-    ]
-  end
-
   lines = []
   lines << "---"
   lines << "title: HELM Ecosystem Directory Map"
-  lines << "status: generated-strict-source-snapshot"
-  lines << "snapshot_date: #{snapshot_date}"
-  lines << "generated_at: #{generated_at}"
+  lines << "status: generated-canonical-source-map"
   lines << "generated_by: .github-repo/scripts/generate-helm-ecosystem-map.rb"
   lines << "manifest_repository_count: #{manifest_summary.fetch("total_repositories")}"
   lines << "active_repository_count: #{manifest_summary.fetch("active_repositories")}"
   lines << "production_release_status: #{manifest_summary.fetch("production_release_status")}"
   lines << "source_of_truth:"
   lines << "  - .github-repo/repo-manifest.yaml"
+  lines << "  - .github-repo/manifest-local-policy.yaml"
+  lines << "  - .github-repo/local-compatibility-policy.yaml"
   lines << "  - production-readiness/estate/estate-inventory.json"
   lines << "  - production-readiness/estate/migration-index.json"
   lines << "---"
@@ -304,7 +246,7 @@ def render_markdown(state)
   lines << "This file is generated. Do not edit it by hand."
   lines << ""
   lines << "> [!IMPORTANT]"
-  lines << "> `$MINDBURN_WORKSPACE_ROOT` is a polyrepo workspace, not one git repository. `.github-repo/repo-manifest.yaml` controls GitHub repo existence, visibility, and archive status. `production-readiness/estate/estate-inventory.json` controls local path classification only."
+  lines << "> `$MINDBURN_WORKSPACE_ROOT` is a polyrepo workspace, not one git repository. `.github-repo/repo-manifest.yaml` controls GitHub repo existence, visibility, and archive status. `production-readiness/estate/estate-inventory.json` controls local path classification only. This committed map intentionally excludes temporal workstation directories."
   lines << ""
   lines << "## Current Manifest Truth"
   lines << ""
@@ -328,22 +270,26 @@ def render_markdown(state)
   lines << "- UI code is never an authorization boundary."
   lines << "- RLM output is advisory evidence only; it does not verify HELM behavior by itself."
   lines << "- HELM is the only Mindburn Labs product. Company Builder, Company OS, and HELM Network are product motions inside HELM; pilot work becomes reusable HELM blueprints and evidence."
-  lines << "- Local `*-wt-*` directories are task checkout directories by naming convention, not separate products or canonical repos."
+  lines << "- Local `*-wt-*` directories are task checkout directories by naming convention, not separate products or canonical repos; this map never enumerates them."
   lines << "- Compatibility/local-only directories are not GitHub repository truth unless they appear in `.github-repo/repo-manifest.yaml`."
   lines << ""
   lines << "## Canonical Manifest Repositories"
   lines << ""
-  lines.concat markdown_table(["Group", "Repository", "Visibility", "Local checkout", "Strict classification"], manifest_rows)
+  lines.concat markdown_table(["Group", "Repository", "Visibility", "Expected workspace path", "Strict classification"], manifest_rows)
   lines << ""
-  lines << "## Manifest Repositories Without Local Checkout"
+  lines << "## Manifest Repository Local-Checkout Policy"
   lines << ""
-  lines.concat markdown_table(["Repository", "Status", "Reason"], missing_rows.empty? ? [["none", "n/a", "all manifest repos have local checkout or alias"]] : missing_rows)
+  lines.concat markdown_table(["Repository", "Policy", "Reason"], manifest_only_rows.empty? ? [["none", "n/a", "all manifest repos use their expected workspace path"]] : manifest_only_rows)
   lines << ""
-  lines << "## Local Directories Not In The Manifest"
+  lines << "## Workstation Inventory Boundary"
   lines << ""
-  lines.concat markdown_table(["Directory", "Relation", "Strict classification"], local_only_rows)
+  lines << "This committed map does not enumerate local-only directories, generated caches, or task worktrees. They change per machine and per task, so recording them here would make workstation state look like repository topology."
   lines << ""
-  lines << "## Compatibility Directories"
+  lines << "For a current local classification, generate and inspect `production-readiness/estate/estate-inventory.json` at the workspace root. That output is local evidence only; it does not change manifest repository truth."
+  lines << ""
+  lines << "## Compatibility Directory Policy"
+  lines << ""
+  lines << "This policy lists approved compatibility names; it does not assert that any such local directory exists."
   lines << ""
   lines.concat markdown_table(["Directory", "Status", "Canonical replacement", "Expires"], compat_rows.empty? ? [["none", "n/a", "n/a", "n/a"]] : compat_rows)
   lines << ""
@@ -351,11 +297,9 @@ def render_markdown(state)
   lines << ""
   lines << "There is no standalone canonical `db-*` repository in the current manifest. Database and state ownership live inside owning repos."
   lines << ""
+  lines << "The rows below are the versioned migration index, not a scan of local worktrees."
+  lines << ""
   lines.concat markdown_table(["Path", "Owner repo", "Kind", "Manifest repo"], migration_rows)
-  lines << ""
-  lines << "## Current Local `*-wt-*` Directories"
-  lines << ""
-  lines.concat markdown_table(["Directory", "Classification", "Authority"], task_rows.empty? ? [["none", "n/a", "n/a"]] : task_rows)
   lines << ""
   lines << "## Where To Start By Task"
   lines << ""
@@ -388,9 +332,10 @@ def render_markdown(state)
   lines << ""
   lines << "## Maintenance"
   lines << ""
-  lines << "- Regenerate with `.github-repo/scripts/refresh-helm-ecosystem-map.sh`."
+  lines << "- Validate with `.github-repo/scripts/generate-helm-ecosystem-map.rb --check` from a workspace that contains the source files and both generated-map paths."
+  lines << "- Intentionally refresh the local estate and generated maps with `.github-repo/scripts/refresh-helm-ecosystem-map.sh`; do not use a transient worktree list as committed topology."
   lines << "- Do not promote compatibility directories into canonical ownership without a manifest/source-truth change."
-  lines << "- Do not promote `*-wt-*` directories into product repos."
+  lines << "- Do not promote local `*-wt-*` directories into product repos."
   lines << ""
   lines.join("\n")
 end
@@ -407,10 +352,7 @@ def build_state
     manifest: manifest,
     manifest_summary: manifest.fetch("inventory_summary"),
     manifest_repos: manifest.fetch("repositories"),
-    generated_at: migration_index.fetch("generated_at", estate_inventory.fetch("generated_at")),
-    estate_entries: estate_entries,
     estate_by_name: estate_by_name(estate_entries),
-    local_dirs: top_level_directories,
     aliases: manifest_policy.fetch("aliases", {}),
     manifest_only_policy: manifest_policy.fetch("manifest_only", {}),
     compat_policy: compat_policy,
@@ -421,23 +363,17 @@ end
 def validate_state!(state, markdown)
   errors = []
   manifest_names = state.fetch(:manifest_repos).map { |repo| repo.fetch("name") }
-  local_dirs = state.fetch(:local_dirs)
   aliases = state.fetch(:aliases)
   manifest_only_policy = state.fetch(:manifest_only_policy)
   compat_policy = state.fetch(:compat_policy).fetch("compatibility_directories", {})
 
   aliases.each do |manifest_name, policy|
     errors << "alias #{manifest_name} is not a manifest repo" unless manifest_names.include?(manifest_name)
-    errors << "alias #{manifest_name} local path #{policy.fetch("local_path")} is missing" unless local_dirs.include?(policy.fetch("local_path"))
+    errors << "alias #{manifest_name} local path is empty" if policy.fetch("local_path").to_s.empty?
   end
 
-  missing_manifest = manifest_names.reject do |name|
-    local_dirs.include?(name) || (aliases[name] && local_dirs.include?(aliases[name].fetch("local_path"))) || manifest_only_policy.key?(name)
-  end
-  errors << "manifest repos missing locally without policy: #{missing_manifest.join(", ")}" unless missing_manifest.empty?
-
-  compatibility_dirs(local_dirs, state.fetch(:estate_entries)).each do |name|
-    errors << "compatibility directory #{name} is missing local-compatibility-policy.yaml entry" unless compat_policy.key?(name)
+  manifest_only_policy.each_key do |name|
+    errors << "manifest-only policy #{name} is not a manifest repo" unless manifest_names.include?(name)
   end
 
   state.fetch(:manifest_summary).fetch("archived_repositories").each do |name|
@@ -458,12 +394,15 @@ def validate_state!(state, markdown)
   errors << "non-manifest repos in manifest table: #{extra_manifest_rows.join(", ")}" unless extra_manifest_rows.empty?
   errors << "duplicate manifest table repos: #{duplicate_manifest_rows.join(", ")}" unless duplicate_manifest_rows.empty?
 
-  local_dirs.each do |name|
-    errors << "local top-level directory #{name} missing from generated Markdown" unless markdown.include?("`#{name}`")
-  end
-
   wt_manifest_rows = rendered_manifest_rows.select { |name| name.include?("-wt-") }
   errors << "`*-wt-*` directories appear in manifest table: #{wt_manifest_rows.join(", ")}" unless wt_manifest_rows.empty?
+
+  worktree_rows = markdown.scan(/^\| `([^`]*-wt-[^`]*)` \|/).flatten
+  errors << "transient worktree directories appear in generated map: #{worktree_rows.join(", ")}" unless worktree_rows.empty?
+
+  compat_policy.each_key do |name|
+    errors << "compatibility policy #{name} missing from generated Markdown" unless markdown.include?("`#{name}`")
+  end
 
   errors << "migration index has no entries" if state.fetch(:migration_entries).empty?
   raise errors.join("\n") unless errors.empty?
@@ -509,7 +448,7 @@ if options[:json]
   summary = {
     "workspace_root" => WORKSPACE_ROOT,
     "manifest_repositories" => state.fetch(:manifest_repos).count,
-    "local_directories" => state.fetch(:local_dirs).count,
+    "workstation_directories_included" => false,
     "migration_entries" => state.fetch(:migration_entries).count,
     "outputs" => [TEAM_DOC_PATH, ROOT_DOC_PATH, HANDBOOK_DOC_PATH]
   }
