@@ -11,7 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import subprocess
 import sys
@@ -19,6 +19,7 @@ import sys
 
 WORKFLOW_DIRECTORY = ".github/workflows"
 CI_WORKFLOW_PATH = f"{WORKFLOW_DIRECTORY}/ci.yml"
+DOCS_TRUTH_WORKFLOW_PATH = f"{WORKFLOW_DIRECTORY}/docs-truth.yml"
 REGULAR_MODE = "100644"
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 WORKFLOW_FILE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*\.ya?ml$")
@@ -27,6 +28,21 @@ REPOSITORY_PATTERN = re.compile(r"^Mindburn-Labs/[A-Za-z0-9_.-]+$")
 ADMISSION_SCHEMA = "mindburn.authority-pr-admission/v1"
 OBJECT_RECEIPT_SCHEMA = "mindburn.authority-bare-git-input/v2"
 MAX_OBJECT_RECEIPT_BYTES = 16 * 1024
+MAX_MATERIALIZED_FILES = 10_000
+MAX_MATERIALIZED_BLOB_BYTES = 16 * 1024 * 1024
+MAX_MATERIALIZED_TOTAL_BYTES = 128 * 1024 * 1024
+PROFILES = {
+    ".github": {
+        "repository": "Mindburn-Labs/.github",
+        "required_workflow_path": CI_WORKFLOW_PATH,
+        "immutable_data_paths": (),
+    },
+    "app-helm-docs": {
+        "repository": "Mindburn-Labs/app-helm-docs",
+        "required_workflow_path": DOCS_TRUTH_WORKFLOW_PATH,
+        "immutable_data_paths": ("docs-truth.yaml",),
+    },
+}
 
 
 class WorkflowTreeError(ValueError):
@@ -51,13 +67,17 @@ def git_environment() -> dict[str, str]:
     return environment
 
 
-def run_git(repository: Path, *arguments: str) -> bytes:
+def run_git(
+    repository: Path,
+    *arguments: str,
+    environment: dict[str, str] | None = None,
+) -> bytes:
     process = subprocess.run(
         ["git", "-C", str(repository), *arguments],
         check=False,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        env=git_environment(),
+        env=environment if environment is not None else git_environment(),
     )
     if process.returncode != 0:
         raise WorkflowTreeError(f"git {arguments[0]} failed while reading workflow objects")
@@ -80,6 +100,13 @@ def require_positive_integer(value: object, *, label: str) -> int:
     if type(value) is not int or value <= 0:
         raise WorkflowTreeError(f"{label} must be a positive integer")
     return value
+
+
+def require_profile(value: str) -> dict[str, object]:
+    try:
+        return PROFILES[value]
+    except KeyError as exc:
+        raise WorkflowTreeError(f"unsupported trusted workflow profile: {value}") from exc
 
 
 def require_exact_mapping(value: object, *, label: str, keys: set[str]) -> dict[str, object]:
@@ -229,6 +256,7 @@ def workflow_inventory(
     revision: str,
     *,
     label: str,
+    required_workflow_path: str = CI_WORKFLOW_PATH,
 ) -> dict[str, tuple[str, str, str]]:
     output = run_git(
         repository,
@@ -263,13 +291,32 @@ def workflow_inventory(
         if path in inventory:
             raise WorkflowTreeError(f"{label} contains a duplicate workflow path: {path}")
         inventory[path] = entry
-    if not inventory or CI_WORKFLOW_PATH not in inventory:
-        raise WorkflowTreeError(f"{label} must contain {CI_WORKFLOW_PATH}")
+    if not inventory or required_workflow_path not in inventory:
+        raise WorkflowTreeError(f"{label} must contain {required_workflow_path}")
     return inventory
 
 
 def git_blob(repository: Path, revision: str, path: str) -> bytes:
     return run_git(repository, "show", f"{revision}:{path}")
+
+
+def tree_entry(repository: Path, revision: str, path: str) -> tuple[str, str, str] | None:
+    output = run_git(repository, "ls-tree", "-z", revision, "--", path)
+    if not output:
+        return None
+    records = [record for record in output.split(b"\0") if record]
+    if len(records) != 1:
+        raise WorkflowTreeError(f"immutable data path did not resolve exactly once: {path}")
+    try:
+        metadata, raw_path = records[0].split(b"\t", maxsplit=1)
+        mode, object_type, object_id = metadata.split(b" ", maxsplit=2)
+        observed_path = raw_path.decode("utf-8")
+        entry = (mode.decode("ascii"), object_type.decode("ascii"), object_id.decode("ascii"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise WorkflowTreeError(f"immutable data path has an invalid tree entry: {path}") from exc
+    if observed_path != path:
+        raise WorkflowTreeError(f"immutable data path resolved unexpectedly: {path}")
+    return entry
 
 
 def verify(
@@ -279,6 +326,8 @@ def verify(
     candidate_repository: Path,
     candidate_sha: str,
     merge_sha: str,
+    required_workflow_path: str = CI_WORKFLOW_PATH,
+    immutable_data_paths: tuple[str, ...] = (),
 ) -> dict[str, object]:
     parent_sha = require_sha(parent_sha, label="parent_sha")
     candidate_sha = require_sha(candidate_sha, label="candidate_sha")
@@ -296,11 +345,13 @@ def verify(
         parent_repository,
         parent_sha,
         label="immutable parent workflow tree",
+        required_workflow_path=required_workflow_path,
     )
     candidate = workflow_inventory(
         candidate_repository,
         merge_sha,
         label="candidate merge workflow tree",
+        required_workflow_path=required_workflow_path,
     )
     for path, (mode, object_type, _) in parent.items():
         if mode != REGULAR_MODE or object_type != "blob":
@@ -332,6 +383,19 @@ def verify(
             raise WorkflowTreeError(
                 f"candidate workflow blob differs from immutable parent: {path}",
             )
+    for path in immutable_data_paths:
+        parent_entry = tree_entry(parent_repository, parent_sha, path)
+        candidate_entry = tree_entry(candidate_repository, merge_sha, path)
+        if parent_entry != candidate_entry:
+            raise WorkflowTreeError(f"candidate changed trusted Docs Truth data input: {path}")
+        if parent_entry is not None and parent_entry[:2] != (REGULAR_MODE, "blob"):
+            raise WorkflowTreeError(f"trusted Docs Truth data input is not a regular blob: {path}")
+        if parent_entry is not None and git_blob(parent_repository, parent_sha, path) != git_blob(
+            candidate_repository,
+            merge_sha,
+            path,
+        ):
+            raise WorkflowTreeError(f"candidate changed trusted Docs Truth data blob: {path}")
     return {
         "schema": "mindburn.authority-workflow-tree-admission/v1",
         "mode": "shadow-exact-tree",
@@ -339,7 +403,100 @@ def verify(
         "candidate_sha": candidate_sha,
         "merge_sha": merge_sha,
         "workflow_paths": sorted(parent_paths),
+        "immutable_data_paths": sorted(immutable_data_paths),
     }
+
+
+def safe_materialized_path(raw_path: bytes) -> PurePosixPath:
+    try:
+        path = raw_path.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise WorkflowTreeError("candidate tree contains a non-UTF-8 path") from exc
+    candidate = PurePosixPath(path)
+    if (
+        not path
+        or candidate.is_absolute()
+        or "\\" in path
+        or any(part in {"", ".", ".."} or part.casefold() == ".git" for part in candidate.parts)
+    ):
+        raise WorkflowTreeError(f"candidate tree contains an unsafe path: {path!r}")
+    return candidate
+
+
+def materialize_inert_tree(
+    *,
+    candidate_repository: Path,
+    revision: str,
+    destination: Path,
+) -> dict[str, int]:
+    """Write a verified Git tree as non-executable data without a checkout.
+
+    Every tree entry must be a regular non-executable blob. Candidate hooks,
+    filters, attributes, submodules, symlinks, and executable modes are never
+    consulted. Bounded object reads prevent a candidate tree from becoming an
+    unbounded runner-local artifact.
+    """
+
+    if destination.exists():
+        raise WorkflowTreeError(f"materialization destination already exists: {destination}")
+    output = run_git(candidate_repository, "ls-tree", "-r", "-l", "-z", revision)
+    entries: list[tuple[PurePosixPath, str, int]] = []
+    total_bytes = 0
+    for record in output.split(b"\0"):
+        if not record:
+            continue
+        try:
+            metadata, raw_path = record.split(b"\t", maxsplit=1)
+            mode, object_type, object_id, raw_size = metadata.split()
+            size = int(raw_size)
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise WorkflowTreeError("candidate tree contains an invalid entry") from exc
+        if mode != REGULAR_MODE.encode("ascii") or object_type != b"blob":
+            path = raw_path.decode("utf-8", errors="replace")
+            raise WorkflowTreeError(f"candidate tree contains a non-data entry: {path}")
+        if size < 0 or size > MAX_MATERIALIZED_BLOB_BYTES:
+            raise WorkflowTreeError("candidate tree contains an oversized blob")
+        path = safe_materialized_path(raw_path)
+        total_bytes += size
+        if total_bytes > MAX_MATERIALIZED_TOTAL_BYTES:
+            raise WorkflowTreeError("candidate tree exceeds the materialization byte limit")
+        entries.append((path, object_id.decode("ascii"), size))
+        if len(entries) > MAX_MATERIALIZED_FILES:
+            raise WorkflowTreeError("candidate tree exceeds the materialization file limit")
+
+    destination.mkdir(mode=0o700, parents=True)
+    for path, object_id, expected_size in entries:
+        target = destination.joinpath(*path.parts)
+        target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        content = run_git(candidate_repository, "cat-file", "blob", object_id)
+        if len(content) != expected_size:
+            raise WorkflowTreeError(f"candidate blob size changed while reading: {path}")
+        with target.open("xb") as stream:
+            stream.write(content)
+        target.chmod(0o600)
+    return {"file_count": len(entries), "total_bytes": total_bytes}
+
+
+def write_inert_index(
+    *,
+    candidate_repository: Path,
+    revision: str,
+    index_file: Path,
+) -> None:
+    """Build an index for read-only trusted tooling without populating a worktree."""
+
+    if index_file.exists():
+        raise WorkflowTreeError(f"candidate index already exists: {index_file}")
+    index_file.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    environment = git_environment()
+    environment["GIT_INDEX_FILE"] = str(index_file)
+    run_git(
+        candidate_repository,
+        "read-tree",
+        revision,
+        environment=environment,
+    )
+    index_file.chmod(0o600)
 
 
 def verify_object_receipt(
@@ -347,6 +504,9 @@ def verify_object_receipt(
     parent_repository: Path,
     candidate_repository: Path,
     object_receipt: Path,
+    profile: str = ".github",
+    materialize_directory: Path | None = None,
+    index_file: Path | None = None,
 ) -> dict[str, object]:
     """Verify a candidate using the single object-binding receipt from fetch.
 
@@ -362,16 +522,37 @@ def verify_object_receipt(
     head = admission["head"]
     if not isinstance(base, dict) or not isinstance(head, dict):
         raise WorkflowTreeError("object receipt admission bindings are invalid")
+    trusted_profile = require_profile(profile)
+    if admission["repository"] != trusted_profile["repository"]:
+        raise WorkflowTreeError(
+            "object receipt repository does not match the trusted workflow profile",
+        )
     result = verify(
         parent_repository=parent_repository,
         parent_sha=base["sha"],
         candidate_repository=candidate_repository,
         candidate_sha=head["sha"],
         merge_sha=admission["merge_sha"],
+        required_workflow_path=trusted_profile["required_workflow_path"],
+        immutable_data_paths=trusted_profile["immutable_data_paths"],
     )
     result["schema"] = "mindburn.authority-workflow-tree-admission/v2"
     result["admission"] = admission
     result["object_receipt_schema"] = OBJECT_RECEIPT_SCHEMA
+    result["profile"] = profile
+    if materialize_directory is not None:
+        result["materialized"] = materialize_inert_tree(
+            candidate_repository=candidate_repository,
+            revision=admission["merge_sha"],
+            destination=materialize_directory,
+        )
+    if index_file is not None:
+        write_inert_index(
+            candidate_repository=candidate_repository,
+            revision=admission["merge_sha"],
+            index_file=index_file,
+        )
+        result["index"] = "trusted-read-tree"
     return result
 
 
@@ -380,6 +561,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--parent-repository", type=Path, required=True)
     parser.add_argument("--candidate-repository", type=Path, required=True)
     parser.add_argument("--object-receipt", type=Path, required=True)
+    parser.add_argument("--profile", choices=sorted(PROFILES), default=".github")
+    parser.add_argument("--materialize-directory", type=Path)
+    parser.add_argument("--index-file", type=Path)
     parser.add_argument("--output", type=Path)
     return parser
 
@@ -391,6 +575,13 @@ def main(argv: list[str]) -> int:
             parent_repository=args.parent_repository.resolve(),
             candidate_repository=args.candidate_repository.resolve(),
             object_receipt=args.object_receipt.resolve(),
+            profile=args.profile,
+            materialize_directory=(
+                args.materialize_directory.resolve()
+                if args.materialize_directory is not None
+                else None
+            ),
+            index_file=args.index_file.resolve() if args.index_file is not None else None,
         )
         encoded = json.dumps(result, indent=2, sort_keys=True) + "\n"
         if args.output is not None:

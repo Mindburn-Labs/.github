@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -43,6 +44,8 @@ def commit(repository: Path, message: str, *, stage: bool = True) -> str:
 def create_pull_request_graph(
     root: Path,
     candidate_mutation: Callable[[Path], bool] | None = None,
+    *,
+    include_ci: bool = True,
 ) -> tuple[Path, str, str, str]:
     source = root / "source"
     workflows = source / ".github" / "workflows"
@@ -50,7 +53,8 @@ def create_pull_request_graph(
     run(source, "init", "-b", "main")
     run(source, "config", "user.name", "Workflow Test")
     run(source, "config", "user.email", "workflow@example.test")
-    (workflows / "ci.yml").write_text("name: candidate\n", encoding="utf-8")
+    if include_ci:
+        (workflows / "ci.yml").write_text("name: candidate\n", encoding="utf-8")
     (workflows / "docs-truth.yml").write_text("name: docs\n", encoding="utf-8")
     commit(source, "initial")
 
@@ -82,15 +86,21 @@ def bare_store(root: Path, source: Path, *, head_ref: str = "main") -> Path:
     return store
 
 
-def object_receipt(*, base_sha: str, head_sha: str, merge_sha: str) -> dict[str, object]:
+def object_receipt(
+    *,
+    base_sha: str,
+    head_sha: str,
+    merge_sha: str,
+    repository: str = "Mindburn-Labs/.github",
+) -> dict[str, object]:
     return {
         "schema": "mindburn.authority-bare-git-input/v2",
         "admission": {
             "schema": "mindburn.authority-pr-admission/v1",
-            "repository": "Mindburn-Labs/.github",
+            "repository": repository,
             "pr_number": 7,
             "base": {"ref": "main", "sha": base_sha},
-            "head": {"repository": "Mindburn-Labs/.github", "sha": head_sha},
+            "head": {"repository": repository, "sha": head_sha},
             "merge_sha": merge_sha,
             "workflow_run_head_sha": head_sha,
         },
@@ -124,6 +134,146 @@ class WorkflowTreeTests(unittest.TestCase):
         self.assertEqual(result["candidate_sha"], head_sha)
         self.assertEqual(result["merge_sha"], merge_sha)
         self.assertEqual(result["workflow_paths"], [".github/workflows/ci.yml", ".github/workflows/docs-truth.yml"])
+
+    def test_app_docs_profile_requires_docs_truth_anchor_and_entire_tree_equality(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, base_sha, head_sha, merge_sha = create_pull_request_graph(
+                root,
+                include_ci=False,
+            )
+            store = bare_store(root, source)
+            receipt_path = root / "object-receipt.json"
+            receipt_path.write_text(
+                json.dumps(
+                    object_receipt(
+                        base_sha=base_sha,
+                        head_sha=head_sha,
+                        merge_sha=merge_sha,
+                        repository="Mindburn-Labs/app-helm-docs",
+                    ),
+                ),
+                encoding="utf-8",
+            )
+            result = MODULE.verify_object_receipt(
+                parent_repository=store,
+                candidate_repository=store,
+                object_receipt=receipt_path,
+                profile="app-helm-docs",
+            )
+            self.assertEqual(result["profile"], "app-helm-docs")
+            self.assertEqual(result["workflow_paths"], [".github/workflows/docs-truth.yml"])
+
+            with self.assertRaises(MODULE.WorkflowTreeError):
+                MODULE.verify_object_receipt(
+                    parent_repository=store,
+                    candidate_repository=store,
+                    object_receipt=receipt_path,
+                    profile=".github",
+                )
+
+    def test_app_docs_profile_rejects_candidate_ignore_configuration(self) -> None:
+        def inject_ignore(repository: Path) -> bool:
+            (repository / "docs-truth.yaml").write_text(
+                "ignored_paths:\n  - '**'\n",
+                encoding="utf-8",
+            )
+            return True
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, base_sha, head_sha, merge_sha = create_pull_request_graph(
+                root,
+                inject_ignore,
+                include_ci=False,
+            )
+            store = bare_store(root, source)
+            receipt_path = root / "object-receipt.json"
+            receipt_path.write_text(
+                json.dumps(
+                    object_receipt(
+                        base_sha=base_sha,
+                        head_sha=head_sha,
+                        merge_sha=merge_sha,
+                        repository="Mindburn-Labs/app-helm-docs",
+                    ),
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaises(MODULE.WorkflowTreeError):
+                MODULE.verify_object_receipt(
+                    parent_repository=store,
+                    candidate_repository=store,
+                    object_receipt=receipt_path,
+                    profile="app-helm-docs",
+                )
+
+    def test_inert_materialization_rejects_candidate_execution_modes_and_symlinks(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, base_sha, head_sha, merge_sha = create_pull_request_graph(root)
+            store = bare_store(root, source)
+            receipt_path = root / "object-receipt.json"
+            receipt_path.write_text(
+                json.dumps(object_receipt(base_sha=base_sha, head_sha=head_sha, merge_sha=merge_sha)),
+                encoding="utf-8",
+            )
+            destination = root / "materialized"
+            index_file = root / "candidate.index"
+            result = MODULE.verify_object_receipt(
+                parent_repository=store,
+                candidate_repository=store,
+                object_receipt=receipt_path,
+                materialize_directory=destination,
+                index_file=index_file,
+            )
+            self.assertGreater(result["materialized"]["file_count"], 0)
+            self.assertEqual((destination / "candidate.md").read_text(encoding="utf-8"), "candidate\n")
+            self.assertEqual((destination / "candidate.md").stat().st_mode & 0o777, 0o600)
+            self.assertFalse((destination / ".git").exists())
+            self.assertEqual(result["index"], "trusted-read-tree")
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "GIT_DIR": str(store),
+                    "GIT_INDEX_FILE": str(index_file),
+                    "GIT_WORK_TREE": str(destination),
+                },
+            )
+            tracked = subprocess.check_output(
+                ["git", "ls-files", "--", "*.md"],
+                env=environment,
+                text=True,
+            ).splitlines()
+            self.assertEqual(tracked, ["base.md", "candidate.md"])
+
+        def executable(repository: Path) -> bool:
+            script = repository / "candidate.sh"
+            script.write_text("exit 0\n", encoding="utf-8")
+            script.chmod(0o755)
+            return True
+
+        def symlink(repository: Path) -> bool:
+            (repository / "candidate-link").symlink_to("candidate.md")
+            return True
+
+        for name, mutation in (("executable", executable), ("symlink", symlink)):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                source, base_sha, head_sha, merge_sha = create_pull_request_graph(root, mutation)
+                store = bare_store(root, source)
+                receipt_path = root / "object-receipt.json"
+                receipt_path.write_text(
+                    json.dumps(object_receipt(base_sha=base_sha, head_sha=head_sha, merge_sha=merge_sha)),
+                    encoding="utf-8",
+                )
+                with self.assertRaises(MODULE.WorkflowTreeError):
+                    MODULE.verify_object_receipt(
+                        parent_repository=store,
+                        candidate_repository=store,
+                        object_receipt=receipt_path,
+                        materialize_directory=root / "materialized",
+                    )
 
     def test_single_object_receipt_rejects_mixed_snapshot_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -192,6 +342,20 @@ class WorkflowTreeTests(unittest.TestCase):
             (repository / ".github" / "workflows" / "ci.yml").write_text("name: altered\n", encoding="utf-8")
             return True
 
+        def inject_secret_environment(repository: Path) -> bool:
+            (repository / ".github" / "workflows" / "docs-truth.yml").write_text(
+                "name: docs\nenv:\n  TOKEN: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}\n",
+                encoding="utf-8",
+            )
+            return True
+
+        def substitute_runner(repository: Path) -> bool:
+            (repository / ".github" / "workflows" / "docs-truth.yml").write_text(
+                "name: docs\njobs:\n  docs:\n    runs-on: self-hosted\n",
+                encoding="utf-8",
+            )
+            return True
+
         def symlink(repository: Path) -> bool:
             path = repository / ".github" / "workflows" / "docs-truth.yml"
             path.unlink()
@@ -211,7 +375,15 @@ class WorkflowTreeTests(unittest.TestCase):
             )
             return False
 
-        for name, mutation in (("add", add), ("delete", delete), ("mutate", mutate), ("symlink", symlink), ("gitlink", gitlink)):
+        for name, mutation in (
+            ("add", add),
+            ("delete", delete),
+            ("mutate", mutate),
+            ("secret-environment", inject_secret_environment),
+            ("runner-substitution", substitute_runner),
+            ("symlink", symlink),
+            ("gitlink", gitlink),
+        ):
             with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
                 source, base_sha, head_sha, merge_sha = create_pull_request_graph(Path(temporary), mutation)
                 store = bare_store(Path(temporary), source)
