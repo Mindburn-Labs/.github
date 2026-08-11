@@ -1,0 +1,62 @@
+name: HELM Workflow State Audit
+
+on:
+  schedule:
+    - cron: "17,47 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  audit:
+    if: ${{ github.repository == 'Mindburn-Labs/.github' }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout policy
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Audit live workflow states
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            echo "::error::MINDBURN_ORG_READ_TOKEN is unavailable"
+            exit 1
+          fi
+
+          inventory="$RUNNER_TEMP/workflow-inventory.jsonl"
+          report="$RUNNER_TEMP/workflow-state-report.json"
+          : > "$inventory"
+          gh api --paginate --method GET 'orgs/Mindburn-Labs/repos?per_page=100&type=all' |
+            jq -r '.[].full_name' | LC_ALL=C sort -u > "$RUNNER_TEMP/repositories.txt"
+          while IFS= read -r repository; do
+            gh api --paginate --method GET "repos/${repository}/actions/workflows?per_page=100" |
+              jq -c --arg repository "$repository" \
+                '.workflows[] | {repository: $repository, workflow_id: .id, name, path, state}' \
+                >> "$inventory"
+          done < "$RUNNER_TEMP/repositories.txt"
+
+          set +e
+          python3 scripts/audit_workflow_states.py \
+            --inventory "$inventory" \
+            --policy config/workflow-state-policy.json \
+            --output "$report"
+          audit_status=$?
+          set -e
+
+          if [[ -f "$report" ]]; then
+            {
+              echo '### HELM workflow state audit'
+              echo '```json'
+              cat "$report"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$audit_status"

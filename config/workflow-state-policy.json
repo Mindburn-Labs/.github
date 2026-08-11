@@ -1,0 +1,29 @@
+{
+  "schema": "mindburn.workflow-state-policy/v1",
+  "intentionally_disabled": [
+    {
+      "repository": "Mindburn-Labs/dev-orchestration",
+      "workflow_id": 305666915,
+      "path": ".github/workflows/docs-truth-self.yml",
+      "expected_state": "disabled_manually",
+      "allow_absent": true,
+      "reason": "Obsolete workflow record; the file is absent from the default branch."
+    },
+    {
+      "repository": "Mindburn-Labs/helm-ai-kernel",
+      "workflow_id": 320266254,
+      "path": ".github/workflows/copilot-code-review.yml",
+      "expected_state": "disabled_manually",
+      "allow_absent": true,
+      "reason": "Obsolete Copilot-billed review workflow; the file is absent from the default branch."
+    },
+    {
+      "repository": "Mindburn-Labs/homebrew-tap",
+      "workflow_id": 266452277,
+      "path": ".github/workflows/publish.yml",
+      "expected_state": "disabled_manually",
+      "allow_absent": false,
+      "reason": "Redundant privileged pull_request_target publication path; keep disabled pending deletion or redesign."
+    }
+  ]
+}

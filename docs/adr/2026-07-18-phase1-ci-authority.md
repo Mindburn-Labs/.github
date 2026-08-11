@@ -1,6 +1,24 @@
 # Phase 1 CI authority and private-module boundary
 
-**Status:** owner-approved on 2026-07-18; implementation remains review-gated.
+**Status:** superseded on 2026-08-11 by the HELM-366 governed full-authority
+decision and the current estate policy. Historical evidence below is retained.
+
+## Supersession
+
+`mindburnlabs` and `peycheff-com` are Ivan's human GitHub accounts and remain
+organization owners/admins. Agents retain full delivery authority through
+those accounts. The controlling boundary is now exact, single-use human
+approval before each privileged Actions, release, production, access, secret,
+or settings mutation—not account demotion, a standing containment instruction,
+or automatic counter-mutation.
+
+The current policy is `Mindburn-Labs/docs` `ai/estate-policy.md`; the canonical
+operator procedure is `Mindburn-Labs/docs_for_team`
+`skills/helm-privileged-ops/SKILL.md`. Linear `HELM-366` records the 2026-08-10
+release cancellation/disable incident and remains open until source controls,
+live state detection, separately approved recovery, release convergence, and a
+clean recurrence audit are all proved. The 2026-07-18 decisions and event log
+below are historical context only where they conflict with those sources.
 
 ## Decision
 

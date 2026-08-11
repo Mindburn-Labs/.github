@@ -11,3 +11,17 @@ Protected paths:
 - `profile/README.md`
 - `repo-manifest.yaml`
 - `.github/workflows/**`
+
+## Privileged GitHub operations
+
+`mindburnlabs` and `peycheff-com` are Ivan's human GitHub accounts. Both must
+remain Mindburn-Labs owners/admins, and agents may use their full authority for
+delivery. Credential capability is not human approval.
+
+Before any Actions cancel, force-cancel, rerun, enable, disable, or dispatch;
+release, tag, or package mutation; production promotion; access or secret
+change; or organization/repository setting, ruleset, or App change, load
+`helm-privileged-ops` and stop for its exact single-use approval packet. An
+instruction to continue, finish, ship, or resolve an incident is not approval
+for any privileged effect or retry. A source PR never authorizes the operation
+it describes.
