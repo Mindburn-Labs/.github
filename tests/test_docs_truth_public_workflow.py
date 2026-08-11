@@ -23,6 +23,9 @@ class DocsTruthTrustedWorkerTests(unittest.TestCase):
         self.assertNotIn("environment:", self.source)
         self.assertIn("runs-on: ubuntu-latest", self.source)
         self.assertNotIn("runs-on: self-hosted", self.source)
+        self.assertIn('workflow_ref = job.get("workflow_ref")', self.source)
+        self.assertIn('workflow_file_path = job.get("workflow_file_path")', self.source)
+        self.assertIn('expected_path = ".github/workflows/docs-truth-public.yml"', self.source)
 
     def test_every_third_party_action_is_pinned_and_no_artifact_or_cache_is_consumed(self) -> None:
         uses = re.findall(r"^        uses:\s*(\S+)", self.source, flags=re.MULTILINE)

@@ -31,10 +31,16 @@ jobs:
           job = json.loads(os.environ["JOB_CONTEXT"])
           repository = job.get("workflow_repository")
           workflow_sha = job.get("workflow_sha")
+          workflow_ref = job.get("workflow_ref")
+          workflow_file_path = job.get("workflow_file_path")
           if repository != "Mindburn-Labs/.github":
               raise SystemExit("trusted worker repository mismatch")
           if not isinstance(workflow_sha, str) or re.fullmatch(r"[0-9a-f]{40}", workflow_sha) is None:
               raise SystemExit("trusted worker must be called by immutable commit SHA")
+          expected_path = ".github/workflows/docs-truth-public.yml"
+          expected_ref = f"{repository}/{expected_path}@{workflow_sha}"
+          if workflow_file_path != expected_path or workflow_ref != expected_ref:
+              raise SystemExit("trusted worker call must use the exact workflow path at its resolved SHA")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"workflow_repository={repository}\n")
               output.write(f"workflow_sha={workflow_sha}\n")
