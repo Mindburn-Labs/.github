@@ -1,5 +1,7 @@
 {
-  "schema": "mindburn.workflow-state-policy/v1",
+  "schema": "mindburn.workflow-state-policy/v2",
+  "audit_log_since": "2026-08-11",
+  "reviewed_state_changes": [],
   "intentionally_disabled": [
     {
       "repository": "Mindburn-Labs/dev-orchestration",

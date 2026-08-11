@@ -20,6 +20,29 @@ live state detection, separately approved recovery, release convergence, and a
 clean recurrence audit are all proved. The 2026-07-18 decisions and event log
 below are historical context only where they conflict with those sources.
 
+### Scheduled detector contract
+
+The `.github` scheduled detector is a read-only observer, not a continuous or
+self-protecting control. Each run fails closed unless the credential-visible
+repository set exactly matches `repo-manifest.yaml`, checks each repository's
+Actions permission and workflow states, and reconciles workflow enable/disable
+audit events from the source-controlled lower bound in
+`config/workflow-state-policy.json`. An audit event remains a violation until a
+reviewed entry ties its immutable document ID and observed fields to a durable
+approval record. Manual dispatch is intentionally absent so branch-selected
+workflow code cannot receive the organization read credential.
+
+A successful run proves only the scope that run observed. Disabling this
+workflow, or disabling Actions for the `.github` repository, prevents the run
+that would report the change. Closing that gap requires a watchdog in a
+separately administered execution domain with protected source, a least-
+privilege credential able to read the organization repository inventory,
+Actions permissions, workflow states, and audit log, plus a missed-heartbeat
+alert for this schedule. Creating that identity, secret, execution path, or
+repository setting is a privileged architecture change requiring its own exact
+owner approval and authoritative readback; this source PR performs none of
+those changes and does not close HELM-366 by itself.
+
 ## Decision
 
 1. Keep the protected P0 workflows manually disabled. Do not re-enable any of
