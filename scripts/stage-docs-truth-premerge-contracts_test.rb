@@ -226,7 +226,7 @@ class StageDocsTruthPremergeContractsTest < Minitest::Test
   def test_workflow_pin_matches_the_reviewed_script
     script = File.expand_path("stage-docs-truth-premerge-contracts.rb", __dir__)
     workflow = File.expand_path("../.github/workflows/docs-truth-public.yml", __dir__)
-    pinned = File.read(workflow).match(/echo "([0-9a-f]{64})  workspace\/.github-repo\/scripts\/stage-docs-truth-premerge-contracts\.rb"/)
+    pinned = File.read(workflow).match(/echo "([0-9a-f]{64})  trusted-worker\/scripts\/stage-docs-truth-premerge-contracts\.rb"/)
     refute_nil pinned
     assert_equal Digest::SHA256.file(script).hexdigest, pinned[1]
   end

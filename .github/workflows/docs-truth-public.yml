@@ -1,124 +1,178 @@
-name: Docs Truth Public Reusable
+name: Docs Truth Trusted Worker
 
 permissions:
+  actions: read
   contents: read
-  # Needed by the "Post orphan-ledger PR comment" step to upsert a comment on
-  # PRs when the report contains missing_ledger_row failures. Caller workflows
-  # must also declare pull-requests: write for the token to actually carry
-  # that permission — a reusable declaration alone is not enough.
-  pull-requests: write
+  pull-requests: read
 
 on:
   workflow_call:
-    inputs:
-      repo:
-        required: false
-        type: string
-      changed_base:
-        required: false
-        type: string
     secrets:
       MINDBURN_ORG_READ_TOKEN:
         required: true
-  workflow_dispatch:
-    inputs:
-      repo:
-        description: Repository name to check. Defaults to the current repo.
-        required: false
-        type: string
-      changed_base:
-        description: Optional base ref for source/doc drift checks.
-        required: false
-        type: string
 
 jobs:
-  docs-truth:
-    timeout-minutes: 20
-    name: docs-truth
+  docs-truth-trusted:
+    name: docs-truth-trusted
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - name: Resolve subject repo
-        id: subject
+      - name: Bind called workflow identity
+        id: identity
         shell: bash
         env:
-          INPUT_REPO: ${{ inputs.repo }}
+          JOB_CONTEXT: ${{ toJSON(job) }}
         run: |
-          repo="$INPUT_REPO"
-          if [ -z "$repo" ]; then
-            repo="${GITHUB_REPOSITORY#*/}"
-          fi
-          if [ "$repo" != ".github" ] && { [[ ! "$repo" =~ ^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$ ]] || [[ "$repo" == *".."* ]]; }; then
-            echo "::error::Invalid subject repository name"
-            exit 1
-          fi
-          local_name="$repo"
-          if [ "$repo" = ".github" ]; then
-            local_name=".github-repo"
-          fi
-          echo "repo=$repo" >> "$GITHUB_OUTPUT"
-          echo "local_name=$local_name" >> "$GITHUB_OUTPUT"
+          python3 - <<'PY'
+          import json
+          import os
+          import re
 
-      # A reusable workflow's `secrets: required: true` only checks that the
-      # caller declared the key, not that the value is non-empty or usable. So
-      # a deleted secret surfaces as actions/checkout's "Input required and not
-      # supplied: token", and an under-scoped one as a bare 403 — both read as
-      # checkout bugs. The 2026-07-16 sweep cost days to that ambiguity
-      # (HELM-311). Fail here instead, naming the actual cause. Probe the entire
-      # private read-set: a public subject can be readable while the private
-      # ledger or runner checkout still fails.
-      - name: Verify org read token
-        shell: bash
+          job = json.loads(os.environ["JOB_CONTEXT"])
+          repository = job.get("workflow_repository")
+          workflow_sha = job.get("workflow_sha")
+          if repository != "Mindburn-Labs/.github":
+              raise SystemExit("trusted worker repository mismatch")
+          if not isinstance(workflow_sha, str) or re.fullmatch(r"[0-9a-f]{40}", workflow_sha) is None:
+              raise SystemExit("trusted worker must be called by immutable commit SHA")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"workflow_repository={repository}\n")
+              output.write(f"workflow_sha={workflow_sha}\n")
+          PY
+
+      - name: Derive exact pull request admission
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         env:
-          TOKEN: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}
-          SUBJECT_REPO: ${{ steps.subject.outputs.repo }}
-        run: |
-          if [ -z "$TOKEN" ]; then
-            echo "::error::MINDBURN_ORG_READ_TOKEN resolved empty. The caller declared the secret but no value reached this run — it was deleted, or an org secret's visibility does not cover this repo."
-            exit 1
-          fi
-          for repo in "$SUBJECT_REPO" .github docs dev-orchestration; do
-            code=$(curl -sS -o /dev/null -w '%{http_code}' \
-              -H "Authorization: Bearer $TOKEN" \
-              -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/Mindburn-Labs/$repo")
-            if [ "$code" != "200" ]; then
-              echo "::error::MINDBURN_ORG_READ_TOKEN cannot read Mindburn-Labs/$repo (HTTP $code). 401=invalid or expired; 403=valid but insufficient scope; 404=token has no access to this repo. Checkout would fail next with a misleading git error."
-              exit 1
-            fi
-          done
-
-      - name: Checkout subject repo
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+          ADMISSION_PATH: ${{ runner.temp }}/docs-truth-admission.json
+          EXPECTED_REPOSITORY: Mindburn-Labs/app-helm-docs
+          EXPECTED_WORKFLOW_ID: "305654002"
+          EXPECTED_WORKFLOW_NAME: Docs Truth
+          EXPECTED_WORKFLOW_PATH: .github/workflows/docs-truth.yml
         with:
-          repository: Mindburn-Labs/${{ steps.subject.outputs.repo }}
-          path: workspace/${{ steps.subject.outputs.local_name }}
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.repo != '' && 'main' || github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 0
-          persist-credentials: false
-          token: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}
+          github-token: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const expectedRepository = process.env.EXPECTED_REPOSITORY;
+            const [owner, repo] = expectedRepository.split('/');
+            const expectedWorkflowId = Number(process.env.EXPECTED_WORKFLOW_ID);
+            const expectedWorkflowName = process.env.EXPECTED_WORKFLOW_NAME;
+            const expectedWorkflowPath = process.env.EXPECTED_WORKFLOW_PATH;
+            const eventRun = context.payload.workflow_run;
+            const shaPattern = /^[0-9a-f]{40}$/;
 
-      - name: Checkout .github inventory
-        if: steps.subject.outputs.repo != '.github'
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+            function fail(message) {
+              throw new Error(`docs-truth admission rejected: ${message}`);
+            }
+            function requirePositiveInteger(value, label) {
+              if (!Number.isSafeInteger(value) || value <= 0) fail(`${label} must be a positive integer`);
+              return value;
+            }
+            function requireSha(value, label) {
+              if (typeof value !== 'string' || !shaPattern.test(value)) fail(`${label} must be a lowercase SHA`);
+              return value;
+            }
+            function requireRun(run, label) {
+              if (!run || typeof run !== 'object') fail(`${label} is missing`);
+              if (run.repository?.full_name !== expectedRepository) fail(`${label}.repository mismatch`);
+              if (run.head_repository?.full_name !== expectedRepository) fail(`${label}.head_repository mismatch`);
+              if (run.workflow_id !== expectedWorkflowId) fail(`${label}.workflow_id mismatch`);
+              if (run.name !== expectedWorkflowName) fail(`${label}.name mismatch`);
+              if (run.path !== expectedWorkflowPath) fail(`${label}.path mismatch`);
+              if (run.event !== 'pull_request') fail(`${label}.event must be pull_request`);
+              if (run.status !== 'completed' || run.conclusion !== 'success') fail(`${label} must be a successful completed run`);
+              requirePositiveInteger(run.id, `${label}.id`);
+              requirePositiveInteger(run.run_attempt, `${label}.run_attempt`);
+              requireSha(run.head_sha, `${label}.head_sha`);
+            }
+
+            if (context.eventName !== 'workflow_run') fail('caller event must be workflow_run');
+            requireRun(eventRun, 'event.workflow_run');
+
+            const response = await github.rest.actions.getWorkflowRun({
+              owner,
+              repo,
+              run_id: eventRun.id,
+              exclude_pull_requests: false,
+            });
+            const run = response.data;
+            requireRun(run, 'api.workflow_run');
+            if (run.id !== eventRun.id) fail('workflow run id changed across snapshots');
+            if (run.run_attempt !== eventRun.run_attempt) fail('workflow run attempt changed across snapshots');
+            if (run.head_sha !== eventRun.head_sha) fail('workflow run head changed across snapshots');
+
+            const associated = await github.paginate(
+              'GET /repos/{owner}/{repo}/commits/{commit_sha}/pulls',
+              { owner, repo, commit_sha: run.head_sha, per_page: 100 },
+            );
+            const candidates = associated.filter(
+              (pull) =>
+                pull.state === 'open' &&
+                pull.base?.ref === 'main' &&
+                pull.base?.repo?.full_name === expectedRepository &&
+                pull.head?.repo?.full_name === expectedRepository &&
+                pull.head?.sha === run.head_sha,
+            );
+            if (candidates.length !== 1) fail('head SHA must identify exactly one open same-repository PR to main');
+
+            const pullNumber = requirePositiveInteger(candidates[0].number, 'pull_request.number');
+            const pullResponse = await github.rest.pulls.get({ owner, repo, pull_number: pullNumber });
+            const pull = pullResponse.data;
+            if (pull.state !== 'open') fail('pull request must remain open');
+            if (pull.base?.ref !== 'main' || pull.base?.repo?.full_name !== expectedRepository) fail('pull request base mismatch');
+            if (pull.head?.repo?.full_name !== expectedRepository) fail('fork pull requests are not admitted');
+            const baseSha = requireSha(pull.base?.sha, 'pull_request.base.sha');
+            const headSha = requireSha(pull.head?.sha, 'pull_request.head.sha');
+            const mergeSha = requireSha(pull.merge_commit_sha, 'pull_request.merge_commit_sha');
+            if (headSha !== run.head_sha) fail('pull request head does not match workflow run head');
+
+            const admission = {
+              schema: 'mindburn.authority-pr-admission/v1',
+              repository: expectedRepository,
+              pr_number: pullNumber,
+              base: { ref: 'main', sha: baseSha },
+              head: { repository: expectedRepository, sha: headSha },
+              merge_sha: mergeSha,
+              workflow_run_head_sha: run.head_sha,
+            };
+            fs.writeFileSync(process.env.ADMISSION_PATH, `${JSON.stringify(admission)}\n`, {
+              encoding: 'utf8',
+              mode: 0o600,
+              flag: 'wx',
+            });
+
+      - name: Load exact trusted worker source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: Mindburn-Labs/.github
-          path: workspace/.github-repo
+          ref: ${{ steps.identity.outputs.workflow_sha }}
+          path: trusted-worker
           fetch-depth: 1
           persist-credentials: false
           token: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}
 
-      - name: Checkout docs truth ledger
-        if: steps.subject.outputs.repo != 'docs'
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Verify trusted worker source
+        shell: bash
+        env:
+          TRUSTED_WORKFLOW_SHA: ${{ steps.identity.outputs.workflow_sha }}
+        run: |
+          observed=$(git -C "$GITHUB_WORKSPACE/trusted-worker" rev-parse HEAD)
+          if [ "$observed" != "$TRUSTED_WORKFLOW_SHA" ]; then
+            echo "::error::Trusted worker checkout did not resolve to the called workflow SHA"
+            exit 1
+          fi
+
+      - name: Load pinned Docs Truth ledger
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: Mindburn-Labs/docs
+          ref: 6f9b686a4db10fed2f968cf2474477051d43c0b0
           path: workspace/docs
           fetch-depth: 1
           persist-credentials: false
           token: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}
 
-      - name: Checkout docs-truth runner
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Load pinned Docs Truth runner
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: Mindburn-Labs/dev-orchestration
           ref: 4338b9ae6b76284aeee7a4cfe9f8d6ef9f101156
@@ -127,238 +181,79 @@ jobs:
           persist-credentials: false
           token: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}
 
-      - name: Verify pre-merge contract implementation
-        if: steps.subject.outputs.repo != '.github' && steps.subject.outputs.repo != 'docs' && github.repository == format('Mindburn-Labs/{0}', steps.subject.outputs.repo)
+      - name: Bind candidate Git objects without checkout
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}
+        run: |
+          python3 "$GITHUB_WORKSPACE/trusted-worker/scripts/fetch_pull_request_git_objects.py" \
+            --admission "$RUNNER_TEMP/docs-truth-admission.json" \
+            --output "$RUNNER_TEMP/app-helm-docs.git" \
+            --receipt "$RUNNER_TEMP/docs-truth-object-receipt.json"
+
+      - name: Verify workflow tree and materialize inert data
         shell: bash
         run: |
-          echo "e0d29e03c4c4ad8bc5f20955ce53c2d944f4af280b0e7442c61f9bd0b732ff9d  workspace/.github-repo/scripts/stage-docs-truth-premerge-contracts.rb" | sha256sum --check
+          python3 "$GITHUB_WORKSPACE/trusted-worker/scripts/verify_workflow_tree.py" \
+            --profile app-helm-docs \
+            --parent-repository "$RUNNER_TEMP/app-helm-docs.git" \
+            --candidate-repository "$RUNNER_TEMP/app-helm-docs.git" \
+            --object-receipt "$RUNNER_TEMP/docs-truth-object-receipt.json" \
+            --materialize-directory "$GITHUB_WORKSPACE/workspace/app-helm-docs" \
+            --index-file "$RUNNER_TEMP/app-helm-docs.index" \
+            --output "$RUNNER_TEMP/docs-truth-workflow-admission.json"
+
+      - name: Stage trusted inventory and reject executable ledger rows
+        shell: bash
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/workspace/.github-repo"
+          cp "$GITHUB_WORKSPACE/trusted-worker/repo-manifest.yaml" \
+            "$GITHUB_WORKSPACE/workspace/.github-repo/repo-manifest.yaml"
+          ruby -rcsv -e '
+            ledger = CSV.read(ARGV.fetch(0), headers: true)
+            rows = ledger.select { |row| row["repo"] == "app-helm-docs" }
+            unsafe = rows.select do |row|
+              row["status"] == "generated" || !row["truth_gate"].to_s.strip.empty?
+            end
+            abort "app-helm-docs ledger contains executable truth_gate semantics" unless unsafe.empty?
+          ' "$GITHUB_WORKSPACE/workspace/docs/audit/markdown-estate-ledger.csv"
+
+      - name: Verify trusted pre-merge contract implementation
+        shell: bash
+        run: |
+          echo "e0d29e03c4c4ad8bc5f20955ce53c2d944f4af280b0e7442c61f9bd0b732ff9d  trusted-worker/scripts/stage-docs-truth-premerge-contracts.rb" | sha256sum --check
 
       - name: Stage verified pre-merge ledger contracts
-        if: steps.subject.outputs.repo != '.github' && steps.subject.outputs.repo != 'docs' && github.repository == format('Mindburn-Labs/{0}', steps.subject.outputs.repo)
         shell: bash
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: Mindburn-Labs/app-helm-docs
+          GITHUB_TOKEN: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}
         run: |
-          ruby "$GITHUB_WORKSPACE/workspace/.github-repo/scripts/stage-docs-truth-premerge-contracts.rb" \
+          ruby "$GITHUB_WORKSPACE/trusted-worker/scripts/stage-docs-truth-premerge-contracts.rb" \
             --ledger "$GITHUB_WORKSPACE/workspace/docs/audit/markdown-estate-ledger.csv" \
-            --root "$GITHUB_WORKSPACE/workspace/${{ steps.subject.outputs.local_name }}" \
-            --repo "${{ steps.subject.outputs.repo }}"
+            --root "$GITHUB_WORKSPACE/workspace/app-helm-docs" \
+            --repo app-helm-docs
 
-      - name: Run docs truth gate
+      - name: Resolve immutable Git bindings
+        id: binding
+        shell: bash
+        run: |
+          ruby -rjson -e '
+            admission = JSON.parse(File.read(ARGV.fetch(0)))
+            puts "base_sha=#{admission.fetch("base").fetch("sha")}"
+          ' "$RUNNER_TEMP/docs-truth-admission.json" >> "$GITHUB_OUTPUT"
+
+      - name: Recompute Docs Truth from inert merge data
         shell: bash
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          INPUT_CHANGED_BASE: ${{ inputs.changed_base }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GIT_DIR: ${{ runner.temp }}/app-helm-docs.git
+          GIT_INDEX_FILE: ${{ runner.temp }}/app-helm-docs.index
+          GIT_WORK_TREE: ${{ github.workspace }}/workspace/app-helm-docs
+          CHANGED_BASE_SHA: ${{ steps.binding.outputs.base_sha }}
         run: |
-          args=(
-            --mode local
-            --workspace-root "$GITHUB_WORKSPACE/workspace"
-            --repo "${{ steps.subject.outputs.repo }}"
+          ruby "$GITHUB_WORKSPACE/workspace/dev-orchestration/estate-control-plane/scripts/docs-truth-org.rb" \
+            --mode local \
+            --workspace-root "$GITHUB_WORKSPACE/workspace" \
+            --repo app-helm-docs \
+            --changed-base "$CHANGED_BASE_SHA" \
             --report "$RUNNER_TEMP/docs-truth-report.json"
-          )
-          changed_base="$INPUT_CHANGED_BASE"
-          if [ -z "$changed_base" ] && [ "$EVENT_NAME" = "pull_request" ]; then
-            changed_base="$PR_BASE_SHA"
-          fi
-          if [ -n "$changed_base" ]; then
-            if [[ ! "$changed_base" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || \
-              { [[ ! "$changed_base" =~ ^[0-9a-fA-F]{40}$ ]] && ! git check-ref-format --allow-onelevel "$changed_base" >/dev/null 2>&1; }; then
-              echo "::error::Invalid changed-base ref"
-              exit 1
-            fi
-            args+=(--changed-base "$changed_base")
-          fi
-          ruby "$GITHUB_WORKSPACE/workspace/dev-orchestration/estate-control-plane/scripts/docs-truth-org.rb" "${args[@]}"
-
-      - name: Upload docs truth report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: docs-truth-report
-          path: ${{ runner.temp }}/docs-truth-report.json
-          if-no-files-found: ignore
-
-      # Post-hoc: on a pull_request run, if the report contains any
-      # missing_ledger_row failures, upsert a PR comment that lists the offending
-      # files and gives the reader a copy-paste-ready block of CSV rows to add
-      # to Mindburn-Labs/docs/audit/markdown-estate-ledger.csv. The intent is to
-      # remove the "recurring silent-orphan" pain-point where autonomous agents
-      # add tracked markdown without opening the paired ledger PR (root cause of
-      # multiple docs-truth stalls this week; see the fixes in Mindburn-Labs/docs
-      # #27 and #28). If the report is clean, any prior orphan comment on this PR
-      # is deleted so a re-opened PR doesn't carry stale advice.
-      - name: Post orphan-ledger PR comment
-        if: always() && github.event_name == 'pull_request'
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
-        env:
-          REPORT_PATH: ${{ runner.temp }}/docs-truth-report.json
-          SUBJECT_REPO: ${{ steps.subject.outputs.repo }}
-        with:
-          script: |
-            const fs = require('fs');
-            const MARKER = '<!-- docs-truth-orphan-comment -->';
-            const path = process.env.REPORT_PATH;
-
-            async function findExistingComment() {
-              const comments = await github.paginate(
-                github.rest.issues.listComments,
-                {
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: context.issue.number,
-                  per_page: 100,
-                }
-              );
-              return comments.find(
-                (c) =>
-                  c.user?.login === 'github-actions[bot]' &&
-                  (c.body || '').startsWith(MARKER)
-              );
-            }
-
-            async function deleteIfExists() {
-              const existing = await findExistingComment();
-              if (existing) {
-                await github.rest.issues.deleteComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  comment_id: existing.id,
-                });
-                core.info(`Deleted stale orphan-ledger comment ${existing.id}`);
-              }
-            }
-
-            if (!fs.existsSync(path)) {
-              core.info('No docs-truth-report.json found — nothing to comment on.');
-              await deleteIfExists();
-              return;
-            }
-
-            let report;
-            try {
-              report = JSON.parse(fs.readFileSync(path, 'utf8'));
-            } catch (err) {
-              core.warning(`Could not parse docs-truth-report.json: ${err.message}`);
-              await deleteIfExists();
-              return;
-            }
-
-            const orphans = (report.failures || []).filter(
-              (f) => f.code === 'missing_ledger_row'
-            );
-
-            if (orphans.length === 0) {
-              // Report is clean of orphan failures — remove any stale comment
-              // from a previous run so the PR reads accurately.
-              await deleteIfExists();
-              return;
-            }
-
-            const subject = process.env.SUBJECT_REPO;
-            const sourceRefs = [
-              `${subject}:Makefile`,
-              `${subject}:catalog-info.yaml`,
-              `${subject}:agent.yaml`,
-              `.github-repo:repo-manifest.yaml`,
-            ].join(';');
-            const notes =
-              'initial docs-truth inventory row generated from tracked markdown; source_refs name owning repo evidence or gates';
-
-            // A PR author can smuggle backticks or newlines through a
-            // crafted markdown filename and inject arbitrary content into
-            // this bot-authored comment. Escape every untrusted value
-            // (report.failures[].path) before interpolating.
-            //
-            //   - Markdown escape: backslash-escape backticks and backslashes
-            //     inside the inline-code span; CR/LF replaced with visible
-            //     literals so a single log-line stays on one line.
-            //   - CSV escape: RFC 4180 — wrap every field in ", double any
-            //     internal ", visualize CR/LF so the row stays single-line.
-            //     Applied to every column (including the static ones) so the
-            //     block round-trips cleanly if a reader pastes it into the
-            //     ledger CSV. Ledger fields treat "" and unquoted "" as
-            //     equivalent empty strings.
-            const escapeMarkdownInline = (value) =>
-              String(value)
-                .replace(/\\/g, '\\\\')
-                .replace(/`/g, '\\`')
-                .replace(/\r/g, '\\r')
-                .replace(/\n/g, '\\n');
-
-            const escapeCsvField = (value) =>
-              `"${String(value)
-                .replace(/"/g, '""')
-                .replace(/\r/g, '\\r')
-                .replace(/\n/g, '\\n')}"`;
-
-            const rows = orphans
-              .map((f) =>
-                [
-                  subject,
-                  f.path,
-                  'active',
-                  subject,
-                  'repo_docs',
-                  sourceRefs,
-                  '',
-                  'false',
-                  '',
-                  notes,
-                ]
-                  .map(escapeCsvField)
-                  .join(',')
-              )
-              .join('\n');
-
-            const fileList = orphans
-              .map((f) => `- \`${escapeMarkdownInline(f.path)}\``)
-              .join('\n');
-
-            const body = [
-              MARKER,
-              `## Docs Truth: \`missing_ledger_row\` — ${orphans.length} file(s) need ledger rows`,
-              '',
-              `Tracked markdown in \`${subject}\` has no matching row in the org ledger`,
-              `(\`Mindburn-Labs/docs/audit/markdown-estate-ledger.csv\`). This gate will stay`,
-              `red on \`main\` after merge until the rows are added there.`,
-              '',
-              '<details><summary>Files that need ledger rows</summary>',
-              '',
-              fileList,
-              '',
-              '</details>',
-              '',
-              '### Fix — open a small PR against `Mindburn-Labs/docs`',
-              '',
-              `Append these rows to \`audit/markdown-estate-ledger.csv\` (schema: \`repo,path,status,owner,truth_kind,source_refs,truth_gate,public_surface,superseded_by,notes\`):`,
-              '',
-              '```csv',
-              rows,
-              '```',
-              '',
-              `Adjust \`source_refs\` if \`${subject}\` does not have all four of \`Makefile\`, \`catalog-info.yaml\`, \`agent.yaml\`, and the \`.github-repo:repo-manifest.yaml\` entry — grep neighboring \`${subject},\` rows in the CSV to see the canonical set for this repo. Keep the new rows alphabetically ordered inside the \`${subject},\` block.`,
-              '',
-              `Once the ledger PR merges, re-run this job (\`gh run rerun ${context.runId} --repo ${context.repo.owner}/${context.repo.repo} --failed\`) to turn this gate green.`,
-              '',
-              `<sub>Auto-generated by \`Mindburn-Labs/.github/.github/workflows/docs-truth-public.yml\`. Longer-term refactor of the two-repo ledger flow is tracked in [HELM-41](https://linear.app/mindburn/issue/HELM-41).</sub>`,
-            ].join('\n');
-
-            const existing = await findExistingComment();
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body,
-              });
-              core.info(`Updated orphan-ledger comment ${existing.id}`);
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body,
-              });
-              core.info(`Created orphan-ledger comment on PR #${context.issue.number}`);
-            }
