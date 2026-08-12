@@ -49,10 +49,20 @@ class DocsTruthTrustedWorkerTests(unittest.TestCase):
             "permission-contents: read",
             "permission-pull-requests: read",
             "permission-statuses: write",
+            "repositories: app-helm-docs",
+            "github-token: ${{ steps.status-token.outputs.token }}",
+            "token: ${{ steps.read-token.outputs.token }}",
         ):
             with self.subTest(required=required):
                 self.assertIn(required, self.source)
         self.assertNotIn("github-token: ${{ secrets.", self.source)
+        status_block = self.source.split("      - name: Mint candidate status token", 1)[1].split(
+            "      - name: Load exact trusted worker source", 1
+        )[0]
+        self.assertNotIn("            .github", status_block)
+        self.assertNotIn("            docs", status_block)
+        self.assertNotIn("            dev-orchestration", status_block)
+        self.assertNotIn("permission-statuses: write", self.source.split("      - name: Mint candidate status token", 1)[0])
 
     def test_every_third_party_action_is_pinned_and_no_artifact_or_cache_is_consumed(self) -> None:
         uses = re.findall(r"^        uses:\s*(\S+)", self.source, flags=re.MULTILINE)
