@@ -63,6 +63,7 @@ class DocsTruthTrustedWorkerTests(unittest.TestCase):
         self.assertNotIn("            docs", status_block)
         self.assertNotIn("            dev-orchestration", status_block)
         self.assertNotIn("permission-statuses: write", self.source.split("      - name: Mint candidate status token", 1)[0])
+        self.assertNotIn("permission-actions: read", self.source.split("      - name: Mint candidate status token", 1)[0])
 
     def test_every_third_party_action_is_pinned_and_no_artifact_or_cache_is_consumed(self) -> None:
         uses = re.findall(r"^        uses:\s*(\S+)", self.source, flags=re.MULTILINE)
