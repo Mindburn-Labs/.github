@@ -65,7 +65,6 @@ jobs:
             app-helm-docs
             docs
             dev-orchestration
-          permission-actions: read
           permission-contents: read
           permission-pull-requests: read
 
