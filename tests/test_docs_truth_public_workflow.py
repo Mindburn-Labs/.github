@@ -7,12 +7,14 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "docs-truth-public.yml"
+WORKER = ROOT / "scripts" / "docs_truth_trusted_worker.js"
 
 
 class DocsTruthTrustedWorkerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.source = WORKFLOW.read_text(encoding="utf-8")
+        cls.worker_source = WORKER.read_text(encoding="utf-8")
 
     def test_is_call_only_read_only_and_fixed_runner(self) -> None:
         self.assertIn("workflow_call:", self.source)
@@ -20,12 +22,37 @@ class DocsTruthTrustedWorkerTests(unittest.TestCase):
         self.assertNotIn("pull_request_target:", self.source)
         self.assertNotIn("id-token:", self.source)
         self.assertNotRegex(self.source, re.compile(r"\b(?:contents|pull-requests|actions):\s*write\b"))
-        self.assertNotIn("environment:", self.source)
+        self.assertIn("permissions: {}", self.source)
+        self.assertIn("      name: docs-truth-trusted", self.source)
+        self.assertIn("      deployment: false", self.source)
         self.assertIn("runs-on: ubuntu-latest", self.source)
         self.assertNotIn("runs-on: self-hosted", self.source)
         self.assertIn('workflow_ref = job.get("workflow_ref")', self.source)
         self.assertIn('workflow_file_path = job.get("workflow_file_path")', self.source)
         self.assertIn('expected_path = ".github/workflows/docs-truth-public.yml"', self.source)
+
+    def test_broker_token_is_short_lived_and_not_supplied_by_the_caller(self) -> None:
+        self.assertRegex(self.source, re.compile(r"on:\n  workflow_call:\n\njobs:"))
+        self.assertNotIn("MINDBURN_ORG_READ_TOKEN", self.source)
+        self.assertIn(
+            "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
+            self.source,
+        )
+        self.assertIn("client-id: ${{ secrets.DOCS_TRUTH_BROKER_CLIENT_ID }}", self.source)
+        self.assertIn("private-key: ${{ secrets.DOCS_TRUTH_BROKER_PRIVATE_KEY }}", self.source)
+        for required in (
+            "            .github",
+            "            app-helm-docs",
+            "            docs",
+            "            dev-orchestration",
+            "permission-actions: read",
+            "permission-contents: read",
+            "permission-pull-requests: read",
+            "permission-statuses: write",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, self.source)
+        self.assertNotIn("github-token: ${{ secrets.", self.source)
 
     def test_every_third_party_action_is_pinned_and_no_artifact_or_cache_is_consumed(self) -> None:
         uses = re.findall(r"^        uses:\s*(\S+)", self.source, flags=re.MULTILINE)
@@ -63,18 +90,24 @@ class DocsTruthTrustedWorkerTests(unittest.TestCase):
 
     def test_event_and_api_bindings_are_exact_and_forks_fail_closed(self) -> None:
         for required in (
-            "EXPECTED_WORKFLOW_ID: \"305654002\"",
-            "EXPECTED_WORKFLOW_NAME: Docs Truth",
-            "EXPECTED_WORKFLOW_PATH: .github/workflows/docs-truth.yml",
-            "context.eventName !== 'workflow_run'",
-            "run.event !== 'pull_request'",
-            "run.status !== 'completed' || run.conclusion !== 'success'",
+            'const EXPECTED_WORKFLOW_ID = 305654002;',
+            'const EXPECTED_WORKFLOW_NAME = "Docs Truth";',
+            'const EXPECTED_WORKFLOW_PATH = ".github/workflows/docs-truth.yml";',
+            'context.eventName !== "workflow_run"',
+            'run.event !== "pull_request"',
+            'run.status !== "completed" || run.conclusion !== "success"',
             "head SHA must identify exactly one open same-repository PR to main",
             "fork pull requests are not admitted",
             "pull.merge_commit_sha",
+            'const STATUS_CONTEXT = "docs-truth-trusted";',
+            "sameSnapshot(expected, observed)",
+            'state: succeeded ? "success" : "failure"',
         ):
             with self.subTest(required=required):
-                self.assertIn(required, self.source)
+                self.assertIn(required, self.worker_source)
+        self.assertIn("await worker.admit", self.source)
+        self.assertIn("await worker.finalize", self.source)
+        self.assertIn("if: ${{ always() && steps.admission.outputs.head_sha != '' }}", self.source)
 
     def test_runner_and_ledger_are_immutable_and_executable_rows_fail_closed(self) -> None:
         self.assertIn("ref: 6f9b686a4db10fed2f968cf2474477051d43c0b0", self.source)
