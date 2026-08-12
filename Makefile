@@ -6,9 +6,11 @@ REQUIRE_WORKSPACE_CONTEXT ?= 0
 setup:
 	@command -v ruby >/dev/null
 	@command -v python3 >/dev/null
+	@command -v node >/dev/null
 
 test: lint
 	@PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p 'test_*.py'
+	@node --test tests/docs_truth_trusted_worker.test.js
 
 lint:
 	@ruby -e 'require "yaml"; require "date"; YAML.safe_load(File.read("repo-manifest.yaml"), permitted_classes: [Date, Time], aliases: true); puts "validated repo-manifest.yaml"'
