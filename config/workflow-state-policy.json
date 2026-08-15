@@ -1,0 +1,80 @@
+{
+  "schema": "mindburn.workflow-state-policy/v2",
+  "audit_log_since": "2026-08-11",
+  "reviewed_state_changes": [
+    {
+      "document_id": "Hl_jiyArEF0atOOubdOjPw",
+      "action": "workflows.enable_workflow",
+      "repository": "Mindburn-Labs/helm-ai-kernel",
+      "workflow_id": 234627948,
+      "actor": "Hirama",
+      "approval_record": "Restore of release.yml after the unrecorded 2026-08-10 agent disable; investigation recorded in Linear HELM-558 (2026-08-15) and the HELM-550 gate-tamper comment."
+    }
+  ],
+  "intentionally_disabled": [
+    {
+      "repository": "Mindburn-Labs/dev-orchestration",
+      "workflow_id": 305666915,
+      "path": ".github/workflows/docs-truth-self.yml",
+      "expected_state": "disabled_manually",
+      "allow_absent": true,
+      "reason": "Obsolete workflow record; the file is absent from the default branch."
+    },
+    {
+      "repository": "Mindburn-Labs/helm-ai-kernel",
+      "workflow_id": 320266254,
+      "path": ".github/workflows/copilot-code-review.yml",
+      "expected_state": "disabled_manually",
+      "allow_absent": true,
+      "reason": "Obsolete Copilot-billed review workflow; the file is absent from the default branch."
+    },
+    {
+      "repository": "Mindburn-Labs/homebrew-tap",
+      "workflow_id": 266452277,
+      "path": ".github/workflows/publish.yml",
+      "expected_state": "disabled_manually",
+      "allow_absent": false,
+      "reason": "Redundant privileged pull_request_target publication path; keep disabled pending deletion or redesign."
+    },
+    {
+      "repository": "Mindburn-Labs/.github",
+      "workflow_id": 283673207,
+      "path": ".github/workflows/ci.yml",
+      "expected_state": "disabled_manually",
+      "allow_absent": false,
+      "reason": "Disabled 2026-07-29 during the July CI-noise sweep without a recorded decision; fix-or-delete triage tracked in Linear HELM-558."
+    },
+    {
+      "repository": "Mindburn-Labs/gitops-apps",
+      "workflow_id": 283676428,
+      "path": ".github/workflows/ci.yml",
+      "expected_state": "disabled_manually",
+      "allow_absent": false,
+      "reason": "Disabled 2026-07-16 during the July CI-noise sweep without a recorded decision; fix-or-delete triage tracked in Linear HELM-558."
+    },
+    {
+      "repository": "Mindburn-Labs/gitops-platform",
+      "workflow_id": 283676014,
+      "path": ".github/workflows/ci.yml",
+      "expected_state": "disabled_manually",
+      "allow_absent": false,
+      "reason": "Disabled 2026-07-16 during the July CI-noise sweep without a recorded decision; fix-or-delete triage tracked in Linear HELM-558."
+    },
+    {
+      "repository": "Mindburn-Labs/integration-mindburn-platform",
+      "workflow_id": 283675068,
+      "path": ".github/workflows/ci.yml",
+      "expected_state": "disabled_manually",
+      "allow_absent": false,
+      "reason": "Disabled 2026-07-16 during the July CI-noise sweep without a recorded decision; fix-or-delete triage tracked in Linear HELM-558."
+    },
+    {
+      "repository": "Mindburn-Labs/svc-agent-sandbox-runner",
+      "workflow_id": 283677199,
+      "path": ".github/workflows/ci.yml",
+      "expected_state": "disabled_manually",
+      "allow_absent": false,
+      "reason": "Disabled 2026-07-16 during the July CI-noise sweep without a recorded decision; fix-or-delete triage tracked in Linear HELM-558."
+    }
+  ]
+}
