@@ -1,0 +1,101 @@
+name: HELM Workflow State Audit
+
+on:
+  schedule:
+    - cron: "17,47 * * * *"
+
+permissions: {}
+
+jobs:
+  audit:
+    if: ${{ github.repository == 'Mindburn-Labs/.github' }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout policy
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Audit observed workflow state and history
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            echo "::error::MINDBURN_ORG_READ_TOKEN is unavailable"
+            exit 1
+          fi
+
+          expected_repositories="$RUNNER_TEMP/expected-repositories.txt"
+          repositories="$RUNNER_TEMP/repositories.jsonl"
+          repository_names="$RUNNER_TEMP/repository-names.txt"
+          inventory="$RUNNER_TEMP/workflow-inventory.jsonl"
+          audit_events="$RUNNER_TEMP/workflow-state-events.jsonl"
+          report="$RUNNER_TEMP/workflow-state-report.json"
+          : > "$repositories"
+          : > "$inventory"
+          : > "$audit_events"
+
+          ruby -ryaml -e '
+            manifest = YAML.safe_load(File.read("repo-manifest.yaml"), aliases: true)
+            abort "unexpected organization" unless manifest["organization"] == "Mindburn-Labs"
+            names = manifest.fetch("repositories").map { |repository| repository.fetch("name") }
+            abort "duplicate repository in repo-manifest.yaml" unless names.uniq.length == names.length
+            puts names.sort.map { |name| "Mindburn-Labs/#{name}" }
+          ' > "$expected_repositories"
+
+          gh api --paginate --method GET 'orgs/Mindburn-Labs/repos?per_page=100&type=all' |
+            jq -r '.[].full_name' | LC_ALL=C sort -u > "$repository_names"
+          while IFS= read -r repository; do
+            gh api --method GET "repos/${repository}/actions/permissions" |
+              jq -c --arg repository "$repository" \
+                '{repository: $repository, actions_enabled: .enabled}' \
+                >> "$repositories"
+            gh api --paginate --method GET "repos/${repository}/actions/workflows?per_page=100" |
+              jq -c --arg repository "$repository" \
+                '.workflows[] | {repository: $repository, workflow_id: .id, name, path, state}' \
+                >> "$inventory"
+          done < "$repository_names"
+
+          audit_since="$(jq -er '.audit_log_since | select(type == "string")' config/workflow-state-policy.json)"
+          for action in workflows.disable_workflow workflows.enable_workflow; do
+            gh api --paginate --method GET orgs/Mindburn-Labs/audit-log \
+              -f phrase="action:${action} created:>=${audit_since}" \
+              -f order=asc \
+              -f per_page=100 |
+              jq -c --arg action "$action" \
+                '.[] | select(.action == $action) | {
+                  document_id: ._document_id,
+                  action,
+                  repository: .repo,
+                  workflow_id,
+                  actor,
+                  created_at
+                }' \
+                >> "$audit_events"
+          done
+
+          set +e
+          python3 scripts/audit_workflow_states.py \
+            --inventory "$inventory" \
+            --repositories "$repositories" \
+            --expected-repositories "$expected_repositories" \
+            --audit-events "$audit_events" \
+            --policy config/workflow-state-policy.json \
+            --output "$report"
+          audit_status=$?
+          set -e
+
+          if [[ -f "$report" ]]; then
+            {
+              echo '### HELM workflow state audit (scheduled observer)'
+              echo '```json'
+              cat "$report"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$audit_status"

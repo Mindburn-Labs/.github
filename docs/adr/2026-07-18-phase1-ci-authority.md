@@ -1,6 +1,59 @@
 # Phase 1 CI authority and private-module boundary
 
-**Status:** owner-approved on 2026-07-18; implementation remains review-gated.
+**Status:** superseded on 2026-08-11 by the HELM-366 governed full-authority
+decision and the current estate policy. Historical evidence below is retained.
+
+## Supersession
+
+`mindburnlabs` and `peycheff-com` are Ivan's human GitHub accounts and remain
+organization owners/admins. Agents retain full delivery authority through
+those accounts. The controlling boundary is now exact, single-use human
+approval before each privileged Actions, release, production, access, secret,
+or settings mutation—not account demotion, a standing containment instruction,
+or automatic counter-mutation.
+
+The current policy is `Mindburn-Labs/docs` `ai/estate-policy.md`; the canonical
+operator procedure is `Mindburn-Labs/docs_for_team`
+`skills/helm-privileged-ops/SKILL.md`. Linear `HELM-366` records the 2026-08-10
+release cancellation/disable incident and remains open until source controls,
+live state detection, separately approved recovery, release convergence, and a
+clean recurrence audit are all proved. The 2026-07-18 decisions and event log
+below are historical context only where they conflict with those sources.
+
+### Scheduled detector contract
+
+The `.github` scheduled detector is a read-only observer, not a continuous or
+self-protecting control. Each run fails closed unless the credential-visible
+repository set exactly matches `repo-manifest.yaml`, checks each repository's
+Actions permission and workflow states, and reconciles workflow enable/disable
+audit events from the source-controlled lower bound in
+`config/workflow-state-policy.json`. An audit event remains a violation until a
+reviewed entry ties its immutable document ID and observed fields to a durable
+approval record. Manual dispatch is intentionally absent so branch-selected
+workflow code cannot receive the organization read credential.
+
+A successful run proves only the scope that run observed. Disabling this
+workflow, or disabling Actions for the `.github` repository, prevents the run
+that would report the change. Closing that gap requires a watchdog in a
+separately administered execution domain with protected source, a least-
+privilege credential able to read the organization repository inventory,
+Actions permissions, workflow states, and audit log, plus a missed-heartbeat
+alert for this schedule. Creating that identity, secret, execution path, or
+repository setting is a privileged architecture change requiring its own exact
+owner approval and authoritative readback; this source PR performs none of
+those changes and does not close HELM-366 by itself.
+
+Interim visibility, not closure: the daily `estate-health` sweep in
+`Mindburn-Labs/dev-orchestration` independently inventories disabled workflows
+org-wide and would list this workflow's `disabled_*` state in its issue the
+next morning. That is cross-repository visibility inside the same organization
+credential domain — one actor holding org-wide `actions: write` can still
+silence both monitors — so the separately administered watchdog above remains
+the only accepted closure. Merging the detector on this basis was an owner
+decision (2026-08-15, Linear HELM-558): thirty-minute coverage for every other
+workflow now, the self-monitoring gap carried openly in the report
+(`self_monitoring: external_watchdog_required`, `continuous_coverage: false`)
+and tracked to closure in Linear.
 
 ## Decision
 
