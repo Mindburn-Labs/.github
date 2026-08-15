@@ -43,6 +43,18 @@ repository setting is a privileged architecture change requiring its own exact
 owner approval and authoritative readback; this source PR performs none of
 those changes and does not close HELM-366 by itself.
 
+Interim visibility, not closure: the daily `estate-health` sweep in
+`Mindburn-Labs/dev-orchestration` independently inventories disabled workflows
+org-wide and would list this workflow's `disabled_*` state in its issue the
+next morning. That is cross-repository visibility inside the same organization
+credential domain — one actor holding org-wide `actions: write` can still
+silence both monitors — so the separately administered watchdog above remains
+the only accepted closure. Merging the detector on this basis was an owner
+decision (2026-08-15, Linear HELM-558): thirty-minute coverage for every other
+workflow now, the self-monitoring gap carried openly in the report
+(`self_monitoring: external_watchdog_required`, `continuous_coverage: false`)
+and tracked to closure in Linear.
+
 ## Decision
 
 1. Keep the protected P0 workflows manually disabled. Do not re-enable any of
