@@ -9,6 +9,14 @@
       "workflow_id": 234627948,
       "actor": "Hirama",
       "approval_record": "Restore of release.yml after the unrecorded 2026-08-10 agent disable; investigation recorded in Linear HELM-558 (2026-08-15) and the HELM-550 gate-tamper comment."
+    },
+    {
+      "document_id": "u-mcMG43Z0MMaghygv_G-g",
+      "action": "workflows.enable_workflow",
+      "repository": "Mindburn-Labs/gitops-apps",
+      "workflow_id": 283676428,
+      "actor": "mindburnlabs",
+      "approval_record": "Owner (Ivan, mindburnlabs account) re-enabled Continuous Integration on 2026-09-08 after gitops-apps #51 replaced the nonexistent POLYREPO_REPO_READ_TOKEN with MINDBURN_ORG_READ_TOKEN; part of the 2026-09-07 production-release sweep (RELEASE-helm-ai-os-2026-09-07.md section 5.2, Linear HELM-658). The workflow still needs gitops-apps added to that org secret's selected repositories to go green."
     }
   ],
   "intentionally_disabled": [
@@ -43,14 +51,6 @@
       "expected_state": "disabled_manually",
       "allow_absent": false,
       "reason": "Disabled 2026-07-29 during the July CI-noise sweep without a recorded decision; fix-or-delete triage tracked in Linear HELM-558."
-    },
-    {
-      "repository": "Mindburn-Labs/gitops-apps",
-      "workflow_id": 283676428,
-      "path": ".github/workflows/ci.yml",
-      "expected_state": "disabled_manually",
-      "allow_absent": false,
-      "reason": "Disabled 2026-07-16 during the July CI-noise sweep without a recorded decision; fix-or-delete triage tracked in Linear HELM-558."
     },
     {
       "repository": "Mindburn-Labs/gitops-platform",
