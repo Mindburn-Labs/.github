@@ -16,7 +16,7 @@
       "repository": "Mindburn-Labs/gitops-apps",
       "workflow_id": 283676428,
       "actor": "mindburnlabs",
-      "approval_record": "Owner (Ivan, mindburnlabs account) re-enabled Continuous Integration on 2026-09-08 after gitops-apps #51 replaced the nonexistent POLYREPO_REPO_READ_TOKEN with MINDBURN_ORG_READ_TOKEN; part of the 2026-09-07 production-release sweep (RELEASE-helm-ai-os-2026-09-07.md \u00a75.2, Linear HELM-658). The workflow still needs gitops-apps added to that org secret's selected repositories to go green."
+      "approval_record": "Owner (Ivan, mindburnlabs account) re-enabled Continuous Integration on 2026-09-08 after gitops-apps #51 replaced the nonexistent POLYREPO_REPO_READ_TOKEN with MINDBURN_ORG_READ_TOKEN; part of the 2026-09-07 production-release sweep (RELEASE-helm-ai-os-2026-09-07.md section 5.2, Linear HELM-658). The workflow still needs gitops-apps added to that org secret's selected repositories to go green."
     }
   ],
   "intentionally_disabled": [
