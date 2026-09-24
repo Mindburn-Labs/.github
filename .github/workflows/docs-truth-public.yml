@@ -88,7 +88,7 @@ jobs:
           done
 
       - name: Checkout subject repo
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: Mindburn-Labs/${{ steps.subject.outputs.repo }}
           path: workspace/${{ steps.subject.outputs.local_name }}
@@ -99,7 +99,7 @@ jobs:
 
       - name: Checkout .github inventory
         if: steps.subject.outputs.repo != '.github'
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: Mindburn-Labs/.github
           path: workspace/.github-repo
@@ -109,7 +109,7 @@ jobs:
 
       - name: Checkout docs truth ledger
         if: steps.subject.outputs.repo != 'docs'
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: Mindburn-Labs/docs
           path: workspace/docs
@@ -118,7 +118,7 @@ jobs:
           token: ${{ secrets.MINDBURN_ORG_READ_TOKEN }}
 
       - name: Checkout docs-truth runner
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: Mindburn-Labs/dev-orchestration
           ref: 4338b9ae6b76284aeee7a4cfe9f8d6ef9f101156
