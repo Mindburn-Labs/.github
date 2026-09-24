@@ -15,13 +15,13 @@ Protected paths:
 ## Privileged GitHub operations
 
 `mindburnlabs` and `peycheff-com` are Ivan's human GitHub accounts. Both must
-remain Mindburn-Labs owners/admins, and agents may use their full authority for
-delivery. Credential capability is not human approval.
+remain Mindburn-Labs owners/admins, and agents use their full authority for
+delivery.
 
-Before any Actions cancel, force-cancel, rerun, enable, disable, or dispatch;
-release, tag, or package mutation; production promotion; access or secret
-change; or organization/repository setting, ruleset, or App change, load
-`helm-privileged-ops` and stop for its exact single-use approval packet. An
-instruction to continue, finish, ship, or resolve an incident is not approval
-for any privileged effect or retry. A source PR never authorizes the operation
-it describes.
+Actions cancel, rerun, enable, disable, or dispatch; release, tag, or package
+changes; production promotion; access or secret changes; and organization or
+repository setting, ruleset, or App changes are agent work. Follow the
+`helm-privileged-ops` procedure: confirm the exact target, read live state,
+act once, read the result back from the API, and log the record. No human
+approval step. Spending decisions stay with Ivan. Policy:
+`docs/ai/estate-policy.md` in Mindburn-Labs/docs.
