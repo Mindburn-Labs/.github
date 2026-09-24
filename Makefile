@@ -1,7 +1,10 @@
 SHELL := /usr/bin/env bash
 REQUIRE_WORKSPACE_CONTEXT ?= 0
 
-.PHONY: setup test lint build agent-context
+.PHONY: check setup test lint build agent-context
+
+# CI runs `make check` (Mindburn-Labs/platform-actions ci.yml@v2).
+check: test
 
 setup:
 	@command -v ruby >/dev/null
