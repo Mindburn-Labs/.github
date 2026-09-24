@@ -51,9 +51,11 @@ repository, so this public repository carries copies they can call:
 
 - `.github/workflows/ci-v2.yml` is a byte-for-byte copy of
   `Mindburn-Labs/platform-actions/.github/workflows/ci.yml` at tag `v2`
-  (commit `6d84391`). Public repositories call it pinned to a commit of this
-  repository; private and internal ones call `platform-actions` `@v2`. When
-  `v2` moves, copy the file again and re-pin the public callers.
+  (commit `6d84391`), called locally by this repository's `ci.yml`. The other
+  public repositories (homebrew-tap, contracts-autonomous-release-lab,
+  contracts-autonomous-release-canary) carry their own copy the same way;
+  private and internal ones call `platform-actions` `@v2`. When `v2` moves,
+  copy the file again in every public repository.
 - `.github/workflows/docs-truth-public.yml` is the Docs Truth reusable gate.
 
 ## Validation
