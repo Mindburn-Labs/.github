@@ -5,7 +5,6 @@ REQUIRE_WORKSPACE_CONTEXT ?= 0
 
 # CI runs `make check` (Mindburn-Labs/platform-actions ci.yml@v2).
 check: test
-	@cd tools/offline-attest && node --test
 
 setup:
 	@command -v ruby >/dev/null

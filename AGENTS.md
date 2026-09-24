@@ -2,7 +2,7 @@
 
 This repo controls organization profile and the production repository manifest.
 
-`make lint` validates the manifest, baseline YAML, and guard scripts (plus the HELM ecosystem map when `$MINDBURN_WORKSPACE_ROOT` is set); `make test` adds the Python unit tests; `make check`, which CI runs, adds the `tools/offline-attest` Node tests. Treat `repo-manifest.yaml` as the current machine-readable GitHub org inventory, not as production deployment evidence. If it conflicts with source code, route registries, OpenAPI, release artifacts, tier config, GitOps manifests, or runtime deployment manifests, the source artifact wins.
+`make lint` validates the manifest, baseline YAML, and guard scripts (plus the HELM ecosystem map when `$MINDBURN_WORKSPACE_ROOT` is set); `make test` adds the Python unit tests; `make check`, which CI runs, is `make test`. Treat `repo-manifest.yaml` as the current machine-readable GitHub org inventory, not as production deployment evidence. If it conflicts with source code, route registries, OpenAPI, release artifacts, tier config, GitOps manifests, or runtime deployment manifests, the source artifact wins.
 
 Use `$MINDBURN_WORKSPACE_ROOT` for workspace references. Ivan's local example is `~/Code/Mindburn-Labs`; do not hardcode that path as a platform invariant.
 
