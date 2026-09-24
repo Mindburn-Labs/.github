@@ -44,8 +44,20 @@ pre-merge docs-truth contract for Mindburn-Labs/REPO#PR@HEAD_SHA expires=YYYY-MM
 
 The reusable gate omits that row only when the PR is still open, its immutable head adds the exact file, the file is absent from the default branch, and the expiry is no more than seven days away. A moved or closed PR, malformed marker, unsafe path, mismatched repository, or unverifiable API response remains fail-closed.
 
+## Public reusable workflows
+
+Public repositories cannot call workflows in the internal `platform-actions`
+repository, so this public repository carries copies they can call:
+
+- `.github/workflows/ci-v2.yml` is a byte-for-byte copy of
+  `Mindburn-Labs/platform-actions/.github/workflows/ci.yml` at tag `v2`
+  (commit `6d84391`). Public repositories call it pinned to a commit of this
+  repository; private and internal ones call `platform-actions` `@v2`. When
+  `v2` moves, copy the file again and re-pin the public callers.
+- `.github/workflows/docs-truth-public.yml` is the Docs Truth reusable gate.
+
 ## Validation
 
 ```bash
-make lint
+make check
 ```

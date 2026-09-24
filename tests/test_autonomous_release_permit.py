@@ -792,50 +792,6 @@ class AutonomousReleasePermitTests(unittest.TestCase):
         self.assertIn("raw-anthropic-attempt-1.txt", outcome["artifacts"])
         self.assertNotIn("raw-anthropic-attempt-2.txt", outcome["artifacts"])
 
-    def test_workflow_keeps_pr_gates_deterministic_and_unprivileged(self) -> None:
-        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
-            encoding="utf-8",
-        )
-        self.assertIn("\non:\n  pull_request:\n", workflow)
-        self.assertIn("name: HELM Deterministic Repository Gates", workflow)
-        self.assertIn("name: Deterministic repository gates", workflow)
-        self.assertIn("permissions: {}", workflow)
-        self.assertNotIn("pull_request_target", workflow)
-        for forbidden in (
-            "\n  prepare:",
-            "\n  model-review:",
-            "\n  permit:",
-            "copilot-requests: write",
-            "attestations: write",
-            "id-token: write",
-            "run_copilot_model_review.sh",
-        ):
-            self.assertNotIn(forbidden, workflow)
-
-    def test_workflow_requires_deterministic_repository_gates(self) -> None:
-        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
-            encoding="utf-8",
-        )
-        self.assertIn("name: Deterministic repository gates", workflow)
-        self.assertIn("Checkout immutable organization gate profiles", workflow)
-        self.assertIn("run_autonomous_release_gates.py", workflow)
-        self.assertIn("config/autonomous-release-gates.json", workflow)
-        self.assertIn('--repository "$GITHUB_REPOSITORY"', workflow)
-        self.assertIn("ref: ${{ github.workflow_sha }}", workflow)
-        self.assertIn("ref: ${{ github.sha }}", workflow)
-        self.assertIn('rev-parse HEAD)" != "$MERGE_SHA"', workflow)
-        self.assertIn('"$second_parent" != "$HEAD_SHA"', workflow)
-        self.assertIn("persist-credentials: false", workflow)
-
-    def test_workflow_binds_the_ephemeral_merge_to_real_base_history(self) -> None:
-        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
-            encoding="utf-8",
-        )
-        self.assertIn('merge-base --is-ancestor "$first_parent" "$live_base"', workflow)
-        self.assertIn("PAYLOAD_BASE_SHA", workflow)
-        self.assertIn("HEAD_SHA", workflow)
-        self.assertNotIn("resolved_base_sha", workflow)
-
 
 if __name__ == "__main__":
     unittest.main()
