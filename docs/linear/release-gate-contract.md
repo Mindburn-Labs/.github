@@ -39,13 +39,11 @@ green PR, CI, DCO, a human review, `/review`, `/ultrareview`, labels, identity,
 and commit trailers: they may be required evidence, but none is merge or
 release authority by itself.
 
-For a protected release path, workspace policy requires source-owned
-deterministic gates, permits from two independent providers, and an exact-head
-approval-only App interlock. This repository does not currently prove that
-those controls are live. Keep private and internal release paths on hold until
-their source and runtime receipts prove them. A release also requires its
-manifest/GitOps, immutable artifact, deployment, smoke, rollback, and
-EvidencePack evidence; Linear cannot substitute for any of those receipts.
+The 2-of-2 model-review release permit and its `helm-authority-*` App
+interlock were retired on 2026-09-24; releases follow the agent-delivery model
+(`docs/architecture/agent-delivery.md` in Mindburn-Labs/docs). A release
+requires its manifest/GitOps, immutable artifact, deployment, smoke, rollback,
+and EvidencePack evidence; Linear cannot substitute for any of those receipts.
 
 ## Release Note Minimum
 
