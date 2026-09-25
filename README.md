@@ -34,16 +34,6 @@ Repository inventory does not prove production readiness. When there is a confli
 - Keep the organization profile factual, compact, and free of release claims that belong to source or GitOps repos.
 - Keep retired org slugs out of tracked org-repository source; `make lint` runs the recurrence guard.
 
-## Docs Truth Pre-Merge Contracts
-
-The central ledger may register a new Markdown file before its source PR merges by using this exact notes prefix:
-
-```text
-pre-merge docs-truth contract for Mindburn-Labs/REPO#PR@HEAD_SHA expires=YYYY-MM-DD; note
-```
-
-The reusable gate omits that row only when the PR is still open, its immutable head adds the exact file, the file is absent from the default branch, and the expiry is no more than seven days away. A moved or closed PR, malformed marker, unsafe path, mismatched repository, or unverifiable API response remains fail-closed.
-
 ## Public reusable workflows
 
 Public repositories cannot call workflows in the internal `platform-actions`
@@ -56,7 +46,6 @@ repository, so this public repository carries copies they can call:
   contracts-autonomous-release-canary) carry their own copy the same way;
   private and internal ones call `platform-actions` `@v2`. When `v2` moves,
   copy the file again in every public repository.
-- `.github/workflows/docs-truth-public.yml` is the Docs Truth reusable gate.
 
 ## Validation
 
