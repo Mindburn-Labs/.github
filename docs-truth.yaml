@@ -1,0 +1,8 @@
+# Per-repo docs-truth config, read by `ecp check` (dev-orchestration
+# estate-control-plane/README.md, "docs-truth"). Prefixes, or File.fnmatch globs in
+# which `*` spans `/`.
+ignored_paths:
+  # Generated output of the 2026-05-26 portfolio security scan (report-only). It
+  # records repository names as they were on that date, including since-retired
+  # ones; it is scanner output kept as evidence, not documentation to maintain.
+  - ".codex-security-scan/"
