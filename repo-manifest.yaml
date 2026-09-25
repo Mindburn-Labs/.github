@@ -12,8 +12,8 @@ source_truth_priority:
 - runbooks_and_architecture_docs
 - org_inventory
 inventory_summary:
-  total_repositories: 53
-  active_repositories: 52
+  total_repositories: 57
+  active_repositories: 56
   archived_repositories:
   - orggenome-compiler
   deleted_repositories:
@@ -77,10 +77,19 @@ repositories:
   visibility: private
   archived: false
   updated_at: '2026-07-21T13:04:52Z'
+- name: cycleseal
+  visibility: public
+  archived: false
+- name: demo-repository
+  visibility: private
+  archived: false
 - name: dev-orchestration
   visibility: private
   archived: false
   updated_at: '2026-07-21T08:14:15Z'
+- name: distillscan
+  visibility: public
+  archived: false
 - name: docs
   visibility: private
   archived: false
@@ -93,6 +102,9 @@ repositories:
   visibility: internal
   archived: false
   updated_at: '2026-07-21T13:38:57Z'
+- name: gatescan
+  visibility: public
+  archived: false
 - name: gitops-apps
   visibility: private
   archived: false
