@@ -34,18 +34,11 @@ Repository inventory does not prove production readiness. When there is a confli
 - Keep the organization profile factual, compact, and free of release claims that belong to source or GitOps repos.
 - Keep retired org slugs out of tracked org-repository source; `make lint` runs the recurrence guard.
 
-## Public reusable workflows
+## CI
 
-Public repositories cannot call workflows in the internal `platform-actions`
-repository, so this public repository carries copies they can call:
-
-- `.github/workflows/ci-v2.yml` is a byte-for-byte copy of
-  `Mindburn-Labs/platform-actions/.github/workflows/ci.yml` at tag `v2`
-  (commit `6d84391`), called locally by this repository's `ci.yml`. The other
-  public repositories (homebrew-tap, contracts-autonomous-release-lab,
-  contracts-autonomous-release-canary) carry their own copy the same way;
-  private and internal ones call `platform-actions` `@v2`. When `v2` moves,
-  copy the file again in every public repository.
+`.github/workflows/ci.yml` calls
+`Mindburn-Labs/platform-actions/.github/workflows/ci.yml@v2` like every other
+repository; the required check is `ci / gate`.
 
 ## Validation
 
