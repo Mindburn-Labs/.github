@@ -34,8 +34,6 @@ it is not proof that the views are already configured.
 | View | Filter intent |
 | --- | --- |
 | `Product: HELM` | HELM product labels including kernel, enterprise, launchpad, evidencepack, and boundary-sync |
-| `Product: Titan` | Titan product labels only; do not treat Titan proof as HELM proof |
-| `Product: Pilot` | Pilot product labels only |
 | `Product: OrgGenome` | OrgGenome compiler, inference, and serving labels |
 | `Product: Mindburn Platform` | platform, infra, GitOps, public site, and docs-platform labels |
 
@@ -58,7 +56,7 @@ MIN-458 can move to `Done` only when:
 - each required view exists in Linear
 - each view filter matches this catalog
 - a reviewer verifies sample membership for each category
-- views do not mix Pilot/Titan/OrgGenome proof into HELM source truth
+- views do not mix OrgGenome proof into HELM source truth
 
 ## Connector Boundary
 
