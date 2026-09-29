@@ -1,2 +1,9 @@
 # Local HELM runtime state and key material must not be tracked in this repository.
 /data/
+
+# Local security-scan and agent output must never land in this public repository (HELM-879).
+.codex-security-scan/
+
+# Python bytecode.
+__pycache__/
+*.pyc
