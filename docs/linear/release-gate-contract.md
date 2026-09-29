@@ -13,8 +13,6 @@ is not enough.
 | --- | --- | --- |
 | HELM AI Kernel | `helm-ai-kernel` | kernel release artifact, pinned image/chart, EvidencePack |
 | HELM Enterprise | `helm-enterprise` | enterprise boundary sync, validation report, EvidencePack |
-| Titan | `titan` | Titan release manifest, deployment proof, smoke evidence |
-| Pilot | `pilot` | Pilot release manifest, deployment proof, smoke evidence |
 | Mindburn public site | `app-mindburn-web-site` | build artifact, deploy URL, production smoke |
 | Compiler serving | `compiler-serving` | model card, serving health, evaluation report |
 
@@ -58,7 +56,7 @@ Each release note must include:
 
 ## Admin Setup Checklist
 
-- Create the six Linear release pipelines above.
+- Create the four Linear release pipelines above.
 - Add automation: PR merge -> `Merged/Verifying`.
 - Add automation: verified release completion -> `Done`.
 - Keep release completion manual if Linear cannot test evidence links directly.
