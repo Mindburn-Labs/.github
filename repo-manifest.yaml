@@ -12,17 +12,28 @@ source_truth_priority:
 - runbooks_and_architecture_docs
 - org_inventory
 inventory_summary:
-  total_repositories: 57
-  active_repositories: 56
-  archived_repositories:
-  - orggenome-compiler
+  total_repositories: 43
+  active_repositories: 43
+  archived_repositories: []
   deleted_repositories:
   - app-docs-platform
   - platform-design-system
-  public_repositories:
-  - ".github"
+  - app-developer-portal
   - contracts-autonomous-release-canary
   - contracts-autonomous-release-lab
+  - demo-repository
+  - helm-compiler-lab
+  - integration-ai-flows
+  - orggenome-compiler
+  - platform-agent-capabilities
+  - platform-mcp-registry
+  - platform-policies
+  - platform-templates
+  - svc-agent-control-plane
+  - svc-high-risk-loop-bridge
+  - worker-helm-launch-worker
+  public_repositories:
+  - ".github"
   - helm-agent-integrations
   - helm-ai-kernel
   - homebrew-tap
@@ -45,10 +56,6 @@ repositories:
   visibility: public
   archived: false
   updated_at: '2026-07-21T12:03:37Z'
-- name: app-developer-portal
-  visibility: private
-  archived: false
-  updated_at: '2026-07-02T00:34:51Z'
 - name: app-helm-admin
   visibility: private
   archived: false
@@ -65,23 +72,12 @@ repositories:
   visibility: private
   archived: false
   updated_at: '2026-07-21T06:44:53Z'
-- name: contracts-autonomous-release-canary
-  visibility: public
-  archived: false
-  updated_at: '2026-07-15T15:50:08Z'
-- name: contracts-autonomous-release-lab
-  visibility: public
-  archived: false
-  updated_at: '2026-07-20T20:21:09Z'
 - name: contracts-catalog
   visibility: private
   archived: false
   updated_at: '2026-07-21T13:04:52Z'
 - name: cycleseal
   visibility: public
-  archived: false
-- name: demo-repository
-  visibility: private
   archived: false
 - name: dev-orchestration
   visibility: private
@@ -125,10 +121,6 @@ repositories:
   visibility: public
   archived: false
   updated_at: '2026-07-21T12:32:45Z'
-- name: helm-compiler-lab
-  visibility: private
-  archived: false
-  updated_at: '2026-07-21T12:51:46Z'
 - name: helm-desktop
   visibility: private
   archived: false
@@ -161,10 +153,6 @@ repositories:
   visibility: private
   archived: false
   updated_at: '2026-07-16T20:09:24Z'
-- name: integration-ai-flows
-  visibility: private
-  archived: false
-  updated_at: '2026-07-21T12:53:55Z'
 - name: integration-helm
   visibility: private
   archived: false
@@ -181,10 +169,6 @@ repositories:
   visibility: private
   archived: false
   updated_at: '2026-07-21T12:56:03Z'
-- name: orggenome-compiler
-  visibility: private
-  archived: true
-  updated_at: '2026-06-10T15:39:07Z'
 - name: pkg-mindburn-helm-ds
   visibility: private
   archived: false
@@ -197,38 +181,18 @@ repositories:
   visibility: internal
   archived: false
   updated_at: '2026-07-21T12:53:16Z'
-- name: platform-agent-capabilities
-  visibility: private
-  archived: false
-  updated_at: '2026-07-21T12:52:40Z'
 - name: platform-agent-substrate
   visibility: private
   archived: false
   updated_at: '2026-07-21T12:52:31Z'
-- name: platform-mcp-registry
-  visibility: private
-  archived: false
-  updated_at: '2026-07-21T12:53:23Z'
 - name: platform-observability
   visibility: private
   archived: false
   updated_at: '2026-07-21T12:54:28Z'
-- name: platform-policies
-  visibility: private
-  archived: false
-  updated_at: '2026-07-21T12:53:32Z'
-- name: platform-templates
-  visibility: private
-  archived: false
-  updated_at: '2026-07-21T12:54:48Z'
 - name: platform-terraform-modules
   visibility: private
   archived: false
   updated_at: '2026-07-21T12:54:00Z'
-- name: svc-agent-control-plane
-  visibility: private
-  archived: false
-  updated_at: '2026-07-21T12:54:07Z'
 - name: svc-agent-sandbox-runner
   visibility: private
   archived: false
@@ -245,10 +209,6 @@ repositories:
   visibility: private
   archived: false
   updated_at: '2026-07-21T14:20:54Z'
-- name: svc-high-risk-loop-bridge
-  visibility: private
-  archived: false
-  updated_at: '2026-07-21T12:53:40Z'
 - name: svc-orggenome-inference
   visibility: private
   archived: false
@@ -261,7 +221,3 @@ repositories:
   visibility: internal
   archived: false
   updated_at: '2026-07-17T23:29:00Z'
-- name: worker-helm-launch-worker
-  visibility: private
-  archived: false
-  updated_at: '2026-07-21T12:55:57Z'

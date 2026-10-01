@@ -95,13 +95,13 @@ def group_for(name)
   case name
   when ".github"
     "GitHub Metadata"
-  when "app-developer-portal", "app-helm-console", "app-helm-docs", "app-mindburn-web"
+  when "app-helm-console", "app-helm-docs", "app-mindburn-web"
     "Frontend / User Surfaces"
   when "app-docs-platform", "platform-design-system"
     "Archived UI / Design"
   when "pkg-mindburn-helm-ds", "pkg-mindburn-web-ds"
     "Design Systems"
-  when "helm-ai-kernel", "helm-ai-enterprise", "helm-agent-integrations", "helm-compiler-lab", "worker-helm-launch-worker", "helm-rollout-evidence"
+  when "helm-ai-kernel", "helm-ai-enterprise", "helm-agent-integrations", "helm-rollout-evidence"
     "HELM Core / Product"
   when /^svc-/
     "Backend / Runtime Services"
@@ -317,7 +317,7 @@ def render_markdown(state)
       ["Connector contracts or packs", "`helm-ai-enterprise`, `contracts-catalog`, `svc-helm-certification`, `integration-helm`"],
       ["Production release state", "`integration-mindburn-platform`, `gitops-apps`, `gitops-platform`"],
       ["Infrastructure/server access", "`mindburn-infra`, `docs_for_team`"],
-      ["Agent substrate/RLM support", "`platform-agent-substrate`, `platform-agent-capabilities`, `svc-agent-sandbox-runner`"]
+      ["Agent substrate/RLM support", "`platform-agent-substrate`, `svc-agent-sandbox-runner`"]
     ]
   )
   lines << ""

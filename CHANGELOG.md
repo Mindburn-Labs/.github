@@ -9,6 +9,13 @@ All notable changes to the `.github` organization configurations repository will
 - Added the MIN-408 Linear release gate contract for release pipelines,
   merge-to-verification behavior, and evidence-backed `Done` transitions.
 - Removed the deleted `orggenome-compiler` archive from the verified organization inventory.
+- Dropped the 14 repositories deleted on 2026-10-01 (HELM-900: `app-developer-portal`,
+  `contracts-autonomous-release-canary`, `contracts-autonomous-release-lab`, `demo-repository`,
+  `helm-compiler-lab`, `integration-ai-flows`, `orggenome-compiler`, `platform-agent-capabilities`,
+  `platform-mcp-registry`, `platform-policies`, `platform-templates`, `svc-agent-control-plane`,
+  `svc-high-risk-loop-bridge`, `worker-helm-launch-worker`) from `repo-manifest.yaml`, recorded them
+  under `deleted_repositories`, and removed them from `manifest-local-policy.yaml` and the
+  ecosystem-map name lists.
 
 ## [1.0.2] - 2026-06-01
 

@@ -8,8 +8,8 @@ The canonical inventory is `repo-manifest.yaml`.
 
 Current verified state:
 
-- 50 repositories in the canonical HELM/Mindburn inventory.
-- 49 active repositories and 1 archived repository.
+- 43 repositories in the canonical HELM/Mindburn inventory.
+- 43 active repositories and no archived repository.
 - `tempora` is a separate product and `tg-knowledge-scraper` is tooling-only; neither belongs in this inventory.
 - Production release readiness is tracked in `integration-mindburn-platform/manifests/release-candidate.yaml`.
 - Final-state evidence is tracked in `integration-mindburn-platform/manifests/final-state-evidence.yaml`.
