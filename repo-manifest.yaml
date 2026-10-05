@@ -12,8 +12,8 @@ source_truth_priority:
 - runbooks_and_architecture_docs
 - org_inventory
 inventory_summary:
-  total_repositories: 43
-  active_repositories: 43
+  total_repositories: 45
+  active_repositories: 45
   archived_repositories: []
   deleted_repositories:
   - app-docs-platform
@@ -125,10 +125,16 @@ repositories:
   visibility: private
   archived: false
   updated_at: '2026-07-21T02:00:16Z'
+- name: helm-g0-t52-sandbox
+  visibility: private
+  archived: false
 - name: helm-rollout-evidence
   visibility: private
   archived: false
   updated_at: '2026-07-02T00:35:35Z'
+- name: helm-skeleton-sandbox
+  visibility: private
+  archived: false
 - name: helm-skills
   visibility: private
   archived: false
@@ -162,7 +168,7 @@ repositories:
   archived: false
   updated_at: '2026-07-21T12:59:00Z'
 - name: mindburn-infra
-  visibility: internal
+  visibility: private
   archived: false
   updated_at: '2026-07-21T14:21:01Z'
 - name: ml-orggenome-compiler
@@ -178,7 +184,7 @@ repositories:
   archived: false
   updated_at: '2026-07-20T20:20:18Z'
 - name: platform-actions
-  visibility: internal
+  visibility: public
   archived: false
   updated_at: '2026-07-21T12:53:16Z'
 - name: platform-agent-substrate
