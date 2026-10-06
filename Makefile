@@ -3,7 +3,7 @@ REQUIRE_WORKSPACE_CONTEXT ?= 0
 
 .PHONY: check setup test lint build agent-context
 
-# CI runs `make check` (Mindburn-Labs/platform-actions ci.yml@v2).
+# CI runs `make check` (Mindburn-Labs/platform-actions ci.yml@v2.0.1).
 check: test
 
 setup:
