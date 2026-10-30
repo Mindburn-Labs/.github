@@ -1,0 +1,68 @@
+version: 2
+owner: "Platform DevOps & GitOps"
+apply_in: "GitHub issue forms in Mindburn-Labs/helm-tracker, .github/ISSUE_TEMPLATE/"
+# The forms are the executable templates. This catalog records what each one is for,
+# which org issue type it sets, and what closes an issue filed with it. The eight
+# MIN-era Linear workspace templates that used to live here are retired; they remain
+# in git history.
+required_body_blocks:
+  - "Outcome"
+  - "Source truth"
+  - "Acceptance evidence"
+  - "Validation"
+  - "Owner / agent split"
+routing_fields:
+  - "Area"
+  - "Priority"
+templates:
+  - name: "HELM execution task"
+    form: "execution-task.yml"
+    issue_type: "Task"
+    default: true
+    use_when: "Code, config, infrastructure, or automation must change."
+    extra_fields: []
+    done_gate: "Change is merged through normal policy and the validation evidence is linked."
+
+  - name: "HELM release or contract gate"
+    form: "release-contract-gate.yml"
+    issue_type: "Gate"
+    default: false
+    use_when: "A release, deploy, contract, SDK, or public-truth gate must pass before something ships."
+    extra_fields:
+      - "Gate subject"
+      - "What this gate blocks"
+      - "Risk"
+    done_gate: "Verification evidence is attached or linked; a merged PR alone is not enough. A waiver records its residual risk."
+
+  - name: "HELM bug or regression"
+    form: "bug-regression.yml"
+    issue_type: "Bug"
+    default: false
+    use_when: "Behavior is broken or has regressed against a source-owned expectation."
+    extra_fields:
+      - "Observed behavior"
+      - "Expected behavior"
+      - "Reproduction"
+      - "Environment"
+    done_gate: "The fix is merged and a regression test or smoke proof shows the defect gone."
+
+  - name: "HELM docs and public truth"
+    form: "docs-public-truth.yml"
+    issue_type: "Docs"
+    default: false
+    use_when: "A source-backed doc, runbook, report, onboarding page, or public claim needs work."
+    extra_fields:
+      - "Page, claim, or document"
+      - "Audience"
+    done_gate: "The doc is merged in the owning repository and each claim is backed by source or release evidence."
+
+  - name: "HELM research or discovery"
+    form: "research-discovery.yml"
+    issue_type: "Research"
+    default: false
+    use_when: "The right implementation is unknown and needs a bounded investigation."
+    extra_fields:
+      - "Question"
+      - "Decision needed"
+      - "Evidence to collect"
+    done_gate: "A decision, a no-go with reasons, or a linked execution issue is recorded."

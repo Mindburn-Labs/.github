@@ -8,11 +8,12 @@ Run:
 make lint
 ```
 
-## Linear Release Gates
+## Tracker Release Gates
 
-Use `docs/linear/release-gate-contract.md` when configuring Linear Releases and
-merge automation. PR merge may move linked issues to `Merged/Verifying`;
-release completion with evidence is what permits the **Linear status** `Done`.
+Use `docs/tracker/release-gate-contract.md` when filing release Gate issues and
+handling merge automation. PR merge leaves a release-bound issue open in Status
+`In Review`; release completion with evidence is what permits the project Status
+`Done` and a completed close.
 Neither state transition authorizes a protected merge, deployment, or release.
 Those actions require the source-owned machine authority and runtime evidence
 defined by the contract. The current manifest records production promotion as
