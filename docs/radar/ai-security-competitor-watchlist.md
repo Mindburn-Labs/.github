@@ -21,8 +21,8 @@ Order of review:
 4. Gray Swan
 5. Jazz
 
-Record every refresh as a dated note or Linear comment on MIN-491 until a
-dedicated radar tracker is available.
+Record every refresh as a dated note or a comment on the radar tracking issue in
+`Mindburn-Labs/helm-tracker` until a dedicated radar tracker is available.
 
 ## Source Gap Checklist
 
@@ -115,7 +115,7 @@ Use this compact packet for each monthly refresh.
 ## AI security competitor watchlist refresh: YYYY-MM
 
 Report source: 2026-06-08 AI security competitor intelligence report
-Linear: MIN-491
+Tracker issue: <helm-tracker issue URL>
 
 ### Straiker
 - Case studies:
@@ -166,5 +166,5 @@ Linear: MIN-491
 ## Done Gate
 
 A refresh is complete only when it names source-owned evidence or explicitly
-marks a source class as `not found` or `not checked`. Linear backlog state is
+marks a source class as `not found` or `not checked`. Tracker state is
 secondary to source truth.

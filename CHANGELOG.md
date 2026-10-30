@@ -5,6 +5,18 @@ All notable changes to the `.github` organization configurations repository will
 ## [Unreleased]
 
 ### Changed
+- Moved issue tracking from Linear to GitHub Issues and the HELM Delivery project
+  (`Mindburn-Labs/helm-tracker`). Renamed `docs/linear/` to `docs/tracker/` and
+  rewrote its contents for GitHub: the release gate contract (release `Gate`
+  issues, Status `In Review` instead of `Merged/Verifying`), the SLA policy
+  (`Target date` plus an `SLA due` view), the project status cadence (project
+  status updates per Track), the view catalog, and the agent guardrails (from the
+  Linear workspace admin guardrails). `docs/tracker/issue-templates.yaml` now
+  catalogs the five HELM issue forms, which live in `helm-tracker` under
+  `.github/ISSUE_TEMPLATE/`; the eight MIN-era Linear workspace templates are
+  retired. `make lint` validates the new catalog and path.
+- Removed `docs/linear-spend-authority-views.md`: it described Linear views over
+  label families that the HELM reset already removed.
 - Bound concurrent docs-truth ledger contracts to an expiring source PR head and exact added path instead of trusting a free-text exemption.
 - Added the MIN-408 Linear release gate contract for release pipelines,
   merge-to-verification behavior, and evidence-backed `Done` transitions.
