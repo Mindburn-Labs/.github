@@ -75,10 +75,6 @@ def manifest_repositories
   read_yaml(MANIFEST_PATH).fetch("repositories")
 end
 
-def inventory_entries
-  read_json(ESTATE_INVENTORY_PATH).fetch("entries")
-end
-
 def migration_entries
   read_json(MIGRATION_INDEX_PATH).fetch("entries")
 end
