@@ -304,7 +304,7 @@ def render_markdown(state)
   lines.concat markdown_table(
     ["If you are working on...", "Start here"],
     [
-      ["HELM product strategy, Company Builder, Company OS, Network, or pilot roles (canon §6.1.2: Artheris — designated HELM Cloud pilot, Building, scope unsigned; MS Realty and IronWrap — blueprint tracks; Tempora — arms-length evidence source)", "strategy canon `docs/ai/mindburn-labs-vision-paper.md` (v1.1; the former AI-2027 strategy and its 2026-07-24 extension are superseded — see their banners), then `docs/architecture/source-truth.md`"],
+      ["HELM product strategy, Company Builder, Company OS, Network, or pilot roles (canon §6.1.2: MS Realty and IronWrap — blueprint tracks; Tempora — arms-length evidence source)", "strategy canon `docs/ai/mindburn-labs-vision-paper.md` (v1.1; the former AI-2027 strategy and its 2026-07-24 extension are superseded — see their banners), then `docs/architecture/source-truth.md`"],
       ["Kernel verdicts, receipts, EvidencePacks, conformance", "`helm-ai-kernel`"],
       ['HELM AI OS (legacy name "Paid HELM AI Enterprise") backend/product logic', "`helm-ai-enterprise`, then `svc-helm-control-plane`"],
       ["Console UX", "`app-helm-console`; backend truth from `svc-helm-control-plane`"],
