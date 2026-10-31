@@ -1,7 +1,4 @@
-aliases:
-  .github:
-    local_path: .github-repo
-    reason: local checkout uses explicit alias
+aliases: {}
 
 manifest_only:
   app-helm-admin:

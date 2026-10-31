@@ -34,13 +34,15 @@ inventory_summary:
   - worker-helm-launch-worker
   public_repositories:
   - ".github"
+  - cycleseal
+  - distillscan
+  - gatescan
   - helm-agent-integrations
   - helm-ai-kernel
   - homebrew-tap
+  - platform-actions
   internal_repositories:
   - docs_for_team
-  - mindburn-infra
-  - platform-actions
   - tg-knowledge-scraper
   production_release_status: not_released
   production_release_source: integration-mindburn-platform/manifests/release-candidate.yaml
