@@ -8,6 +8,7 @@ require "optparse"
 require "pathname"
 require "time"
 require "yaml"
+require_relative "generate-repo-inventory"
 
 REPO_ROOT = File.expand_path("..", __dir__)
 WORKSPACE_ROOT = ENV.fetch("MINDBURN_WORKSPACE_ROOT") { File.expand_path("..", REPO_ROOT) }
@@ -28,7 +29,7 @@ OPTIONS = {
 }.freeze
 
 def usage
-  "Usage: ruby scripts/generate-helm-ecosystem-map.rb [--write|--check|--json]"
+  "Usage: ruby scripts/generate-helm-ecosystem-map.rb [--write|--check|--json] [--output PATH] [--legacy-snapshots]"
 end
 
 options = OPTIONS.dup
@@ -37,7 +38,10 @@ OptionParser.new do |parser|
   parser.on("--write", "Write generated Markdown outputs") { options[:write] = true }
   parser.on("--check", "Fail if generated outputs are stale or invalid") { options[:check] = true }
   parser.on("--json", "Print machine-readable summary") { options[:json] = true }
+  parser.on("--output PATH", "Limit generated output to this path (repeatable)") { |path| (options[:outputs] ||= []) << File.expand_path(path) }
+  parser.on("--legacy-snapshots", "Include capture-only local classification and migration snapshots; both must exist") { options[:legacy] = true }
 end.parse!
+output_paths = options.fetch(:outputs, [TEAM_DOC_PATH, ROOT_DOC_PATH, HANDBOOK_DOC_PATH])
 
 if !options[:write] && !options[:check] && !options[:json]
   warn usage
@@ -57,7 +61,7 @@ end
 def read_json(path, required: true)
   if !File.exist?(path)
     hint = if path == MIGRATION_INDEX_PATH
-             " Run `ruby scripts/estate-control-plane.rb` from the workspace root first."
+             " The retired root inventory script produced this legacy snapshot; current ecp reports do not replace it."
            elsif path == ESTATE_INVENTORY_PATH
              " Run from a full Mindburn workspace checkout, not a repo-only checkout."
            else
@@ -189,7 +193,7 @@ def render_markdown(state)
       "`#{name}`",
       "`#{repo.fetch("visibility")}`",
       expected_workspace_path_for(name, aliases, manifest_only_policy),
-      manifest_classification(repo, estate[name])
+      state.fetch(:legacy_snapshots) ? manifest_classification(repo, estate[name]) : "local classification unavailable; no snapshot supplied"
     ]
   end
 
@@ -225,16 +229,18 @@ def render_markdown(state)
   lines << "---"
   lines << "title: HELM Ecosystem Directory Map"
   lines << "status: generated-canonical-source-map"
-  lines << "generated_by: .github-repo/scripts/generate-helm-ecosystem-map.rb"
+  lines << "generated_by: .github/scripts/generate-helm-ecosystem-map.rb"
   lines << "manifest_repository_count: #{manifest_summary.fetch("total_repositories")}"
   lines << "active_repository_count: #{manifest_summary.fetch("active_repositories")}"
   lines << "production_release_status: #{manifest_summary.fetch("production_release_status")}"
   lines << "source_of_truth:"
-  lines << "  - .github-repo/repo-manifest.yaml"
-  lines << "  - .github-repo/manifest-local-policy.yaml"
-  lines << "  - .github-repo/local-compatibility-policy.yaml"
-  lines << "  - production-readiness/estate/estate-inventory.json"
-  lines << "  - production-readiness/estate/migration-index.json"
+  lines << "  - .github/repo-manifest.yaml"
+  lines << "  - .github/manifest-local-policy.yaml"
+  lines << "  - .github/local-compatibility-policy.yaml"
+  if state.fetch(:legacy_snapshots)
+    lines << "  - production-readiness/estate/estate-inventory.json"
+    lines << "  - production-readiness/estate/migration-index.json"
+  end
   lines << "---"
   lines << ""
   lines << "# HELM Ecosystem Directory Map"
@@ -242,7 +248,13 @@ def render_markdown(state)
   lines << "This file is generated. Do not edit it by hand."
   lines << ""
   lines << "> [!IMPORTANT]"
-  lines << "> `$MINDBURN_WORKSPACE_ROOT` is a polyrepo workspace, not one git repository. `.github-repo/repo-manifest.yaml` controls GitHub repo existence, visibility, and archive status. `production-readiness/estate/estate-inventory.json` controls local path classification only. This committed map intentionally excludes temporal workstation directories."
+  lines << "> `$MINDBURN_WORKSPACE_ROOT` is a polyrepo workspace, not one git repository. `.github/repo-manifest.yaml` records GitHub repo existence, visibility, and archive status after live reconciliation. This committed map intentionally excludes temporal workstation directories."
+  lines << ""
+  lines << if state.fetch(:legacy_snapshots)
+             "Local classification and migration rows below are legacy capture evidence supplied with `--legacy-snapshots`; they do not describe current workstation state."
+           else
+             "Local classification and migration snapshots were not supplied. Their absence is not evidence of an empty workstation or no migrations. Current read-only checks are owned by `dev-orchestration/estate-control-plane/bin/ecp`; `ecp` does not generate those legacy snapshots."
+           end
   lines << ""
   lines << "## Current Manifest Truth"
   lines << ""
@@ -267,7 +279,7 @@ def render_markdown(state)
   lines << "- RLM output is advisory evidence only; it does not verify HELM behavior by itself."
   lines << "- HELM is the only Mindburn Labs product. Company Builder, Company OS, and HELM Network are product motions inside HELM; pilot work becomes reusable HELM blueprints and evidence."
   lines << "- Local `*-wt-*` directories are task checkout directories by naming convention, not separate products or canonical repos; this map never enumerates them."
-  lines << "- Compatibility/local-only directories are not GitHub repository truth unless they appear in `.github-repo/repo-manifest.yaml`."
+  lines << "- Compatibility/local-only directories are not GitHub repository truth unless they appear in `.github/repo-manifest.yaml`."
   lines << ""
   lines << "## Canonical Manifest Repositories"
   lines << ""
@@ -281,7 +293,7 @@ def render_markdown(state)
   lines << ""
   lines << "This committed map does not enumerate local-only directories, generated caches, or task worktrees. They change per machine and per task, so recording them here would make workstation state look like repository topology."
   lines << ""
-  lines << "For a current local classification, generate and inspect `production-readiness/estate/estate-inventory.json` at the workspace root. That output is local evidence only; it does not change manifest repository truth."
+  lines << "For current local checkout findings, run `ruby dev-orchestration/estate-control-plane/bin/ecp check --root <workspace>`. An existing `production-readiness/estate/estate-inventory.json` is legacy capture evidence only; current `ecp` does not generate it. Neither artifact changes manifest repository truth."
   lines << ""
   lines << "## Compatibility Directory Policy"
   lines << ""
@@ -293,7 +305,7 @@ def render_markdown(state)
   lines << ""
   lines << "There is no standalone canonical `db-*` repository in the current manifest. Database and state ownership live inside owning repos."
   lines << ""
-  lines << "The rows below are the versioned migration index, not a scan of local worktrees."
+  lines << (state.fetch(:legacy_snapshots) ? "The rows below are the legacy migration index, not a scan of local worktrees." : "Migration-index evidence is unavailable in this render; no migration inventory is asserted.")
   lines << ""
   lines.concat markdown_table(["Path", "Owner repo", "Kind", "Manifest repo"], migration_rows)
   lines << ""
@@ -328,24 +340,29 @@ def render_markdown(state)
   lines << ""
   lines << "## Maintenance"
   lines << ""
-  lines << "- Validate with `.github-repo/scripts/generate-helm-ecosystem-map.rb --check` from a workspace that contains the source files and both generated-map paths."
-  lines << "- Intentionally refresh the local estate and generated maps with `.github-repo/scripts/refresh-helm-ecosystem-map.sh`; do not use a transient worktree list as committed topology."
+  lines << "- Validate with `ruby .github/scripts/generate-helm-ecosystem-map.rb --check` from a workspace containing the generated-map copies, or pass `--output <path>` for a scoped check."
+  lines << "- Regenerate manifest-derived maps with `.github/scripts/refresh-helm-ecosystem-map.sh`. Use `--output <path>` for a scoped output; supply `--legacy-snapshots` only when both legacy capture files are available. Do not use a transient worktree list as committed topology."
   lines << "- Do not promote compatibility directories into canonical ownership without a manifest/source-truth change."
   lines << "- Do not promote local `*-wt-*` directories into product repos."
   lines << ""
   lines.join("\n")
 end
 
-def build_state
+def build_state(legacy_snapshots: false)
   manifest = read_yaml(MANIFEST_PATH)
-  estate_inventory = read_json(ESTATE_INVENTORY_PATH)
-  migration_index = read_json(MIGRATION_INDEX_PATH)
+  derived_summary = RepoInventory.derive(manifest)
+  unless derived_summary.all? { |key, value| manifest.fetch("inventory_summary")[key] == value }
+    raise "manifest summary is stale; run scripts/generate-repo-inventory.rb --write"
+  end
+  estate_inventory = legacy_snapshots ? read_json(ESTATE_INVENTORY_PATH) : { "entries" => [] }
+  migration_index = legacy_snapshots ? read_json(MIGRATION_INDEX_PATH) : { "entries" => [] }
   estate_entries = estate_inventory.fetch("entries")
   manifest_policy = manifest_policy()
   compat_policy = compatibility_policy()
 
   {
     manifest: manifest,
+    legacy_snapshots: legacy_snapshots,
     manifest_summary: manifest.fetch("inventory_summary"),
     manifest_repos: manifest.fetch("repositories"),
     estate_by_name: estate_by_name(estate_entries),
@@ -400,34 +417,28 @@ def validate_state!(state, markdown)
     errors << "compatibility policy #{name} missing from generated Markdown" unless markdown.include?("`#{name}`")
   end
 
-  errors << "migration index has no entries" if state.fetch(:migration_entries).empty?
+  errors << "legacy migration index has no entries" if state.fetch(:legacy_snapshots) && state.fetch(:migration_entries).empty?
   raise errors.join("\n") unless errors.empty?
 end
 
-def write_outputs(markdown)
-  [TEAM_DOC_PATH, ROOT_DOC_PATH, HANDBOOK_DOC_PATH].each do |path|
+def write_outputs(markdown, paths)
+  paths.each do |path|
     FileUtils.mkdir_p(File.dirname(path))
     File.write(path, markdown)
   end
 end
 
-state = build_state
+state = build_state(legacy_snapshots: options.fetch(:legacy, false))
 markdown = render_markdown(state)
 validate_state!(state, markdown)
 
 if options[:write]
-  write_outputs(markdown)
-  puts "Wrote #{TEAM_DOC_PATH}"
-  puts "Wrote #{ROOT_DOC_PATH}"
-  puts "Wrote #{HANDBOOK_DOC_PATH}"
+  write_outputs(markdown, output_paths)
+  output_paths.each { |path| puts "Wrote #{path}" }
 end
 
 if options[:check]
-  expected = {
-    TEAM_DOC_PATH => markdown,
-    ROOT_DOC_PATH => markdown,
-    HANDBOOK_DOC_PATH => markdown
-  }
+  expected = output_paths.to_h { |path| [path, markdown] }
   stale = expected.filter_map do |path, content|
     if !File.exist?(path)
       "#{path} is missing"
@@ -446,7 +457,8 @@ if options[:json]
     "manifest_repositories" => state.fetch(:manifest_repos).count,
     "workstation_directories_included" => false,
     "migration_entries" => state.fetch(:migration_entries).count,
-    "outputs" => [TEAM_DOC_PATH, ROOT_DOC_PATH, HANDBOOK_DOC_PATH]
+    "outputs" => output_paths,
+    "legacy_snapshots_included" => state.fetch(:legacy_snapshots)
   }
   puts JSON.pretty_generate(summary)
 end
