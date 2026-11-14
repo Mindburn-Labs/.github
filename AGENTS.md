@@ -1,5 +1,17 @@
 # AGENTS.md
 
+<!-- helm-sdlc-baseline:v1 -->
+Apply the [HELM SDLC baseline](https://github.com/Mindburn-Labs/docs/blob/main/ai/sdlc.md).
+Before implementation, define the outcome and observable acceptance conditions.
+Use the existing tracker and isolated worktree; verify in proportion to risk with
+the owning repository's checks. Bind results to the tested source and configuration.
+Missing, skipped or inconclusive required checks are not passes. Report source,
+CI, release, deployment, runtime and user acceptance separately; verify applicable
+rollback, restoration and external-effect recovery. Use `Refs` while acceptance
+work remains and `Closes` only when the whole issue is fulfilled. Preserve existing
+authority boundaries and never bypass failed checks or move published tags.
+<!-- /helm-sdlc-baseline -->
+
 This repo controls organization profile and the production repository manifest.
 
 `make lint` validates the manifest, baseline YAML, and guard scripts (plus the HELM ecosystem map when `$MINDBURN_WORKSPACE_ROOT` is set); `make test` adds the Python unit tests; `make check`, which CI runs, is `make test`. Treat `repo-manifest.yaml` as the current machine-readable GitHub org inventory, not as production deployment evidence. If it conflicts with source code, route registries, OpenAPI, release artifacts, tier config, GitOps manifests, or runtime deployment manifests, the source artifact wins.
