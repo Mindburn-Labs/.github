@@ -11,7 +11,7 @@ separate products and tooling. Product scope does not exclude an existing
 repository from the inventory.
 
 <!-- BEGIN GENERATED REPOSITORY INVENTORY -->
-46 repositories: 46 active, 0 archived; 8 public, 36 private, 2 internal.
+48 repositories: 48 active, 0 archived; 8 public, 38 private, 2 internal.
 
 Public repositories: `.github`, `cycleseal`, `distillscan`, `gatescan`, `helm-agent-integrations`, `helm-ai-kernel`, `homebrew-tap`, `platform-actions`.
 
