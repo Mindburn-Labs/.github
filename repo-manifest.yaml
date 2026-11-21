@@ -12,8 +12,8 @@ source_truth_priority:
 - runbooks_and_architecture_docs
 - org_inventory
 inventory_summary:
-  total_repositories: 46
-  active_repositories: 46
+  total_repositories: 48
+  active_repositories: 48
   archived_repositories: []
   deleted_repositories:
   - app-docs-platform
@@ -100,6 +100,12 @@ repositories:
   visibility: internal
   archived: false
   updated_at: '2026-07-21T13:38:57Z'
+- name: factoryhub
+  visibility: private
+  archived: false
+- name: factoryhub2
+  visibility: private
+  archived: false
 - name: gatescan
   visibility: public
   archived: false
