@@ -2,13 +2,10 @@
 
 This repository owns the Mindburn Labs organization profile, default repository guidance, baseline metadata, and the machine-readable GitHub organization inventory.
 
-## Canonical Inventory
+## Repository inventory
 
-The canonical inventory is `repo-manifest.yaml`.
-
-The inventory covers every repository in the GitHub organization, including
-separate products and tooling. Product scope does not exclude an existing
-repository from the inventory.
+The totals below summarize the checked-in [repository manifest](repo-manifest.yaml).
+Use the [inventory drift check](#inventory-drift) to compare it with GitHub.
 
 <!-- BEGIN GENERATED REPOSITORY INVENTORY -->
 48 repositories: 48 active, 0 archived; 8 public, 38 private, 2 internal.
@@ -33,12 +30,21 @@ Repository inventory does not prove production readiness. When there is a confli
 6. Runbooks and architecture docs.
 7. Organization inventory.
 
-## Operating Rules
+## Inventory drift
 
-- Reconcile the per-repository entries with `gh repo list Mindburn-Labs --limit 300 --json name,isArchived,visibility,updatedAt`; inventory reconciliation never changes live visibility.
+Compare the manifest against a saved GitHub readback from an account with
+access to the organization inventory.
+
+```sh
+gh repo list Mindburn-Labs --limit 300 --json name,isArchived,visibility > readback.json
+ruby scripts/generate-repo-inventory.rb --check --github-json readback.json
+```
+
+## Operating rules
+
 - Derive summary and count blocks with `ruby scripts/generate-repo-inventory.rb --write`. `make check` rejects summary or README drift.
-- Include `--docs-root <docs-checkout>` to regenerate and check topology and the current estate-plan inventory blocks. Pass `--github-json <readback.json>` to require exact agreement with a saved GitHub readback before generating or checking.
-- Historical survey tables retain their original counts; generated current-inventory blocks supersede them for current repository totals.
+- Include `--docs-root <docs-checkout>` to regenerate and check topology and the current estate-plan inventory blocks.
+- Historical survey tables retain their original counts.
 - Do not mark production released in org docs. Production status belongs in the integration release manifest and GitOps evidence.
 - Do not use floating tags or mutable image references in production release evidence.
 - Keep the organization profile factual, compact, and free of release claims that belong to source or GitOps repos.

@@ -75,10 +75,6 @@ def read_json(path, required: true)
   JSON.parse(File.read(path))
 end
 
-def manifest_repositories
-  read_yaml(MANIFEST_PATH).fetch("repositories")
-end
-
 def migration_entries
   read_json(MIGRATION_INDEX_PATH).fetch("entries")
 end
@@ -263,7 +259,7 @@ def render_markdown(state)
   lines.concat markdown_table(
     ["Field", "Value"],
     [
-      ["GitHub organization", "`#{read_yaml(MANIFEST_PATH).fetch("organization")}`"],
+      ["GitHub organization", "`#{state.fetch(:manifest).fetch("organization")}`"],
       ["Total repositories", "`#{manifest_summary.fetch("total_repositories")}`"],
       ["Active repositories", "`#{manifest_summary.fetch("active_repositories")}`"],
       ["Archived repositories", Array(manifest_summary.fetch("archived_repositories")).empty? ? "none" : Array(manifest_summary.fetch("archived_repositories")).map { |name| "`#{name}`" }.join(", ")],
