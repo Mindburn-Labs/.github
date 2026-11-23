@@ -1,7 +1,3 @@
-# Patch and minor updates arrive as one grouped PR per ecosystem; majors come
-# one PR each. Runtime dependency updates are committed as `fix(deps)`, so
-# auto-tag.yml@v2 cuts a patch release for them; dev dependencies and actions
-# use `chore`/`ci` and release nothing.
 version: 2
 updates:
   - package-ecosystem: github-actions
