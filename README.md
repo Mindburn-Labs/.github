@@ -46,9 +46,8 @@ Repository inventory does not prove production readiness. When there is a confli
 
 ## CI
 
-`.github/workflows/ci.yml` calls
-`Mindburn-Labs/platform-actions/.github/workflows/ci.yml@v2` like every other
-repository; the required check is `ci / gate`.
+The [CI workflow](.github/workflows/ci.yml) runs this repository’s `make check`
+through the shared `platform-actions` workflow. The required check is `ci / gate`.
 
 ## Validation
 

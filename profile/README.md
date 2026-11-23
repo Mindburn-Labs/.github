@@ -1,46 +1,17 @@
 # Mindburn Labs, Inc.
 
-**Models propose. HELM governs execution.**
+We build HELM so people can run organizations with AI agents within rules they set.
 
-We build HELM, the fail-closed execution authority for AI agents: every consequential agent action passes a policy boundary, returns an ALLOW / DENY / ESCALATE verdict, and leaves a signed, offline-verifiable receipt.
+The [HELM AI Kernel](https://github.com/Mindburn-Labs/helm-ai-kernel) is the
+open-source execution boundary. It checks actions routed through HELM, returns
+`ALLOW`, `DENY`, or `ESCALATE`, and records signed decisions. You can verify
+receipts offline and check signer trust against a known public key.
 
-**No receipt, no production.**
+[HELM AI OS](https://mindburn.org/helm/) gives you a place to define an
+organization’s roles, rules, and budgets for people and AI agents. For reviewed
+access, [contact Mindburn Labs](https://mindburn.org/contact/).
 
----
-
-### What We Build
-
-| Product | Description | Stack | Links |
-| :--- | :--- | :--- | :--- |
-| **HELM AI Kernel** | Public, self-hostable execution boundary for AI agents. Fail-closed policy enforcement, MCP server quarantine, signed receipts, replayable EvidencePacks. Apache-2.0. | Go · WASM (wazero) · Ed25519 | [Repo](https://github.com/Mindburn-Labs/helm-ai-kernel) · [Docs](https://helm.docs.mindburn.org) |
-| **HELM AI Company OS** | Reviewed-access operating layer for governed company work around the same Kernel boundary. | Go · TypeScript | [Overview](https://mindburn.org/helm/company-ai-os/) |
-
-Company site: [mindburn.org](https://mindburn.org/) · Documentation: [helm.docs.mindburn.org](https://helm.docs.mindburn.org/) · Integration examples: [helm-agent-integrations](https://github.com/Mindburn-Labs/helm-agent-integrations)
-
----
-
-### How HELM Works
-
-```text
-proposal → HELM boundary → ALLOW / DENY / ESCALATE → signed receipt → verification
-```
-
-1. **Fail-closed by default.** Unknown or unapproved actions are denied. Unknown MCP servers stay quarantined until a human approves them.
-2. **Deterministic evidence.** Receipts and EvidencePacks are canonicalized with JCS (RFC 8785) + SHA-256 and signed with Ed25519, so anyone can verify them offline. Evidence is tamper-evident and replayable.
-3. **Contract-first boundaries.** Public surfaces are governed by versioned schemas (OpenAPI, Protobuf, JSON Schema); changes are checked for backward compatibility.
-
-Orchestration decides what to attempt; HELM decides what may execute.
-
----
-
-### Security Posture
-
-*   **OIDC token federation** for container publishing and cloud deployments; long-lived static credentials in repository variables are forbidden.
-*   **Automated dependency and vulnerability gates** (Renovate, push protection, CodeQL) across organization repositories.
-*   **Security disclosures**: see [SECURITY.md](https://github.com/Mindburn-Labs/.github/blob/main/SECURITY.md) or the live policy at [mindburn.org/security](https://mindburn.org/security/).
-
----
-
-### Collaboration
-
-Contributions to the open-source repositories (`helm-ai-kernel`, `helm-agent-integrations`) are welcome — see each repository's `CONTRIBUTING.md`. For HELM evaluation or reviewed access, use [mindburn.org/contact](https://mindburn.org/contact/).
+- [Documentation](https://helm.docs.mindburn.org/) for installing the Kernel and verifying receipts
+- [Agent integration examples](https://github.com/Mindburn-Labs/helm-agent-integrations) for routing tool calls through the Kernel
+- [Kernel contribution guide](https://github.com/Mindburn-Labs/helm-ai-kernel/blob/main/CONTRIBUTING.md)
+- [Security policy](https://github.com/Mindburn-Labs/.github/blob/main/SECURITY.md) for reporting vulnerabilities
