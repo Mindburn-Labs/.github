@@ -2,10 +2,8 @@
 
 Source: Mindburn Labs Strategic Radar, MIN-491.
 
-This watchlist operationalizes the 2026-06-08 AI security competitor
-intelligence report as a monthly radar input. It is not HELM source truth, does
-not prove product readiness, and does not replace Kernel, Enterprise,
-control-plane, Console, GitOps, or release evidence.
+Use this watchlist to record changes in competing agent-security products.
+Use HELM's own source and release evidence to assess its readiness.
 
 ## Monthly Refresh Contract
 
@@ -109,51 +107,15 @@ Required classification:
 
 ## Output Template
 
-Use this compact packet for each monthly refresh.
+Repeat this block for each competitor in a refresh. Link to evidence for each
+source class or record its status from the checklist.
 
 ```md
-## AI security competitor watchlist refresh: YYYY-MM
+## AI security competitor watchlist refresh
 
-Report source: 2026-06-08 AI security competitor intelligence report
 Tracker issue: <helm-tracker issue URL>
 
-### Straiker
-- Case studies:
-- Conferences:
-- Hiring:
-- Marketplace listings:
-- Product launches:
-- HELM pressure:
-- Source gaps:
-
-### Native
-- Case studies:
-- Conferences:
-- Hiring:
-- Marketplace listings:
-- Product launches:
-- HELM pressure:
-- Source gaps:
-
-### Tenzai
-- Case studies:
-- Conferences:
-- Hiring:
-- Marketplace listings:
-- Product launches:
-- HELM pressure:
-- Source gaps:
-
-### Gray Swan
-- Case studies:
-- Conferences:
-- Hiring:
-- Marketplace listings:
-- Product launches:
-- HELM pressure:
-- Source gaps:
-
-### Jazz
+### <Competitor>
 - Case studies:
 - Conferences:
 - Hiring:
