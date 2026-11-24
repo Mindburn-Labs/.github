@@ -5,7 +5,7 @@
 Run:
 
 ```sh
-make lint
+make check
 ```
 
 ## Tracker Release Gates
