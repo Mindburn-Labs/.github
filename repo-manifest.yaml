@@ -12,8 +12,8 @@ source_truth_priority:
 - runbooks_and_architecture_docs
 - org_inventory
 inventory_summary:
-  total_repositories: 48
-  active_repositories: 48
+  total_repositories: 49
+  active_repositories: 49
   archived_repositories: []
   deleted_repositories:
   - app-docs-platform
@@ -178,6 +178,9 @@ repositories:
   visibility: private
   archived: false
   updated_at: '2026-07-21T12:59:00Z'
+- name: mindburn-brokerage
+  visibility: private
+  archived: false
 - name: mindburn-infra
   visibility: private
   archived: false
